@@ -1,0 +1,10 @@
+[project]
+name = "lmi-core"
+version = "0.1.0"
+description = "Shared configuration and domain code for the LMI API and worker."
+requires-python = ">=3.14,<3.15"
+dependencies = ["pydantic-settings"]
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14"]
+build-backend = "uv_build"
