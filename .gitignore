@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+data/
+__pycache__/
+.venv/
+node_modules/
+.next/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage/
+.handoff/
