@@ -14,7 +14,13 @@ COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile --filter web...
 
 FROM deps AS builder
-COPY . .
+# Copy only the sources the build needs. The build context has no
+# .dockerignore, so a blanket `COPY . .` would also overwrite the installed
+# node_modules with host artifacts.
+COPY apps/web/next.config.ts apps/web/tsconfig.json apps/web/eslint.config.mjs ./apps/web/
+COPY apps/web/app ./apps/web/app
+COPY apps/web/lib ./apps/web/lib
+COPY apps/web/public ./apps/web/public
 RUN pnpm --filter web build
 
 FROM node:24-slim AS runner
