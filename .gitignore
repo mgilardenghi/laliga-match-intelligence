@@ -1,7 +1,9 @@
 .env
 .env.*
 !.env.example
-data/
+# Raw downloaded data, at the repository root only: the packaged reference data
+# under packages/core/src/lmi_core/data/ is part of the source.
+/data/
 __pycache__/
 .venv/
 node_modules/
