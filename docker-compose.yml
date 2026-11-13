@@ -34,12 +34,33 @@ services:
       retries: 12
     # No published ports: Redis stays on the Compose network.
 
+  # One-shot schema and seed job. It is the only writer of the schema: the API
+  # and the worker wait for it to exit 0 before they start, so no process races
+  # an unmigrated database.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment: &database_environment
+      # The connection is built from parts, so no value needs URL quoting.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-lmi}
+      POSTGRES_DB: ${POSTGRES_DB:-lmi}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+    # One-shot job, like the worker: run the migrations, then the seed, then exit.
+    command: ["python", "-m", "lmi_core.db", "migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-lmi}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-lmi}"
+      <<: *database_environment
       REDIS_URL: redis://redis:6379/0
     ports:
       # Bind to the loopback interface: the stack is local, so nothing on the
@@ -50,6 +71,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       # The slim image has no curl, so probe /health with the standard library.
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
@@ -63,7 +86,7 @@ services:
       context: .
       dockerfile: apps/worker/Dockerfile
     environment:
-      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-lmi}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-lmi}"
+      <<: *database_environment
       REDIS_URL: redis://redis:6379/0
     # One-shot job: run the ingestion command and exit; `restart: "no"` keeps it
     # from being relaunched by the Docker daemon.
@@ -74,6 +97,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   web:
     build:
