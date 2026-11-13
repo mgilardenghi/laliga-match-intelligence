@@ -1,12 +1,13 @@
 # syntax=docker/dockerfile:1
 
 # Stage 1: resolve the locked environment for the API package with uv.
-FROM python:3.14-slim AS builder
+FROM python:3.14.10-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
 
 WORKDIR /app
 
@@ -20,7 +21,7 @@ RUN uv sync --frozen --no-dev --package lmi-api
 
 # Stage 2: runtime image. The same /app paths as the builder are required,
 # because uv installs workspace members as editable installs.
-FROM python:3.14-slim AS runtime
+FROM python:3.14.10-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
