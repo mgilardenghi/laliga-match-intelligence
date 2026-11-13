@@ -14,9 +14,10 @@ COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile --filter web...
 
 FROM deps AS builder
-# Copy only the sources the build needs. The repository .dockerignore keeps host
-# node_modules out of the build context, and a blanket `COPY . .` would still
-# overwrite the dependencies installed in the previous stage.
+# Copy only the sources the build needs: a blanket `COPY . .` would invalidate
+# this layer on every documentation or workflow change. Host node_modules never
+# reaches the build context (see .dockerignore), and the dependencies installed
+# in the previous stage are kept.
 COPY apps/web/next.config.ts apps/web/tsconfig.json apps/web/eslint.config.mjs ./apps/web/
 COPY apps/web/app ./apps/web/app
 COPY apps/web/lib ./apps/web/lib
