@@ -29,17 +29,17 @@ Only the API and the worker touch the database (ADR-0001). The dashboard reads d
 
 ## Quickstart
 
-Prerequisites for the full stack: Docker with Compose. To run the linters, type checks and tests on the host you also need [uv](https://docs.astral.sh/uv/) and [pnpm](https://pnpm.io/).
+Prerequisites: Docker with Compose, and `make`. The stack itself needs nothing else. Two more tools are needed for the host-side commands and for `make setup`: [uv](https://docs.astral.sh/uv/) and [pnpm](https://pnpm.io/).
 
-1. Create the environment file and install the toolchains:
+1. Create the environment file and install the Python and Node dependencies:
 
    ```sh
    make setup
    ```
 
-   This copies `.env.example` to `.env` when `.env` is missing, then installs the Python and Node dependencies.
+   This copies `.env.example` to `.env` when `.env` is missing, then installs both toolchains. If you only want to run the Docker stack, `cp .env.example .env` is enough and uv and pnpm are not required.
 
-2. Edit `.env` and replace the placeholder `POSTGRES_PASSWORD`. The Compose stack refuses to start without a value.
+2. Edit `.env` and replace the placeholder `POSTGRES_PASSWORD`. The Compose stack refuses to start without a value. Keep the password to letters, digits and `- _ . ~`, because it is inserted into the database URL.
 
 3. Build and start the stack:
 

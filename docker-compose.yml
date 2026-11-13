@@ -16,7 +16,9 @@ services:
       - pgdata:/var/lib/postgresql
     healthcheck:
       # The container's own environment names the user and database to check.
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      # The probe goes over TCP so it cannot pass during the image's initdb
+      # phase, which serves only the Unix socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -40,7 +42,9 @@ services:
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-lmi}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-lmi}"
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      # Bind to the loopback interface: the stack is local, so nothing on the
+      # LAN should reach the API.
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -79,7 +83,8 @@ services:
       # The dashboard reaches the API over the Compose network, not localhost.
       API_URL: http://api:8000
     ports:
-      - "3000:3000"
+      # Bind to the loopback interface, like the API.
+      - "127.0.0.1:3000:3000"
     depends_on:
       api:
         condition: service_healthy
