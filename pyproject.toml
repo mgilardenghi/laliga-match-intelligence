@@ -1,0 +1,23 @@
+# Virtual workspace root: it holds tool configuration only, no package of its own.
+# Members are declared in [tool.uv.workspace]; `uv sync --all-packages` installs them.
+
+[tool.uv.workspace]
+members = ["apps/api", "apps/worker", "packages/core"]
+
+[dependency-groups]
+# Unpinned on purpose: uv.lock pins the resolved versions.
+dev = ["httpx", "mypy", "pytest", "ruff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["apps/api/tests", "apps/worker/tests", "packages/core/tests"]
