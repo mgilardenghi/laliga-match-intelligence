@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Build context is the repository root, not apps/web.
 
-FROM node:24-slim AS base
+FROM node:24.22.3-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -23,7 +23,7 @@ COPY apps/web/lib ./apps/web/lib
 COPY apps/web/public ./apps/web/public
 RUN pnpm --filter web build
 
-FROM node:24-slim AS runner
+FROM node:24.22.3-slim AS runner
 WORKDIR /repo
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
