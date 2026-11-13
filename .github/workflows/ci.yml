@@ -82,8 +82,10 @@ jobs:
       - name: Start the stack
         run: make up
       # The worker is a one-shot job. Wait for it so a failed ingestion fails
-      # the job instead of leaving a stopped container behind a green run.
+      # the job instead of leaving a stopped container behind a green run, with
+      # a bound so a stalled job cannot hold the run until the global limit.
       - name: Check the worker job exited cleanly
+        timeout-minutes: 15
         run: docker compose wait worker
       - name: Check the API health endpoint
         run: curl -fsS localhost:8000/health
