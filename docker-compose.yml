@@ -1,0 +1,95 @@
+# Local development stack. Copy .env.example to .env with `make setup` first.
+name: lmi
+
+services:
+  db:
+    image: postgres:18.7-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lmi}
+      POSTGRES_DB: ${POSTGRES_DB:-lmi}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+    # PostgreSQL 18+ keeps its cluster in a versioned subdirectory of
+    # /var/lib/postgresql, so the volume covers that root and PGDATA keeps the
+    # image default. Mounting /var/lib/postgresql/data would need a PGDATA
+    # override and blocks a future major-version upgrade.
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      # The container's own environment names the user and database to check.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    # No published ports: only the API and worker talk to the database.
+
+  redis:
+    image: redis:8.8.4-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # No published ports: Redis stays on the Compose network.
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-lmi}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-lmi}"
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The slim image has no curl, so probe /health with the standard library.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-lmi}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-lmi}"
+      REDIS_URL: redis://redis:6379/0
+    # One-shot job: run the ingestion command and exit; `restart: "no"` keeps it
+    # from being relaunched by the Docker daemon.
+    command: ["python", "-m", "lmi_worker", "ingest"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      # The dashboard reaches the API over the Compose network, not localhost.
+      API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  # Database files survive `docker compose down`; `make clean` removes them.
+  pgdata:
