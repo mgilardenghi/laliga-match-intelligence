@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python lint, types, tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.13.7"
+          enable-cache: true
+      - name: Check the lock file matches the manifests
+        run: uv lock --check
+      - name: Install the workspace from the lock file
+        run: uv sync --all-packages --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Type check
+        run: uv run mypy apps packages
+      - name: Test
+        run: uv run pytest
+
+  web:
+    name: Dashboard lint, types, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pnpm
+        uses: pnpm/action-setup@9bbca1e9dc2902adb87e8780fe5c98796985a62d # v6.1.1
+        with:
+          version: "12.18.0"
+          run_install: false
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm --filter web lint
+      - name: Type check
+        run: pnpm --filter web typecheck
+      - name: Build
+        run: pnpm --filter web build
+
+  docker:
+    name: Compose stack
+    runs-on: ubuntu-latest
+    needs: [python, web]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create the env file from the committed template
+        run: cp .env.example .env
+      # `make up` is the documented one-command start: it waits for the
+      # long-running services and then starts the one-shot worker.
+      - name: Start the stack
+        run: make up
+      - name: Check the API health endpoint
+        run: curl -fsS localhost:8000/health
+      - name: Check the dashboard reports the API as online
+        run: |
+          curl -fsS localhost:3000 > /tmp/web.html
+          grep -q "API status" /tmp/web.html
+          grep -q ">online<" /tmp/web.html
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
