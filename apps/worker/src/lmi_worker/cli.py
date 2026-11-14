@@ -21,6 +21,8 @@ from datetime import date
 import httpx
 from lmi_core.config import get_settings
 from lmi_core.db.session import make_engine
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from lmi_worker import http
@@ -53,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     selection.add_argument(
         "--season",
         metavar="CODE",
-        help="one season code, for example 2025-26; wins over the other flags",
+        help="one season code, for example 2025-26",
     )
     selection.add_argument(
         "--backfill",
@@ -128,6 +130,11 @@ def _ingest(
         print(f"ingest: {error}", file=sys.stderr)
         return 2
 
+    if not _database_reachable(engine):
+        engine.dispose()
+        print("ingest: cannot reach the database", file=sys.stderr)
+        return 1
+
     client: httpx.Client | None = None
     try:
         if fetcher is None:
@@ -152,6 +159,23 @@ def _ingest(
     failed = len(results) - succeeded
     logger.info("ingest: %d succeeded, %d failed", succeeded, failed)
     return 0 if failed == 0 else 1
+
+
+def _database_reachable(engine: Engine) -> bool:
+    """Return whether one statement reaches the database.
+
+    The ingestion checks the database once before the first job, so a database
+    that cannot be reached is one line instead of a traceback per job. The text
+    of a driver exception can carry the connection URL, so only the boolean
+    leaves this function. A failure during a job keeps its own handling: the job
+    fails, the run row records why, and the remaining jobs still run.
+    """
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        return False
+    return True
 
 
 def _status() -> int:
