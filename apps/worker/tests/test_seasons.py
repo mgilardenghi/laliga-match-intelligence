@@ -48,7 +48,19 @@ def test_openfootball_path_round_trips() -> None:
     assert SeasonCode.parse(season.openfootball_path) == season
 
 
-@pytest.mark.parametrize("text", ["2026-28", "26-27", "2026/27", ""])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2026-28",
+        "26-27",
+        "2026/27",
+        "",
+        "2026-27\n",
+        " 2026-27",
+        "2026-27 ",
+        "\uff12\uff10\uff12\uff16-27",
+    ],
+)
 def test_parse_rejects_invalid_codes(text: str) -> None:
     with pytest.raises(ValueError):
         SeasonCode.parse(text)

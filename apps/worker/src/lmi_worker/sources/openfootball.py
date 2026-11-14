@@ -55,8 +55,10 @@ def parse_json(content: bytes) -> list[OfFixture]:
 
     Raises :class:`OfSnapshotError` when the file as a whole is unusable: not
     UTF-8, not JSON, not an object with a non-empty ``matches`` list, a malformed
-    date or round, a duplicate fixture, a fixture count that is not a full double
-    round robin, or a matchday range that is not covered evenly.
+    date or round, a duplicate fixture, a team drawn against itself, a fixture
+    count that is not a full double round robin, a matchday range that is not
+    covered evenly, an ordered pair of distinct teams that never plays, or a team
+    that appears more than once on the same matchday.
     """
     document = _document(content)
     raw_matches = document.get("matches")
@@ -69,8 +71,10 @@ def parse_json(content: bytes) -> list[OfFixture]:
         raise OfSnapshotError("the matches list is empty")
     fixtures = [_fixture(entry, number) for number, entry in enumerate(entries, start=1)]
     _reject_duplicate_fixtures(fixtures)
+    _reject_self_fixtures(fixtures)
     _validate_fixture_count(fixtures)
     _validate_matchdays(fixtures)
+    _validate_round_robin(fixtures)
     return fixtures
 
 
@@ -166,6 +170,18 @@ def _reject_duplicate_fixtures(fixtures: Sequence[OfFixture]) -> None:
         seen.add(pair)
 
 
+def _reject_self_fixtures(fixtures: Sequence[OfFixture]) -> None:
+    """Raise when a team is drawn against itself.
+
+    This runs before the fixture-count check so the message names the team
+    instead of reporting a confusing count: replacing one fixture of a complete
+    list with a self-fixture leaves the fixture count unchanged.
+    """
+    for fixture in fixtures:
+        if fixture.team1 == fixture.team2:
+            raise OfSnapshotError(f"fixture {fixture.team1!r} cannot play itself")
+
+
 def _validate_fixture_count(fixtures: Sequence[OfFixture]) -> None:
     """Raise unless every ordered pair of the ``n`` teams appears exactly once."""
     team_count = len(_teams(fixtures))
@@ -204,3 +220,32 @@ def _validate_matchdays(fixtures: Sequence[OfFixture]) -> None:
         raise OfSnapshotError(
             f"every matchday needs exactly {per_matchday} fixtures, but {', '.join(uneven)}"
         )
+
+
+def _validate_round_robin(fixtures: Sequence[OfFixture]) -> None:
+    """Raise unless every pair plays and no team plays twice on one matchday.
+
+    The fixture-count check already implies pair completeness for a list without
+    self-fixtures, so the pair rule is a defensive invariant; its own test calls
+    this function directly because ``parse_json`` rejects a short list earlier.
+    """
+    teams = sorted(_teams(fixtures))
+    pairs = {(fixture.team1, fixture.team2) for fixture in fixtures}
+    missing = [
+        (team1, team2)
+        for team1 in teams
+        for team2 in teams
+        if team1 != team2 and (team1, team2) not in pairs
+    ]
+    if missing:
+        team1, team2 = missing[0]
+        raise OfSnapshotError(f"missing fixture: {team1!r} vs {team2!r}")
+    appearances = Counter(
+        (fixture.matchday, team) for fixture in fixtures for team in (fixture.team1, fixture.team2)
+    )
+    repeated = sorted(
+        (matchday, team) for (matchday, team), count in appearances.items() if count > 1
+    )
+    if repeated:
+        matchday, team = repeated[0]
+        raise OfSnapshotError(f"matchday {matchday}: {team!r} appears more than once")
