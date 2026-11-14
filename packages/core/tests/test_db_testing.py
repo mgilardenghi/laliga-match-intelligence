@@ -1,14 +1,42 @@
 """Tests for :mod:`lmi_core.db.testing`."""
 
+import os
+
 import pytest
 from lmi_core.db.testing import require_disposable_database
+
+_DATABASE_URL = (
+    "postgresql://sentinel_user:sentinel_password@sentinel-host.invalid:5432/sentinel_db"
+)
+"""A URL whose every component is distinguishable, so a leak is detectable."""
+
+_DATABASE_URL_PARTS = (
+    "postgresql://",
+    "sentinel_user",
+    "sentinel_password",
+    "sentinel-host.invalid",
+    "sentinel_db",
+)
+"""The parts of :data:`_DATABASE_URL` that must never reach a refusal message."""
+
+
+def clear_variable(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Remove every spelling of ``name``, because the check ignores letter case."""
+    for present in [key for key in os.environ if key.lower() == name.lower()]:
+        monkeypatch.delenv(present)
+
+
+def assert_no_url_part(message: str) -> None:
+    """Fail when ``message`` carries any component of :data:`_DATABASE_URL`."""
+    for part in _DATABASE_URL_PARTS:
+        assert part not in message, f"the refusal message leaks {part!r}"
 
 
 def test_require_disposable_database_refuses_without_opt_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("LMI_ALLOW_DESTRUCTIVE_TESTS", raising=False)
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    clear_variable(monkeypatch, "LMI_ALLOW_DESTRUCTIVE_TESTS")
+    clear_variable(monkeypatch, "DATABASE_URL")
 
     with pytest.raises(RuntimeError) as refused:
         require_disposable_database()
@@ -19,16 +47,46 @@ def test_require_disposable_database_refuses_without_opt_in(
 def test_require_disposable_database_refuses_a_database_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    database_url = "postgresql://user:placeholder@db.example:5432/example"
     monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
-    monkeypatch.setenv("DATABASE_URL", database_url)
+    clear_variable(monkeypatch, "DATABASE_URL")
+    monkeypatch.setenv("DATABASE_URL", _DATABASE_URL)
 
     with pytest.raises(RuntimeError) as refused:
         require_disposable_database()
 
     message = str(refused.value)
     assert "DATABASE_URL" in message
-    assert database_url not in message
+    assert_no_url_part(message)
+
+
+def test_require_disposable_database_refuses_a_lower_case_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pydantic settings match environment names in any letter case."""
+    monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
+    clear_variable(monkeypatch, "DATABASE_URL")
+    monkeypatch.setenv("database_url", _DATABASE_URL)
+
+    with pytest.raises(RuntimeError) as refused:
+        require_disposable_database()
+
+    message = str(refused.value)
+    assert "DATABASE_URL" in message
+    assert_no_url_part(message)
+
+
+def test_require_disposable_database_refuses_an_empty_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty value is still a set variable, and the contract says present is refused."""
+    monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
+    clear_variable(monkeypatch, "DATABASE_URL")
+    monkeypatch.setenv("DATABASE_URL", "")
+
+    with pytest.raises(RuntimeError) as refused:
+        require_disposable_database()
+
+    assert "DATABASE_URL" in str(refused.value)
 
 
 def test_require_disposable_database_accepts_a_throwaway_configuration(
@@ -36,6 +94,8 @@ def test_require_disposable_database_accepts_a_throwaway_configuration(
 ) -> None:
     """An explicit opt-in with no ``DATABASE_URL`` is accepted and returns nothing."""
     monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    clear_variable(monkeypatch, "DATABASE_URL")
 
     require_disposable_database()
+
+    assert not [key for key in os.environ if key.lower() == "database_url"]

@@ -7,10 +7,20 @@ not explicitly disposable.
 
 A disposable test database is configured through the ``POSTGRES_*`` variables,
 never through ``DATABASE_URL``: a complete URL is the override a deployment
-uses, so a set one is treated as a real database and refused.
+uses, so a present one is treated as a real database and refused.
+
+The refusal reads ``os.environ`` itself rather than :class:`lmi_core.config.Settings`,
+so it happens before any configuration object exists. Because
+:class:`pydantic_settings.BaseSettings` matches environment names without regard
+to letter case, the check does the same: ``database_url`` set in lower case feeds
+``Settings.database_url`` just as ``DATABASE_URL`` does, and an empty value is
+still a name the deployment chose to set.
 """
 
 import os
+
+ALLOW_DESTRUCTIVE_TESTS_VARIABLE = "LMI_ALLOW_DESTRUCTIVE_TESTS"
+DATABASE_URL_VARIABLE = "DATABASE_URL"
 
 
 def require_disposable_database() -> None:
@@ -23,18 +33,19 @@ def require_disposable_database() -> None:
 
     Raises:
         RuntimeError: ``LMI_ALLOW_DESTRUCTIVE_TESTS`` is not ``"1"``, or
-            ``DATABASE_URL`` is set to a non-empty value. Each message names
-            the environment variable and never a value, so it is safe to log.
+            ``DATABASE_URL`` is present in the environment under any letter case,
+            including with an empty value. Each message names the environment
+            variable and never a value, so it is safe to log.
     """
-    if os.environ.get("LMI_ALLOW_DESTRUCTIVE_TESTS") != "1":
+    if os.environ.get(ALLOW_DESTRUCTIVE_TESTS_VARIABLE) != "1":
         raise RuntimeError(
-            "refusing to run a destructive test: LMI_ALLOW_DESTRUCTIVE_TESTS is not 1; "
+            f"refusing to run a destructive test: {ALLOW_DESTRUCTIVE_TESTS_VARIABLE} is not 1; "
             "this suite drops the public schema, so run it with `make test-integration` "
-            "or set LMI_ALLOW_DESTRUCTIVE_TESTS=1 for a throwaway database"
+            f"or set {ALLOW_DESTRUCTIVE_TESTS_VARIABLE}=1 for a throwaway database"
         )
-    if os.environ.get("DATABASE_URL"):
+    if any(name.lower() == DATABASE_URL_VARIABLE.lower() for name in os.environ):
         raise RuntimeError(
-            "refusing to run a destructive test: DATABASE_URL is set; this suite "
-            "configures its throwaway database through the POSTGRES_* variables, so "
-            "unset DATABASE_URL"
+            f"refusing to run a destructive test: {DATABASE_URL_VARIABLE} is set, in any "
+            "letter case; this suite configures its throwaway database through the "
+            f"POSTGRES_* variables, so unset {DATABASE_URL_VARIABLE}"
         )
