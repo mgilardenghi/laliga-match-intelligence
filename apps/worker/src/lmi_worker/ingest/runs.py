@@ -16,6 +16,8 @@ the terminal status and the diagnostics in its own transaction, so a rollback of
 the data transaction cannot erase the reason the run failed.
 """
 
+import logging
+import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,7 +26,7 @@ from uuid import UUID
 
 from lmi_core.db.models import IngestionRejection, IngestionRun
 from sqlalchemy import func, insert, text, update
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from lmi_worker.ingest.plan import Job
@@ -36,6 +38,9 @@ SOURCE_LOCK_IDS: dict[str, int] = {"football_data": 1, "openfootball": 2}
 
 ABANDONED_ERROR = "abandoned: the process ended before the run finished"
 """The error stored on a ``running`` row that a later run had to give up on."""
+
+_logger = logging.getLogger(__name__)
+"""The log of the run bookkeeping, which never carries a connection URL."""
 
 
 @dataclass(frozen=True)
@@ -74,7 +79,9 @@ def run_lock(engine: Engine, job: Job) -> Iterator[bool]:
 
     Yields:
         ``True`` when the lock was acquired, ``False`` when another process holds
-        it. The lock is released in ``finally``, also when the block raises.
+        it. The lock is released in ``finally``, also when the block raises; a
+        release that fails discards the connection, so the lock never returns to
+        the pool.
     """
     key = lock_key(job)
     connection = engine.connect()
@@ -90,13 +97,44 @@ def run_lock(engine: Engine, job: Job) -> Iterator[bool]:
             yield acquired
         finally:
             if acquired:
-                connection.execute(
-                    text("SELECT pg_advisory_unlock(:lock_class, :key)"),
-                    {"lock_class": LOCK_CLASS, "key": key},
-                )
-                connection.commit()
+                _release_run_lock(connection, job, key)
     finally:
         connection.close()
+
+
+def _release_run_lock(connection: Connection, job: Job, key: int) -> None:
+    """Release the run lock of ``job`` on ``connection`` and keep the pool clean.
+
+    A connection that goes back to the pool with the session lock still held
+    makes every later job of the same process see the lock as taken. A failed
+    release therefore invalidates the connection before it is closed: the
+    server ends the session, and PostgreSQL releases the session locks of an
+    ended session.
+
+    Raises:
+        Exception: the release failed and no exception is already propagating,
+            so the failure is not hidden. An exception that is propagating wins,
+            because it is the one the caller can act on.
+    """
+    propagating = sys.exc_info()[1]
+    try:
+        connection.execute(
+            text("SELECT pg_advisory_unlock(:lock_class, :key)"),
+            {"lock_class": LOCK_CLASS, "key": key},
+        )
+        connection.commit()
+    except Exception as error:
+        connection.invalidate()
+        # The job and the failure kind only: the message of a driver error can
+        # carry the connection URL, and the URL can carry credentials.
+        _logger.warning(
+            "the run lock of %s %s could not be released (%s); the connection was discarded",
+            job.source,
+            job.season.code,
+            type(error).__name__,
+        )
+        if propagating is None:
+            raise
 
 
 def start_run(factories: sessionmaker[Session], job: Job, loader_version: str) -> UUID:
