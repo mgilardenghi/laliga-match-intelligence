@@ -15,9 +15,14 @@ _DATABASE_URL_PARTS = (
     "sentinel_user",
     "sentinel_password",
     "sentinel-host.invalid",
+    "5432",
     "sentinel_db",
 )
-"""The parts of :data:`_DATABASE_URL` that must never reach a refusal message."""
+"""The parts of :data:`_DATABASE_URL` that must never reach a refusal message.
+
+Every distinguishable component is listed, the port included, so a message that
+leaks only one of them still fails the assertion.
+"""
 
 
 def clear_variable(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
@@ -96,10 +101,38 @@ def test_require_disposable_database_refuses_an_empty_database_url(
     assert_url_refusal(str(refused.value))
 
 
+def test_require_disposable_database_refuses_an_unrecognised_opt_in_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only ``"1"`` opts in; another non-empty value must not be enough."""
+    clear_variable(monkeypatch, "DATABASE_URL")
+    monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "true")
+
+    with pytest.raises(RuntimeError) as refused:
+        require_disposable_database()
+
+    assert "LMI_ALLOW_DESTRUCTIVE_TESTS" in str(refused.value)
+
+
+def test_require_disposable_database_refuses_two_spellings_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Any matching name is enough, so the scan cannot stop after the first one."""
+    monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
+    clear_variable(monkeypatch, "DATABASE_URL")
+    monkeypatch.setenv("DATABASE_URL", _DATABASE_URL)
+    monkeypatch.setenv("database_url", _DATABASE_URL)
+
+    with pytest.raises(RuntimeError) as refused:
+        require_disposable_database()
+
+    assert_url_refusal(str(refused.value))
+
+
 def test_require_disposable_database_accepts_a_throwaway_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An explicit opt-in with no ``DATABASE_URL`` is accepted and returns nothing."""
+    """An explicit opt-in with no ``DATABASE_URL`` is accepted."""
     monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
     clear_variable(monkeypatch, "DATABASE_URL")
 
