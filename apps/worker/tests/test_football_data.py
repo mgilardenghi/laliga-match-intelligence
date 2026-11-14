@@ -229,8 +229,9 @@ def test_trailing_blank_rows_are_skipped() -> None:
     assert snapshot.rejections == []
 
 
-def test_a_partially_filled_odds_group_is_omitted() -> None:
-    snapshot = parse_csv(_csv(_ODDS_HEADER, f"{_GOOD_ROW},1.90,3.50,"))
+@pytest.mark.parametrize("odds", ["1.90,3.50,", "1.90,,4.20", ",3.50,4.20"])
+def test_a_partially_filled_odds_group_is_omitted(odds: str) -> None:
+    snapshot = parse_csv(_csv(_ODDS_HEADER, f"{_GOOD_ROW},{odds}"))
 
     [match] = snapshot.matches
     assert match.odds == []
@@ -274,6 +275,79 @@ def test_rejects_a_result_that_disagrees_with_the_score() -> None:
 
     assert "FTR" in rejection.reason
     assert rejection.raw["HomeTeam"] == "Gamma CD"
+
+
+@pytest.mark.parametrize(
+    ("home", "away"),
+    [
+        # The same name spelled identically, padded and NFC-equivalent.
+        ("Alpha FC", "Alpha FC"),
+        ("Alpha FC", "  Alpha   FC "),
+        ("Atención FC", "Atencio\u0301n FC"),
+    ],
+)
+def test_rejects_a_team_playing_itself(home: str, away: str) -> None:
+    rejection = _rejection_of(_GOOD_ROW, f"SP1,12/09/20,{home},{away},2,0,H,1,0,10,8")
+
+    assert "HomeTeam/AwayTeam" in rejection.reason
+    assert "cannot play itself" in rejection.reason
+
+
+@pytest.mark.parametrize(
+    ("row", "column"),
+    [
+        ("SP1,12/09/20,Gamma CD,Alpha FC,1,1,D,2,1,10,8", "HTHG"),
+        ("SP1,12/09/20,Gamma CD,Alpha FC,1,1,D,1,2,10,8", "HTAG"),
+    ],
+)
+def test_rejects_half_time_goals_above_the_full_time_score(row: str, column: str) -> None:
+    rejection = _rejection_of(_GOOD_ROW, row)
+
+    assert f"{column}:" in rejection.reason
+    assert "exceed" in rejection.reason
+
+
+def test_rejects_a_row_with_only_one_half_time_goal() -> None:
+    rejection = _rejection_of(_GOOD_ROW, "SP1,12/09/20,Gamma CD,Alpha FC,0,1,A,,1,10,8")
+
+    assert "HTHG" in rejection.reason
+    assert "HTAG" in rejection.reason
+
+
+def test_empty_half_time_goals_stay_none() -> None:
+    snapshot = parse_csv(_csv(_HEADER, "SP1,12/09/20,Alpha FC,Beta CF,2,0,H,,,10,8"))
+
+    [match] = snapshot.matches
+    assert (match.hthg, match.htag) == (None, None)
+    assert snapshot.rejections == []
+
+
+@pytest.mark.parametrize(
+    ("odds", "column"),
+    [
+        (",3.50,n/a", "B365A"),
+        ("1.90,,n/a", "B365A"),
+        ("n/a,3.50,", "B365H"),
+    ],
+)
+def test_rejects_garbage_odds_in_an_incomplete_group(odds: str, column: str) -> None:
+    rejection = _rejection_of(
+        _GOOD_ROW_WITH_ODDS,
+        f"SP1,12/09/20,Gamma CD,Alpha FC,0,1,A,0,0,10,8,{odds}",
+        header=_ODDS_HEADER,
+    )
+
+    assert column in rejection.reason
+
+
+def test_rejects_odds_at_or_below_one_in_an_incomplete_group() -> None:
+    rejection = _rejection_of(
+        _GOOD_ROW_WITH_ODDS,
+        "SP1,12/09/20,Gamma CD,Alpha FC,0,1,A,0,0,10,8,1.90,,1.00",
+        header=_ODDS_HEADER,
+    )
+
+    assert "B365A" in rejection.reason
 
 
 def test_rejects_negative_goals() -> None:
