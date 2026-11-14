@@ -339,11 +339,15 @@ name = "lmi-worker"
 version = "0.1.0"
 source = { editable = "apps/worker" }
 dependencies = [
+    { name = "httpx" },
     { name = "lmi-core" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "lmi-core", editable = "packages/core" }]
+requires-dist = [
+    { name = "httpx" },
+    { name = "lmi-core", editable = "packages/core" },
+]
 
 [[package]]
 name = "mako"
