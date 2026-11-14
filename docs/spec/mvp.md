@@ -35,10 +35,10 @@ The project is a public portfolio piece. It runs on localhost with free, verifie
 
 ### 3. Evaluation
 
-- Walk-forward backtest per season: fit on data before matchday N, predict matchday N, move on.
+- Walk-forward backtest with chronological windows: fit on every match strictly before a cutoff date, score the next window, then move the cutoff forward. Windows follow dates rather than matchdays, because the historical seasons carry no matchday.
 - Metrics: log loss, Brier score, ranked probability score (RPS), calibration curve.
 - Compare every model against the baselines and the market.
-- Live tracking: predictions for upcoming 2026/27 matches are stored with a creation timestamp before kickoff and scored after the result arrives. Stored predictions are never modified.
+- Live tracking: predictions for upcoming 2026/27 matches are stored with a creation timestamp before the match and scored after the result arrives. Stored predictions are never modified. The M4 pre-kickoff guard uses the match date: a live prediction must be created before 00:00 Europe/Madrid on the day of the match. No source provides a verified absolute kickoff instant (see ADR-0002), so the date is the honest boundary.
 
 ### 4. Season simulation
 
@@ -50,16 +50,18 @@ The project is a public portfolio piece. It runs on localhost with free, verifie
 
 - Current table computed from results.
 - Per team: expected points vs actual points, goals vs xG where available, shots and shots on target for and against, home/away split, form, discipline.
-- Referee tendencies (cards and fouls per match).
+- Referee tendencies (cards and fouls per match): deferred until a free referee source is verified. The football-data.co.uk files carry no referee column.
 
 ### 6. Team focus mode
 
 Select one team (default Valencia CF) and see:
 
-- Season diagnosis: points vs expected points, rolling 5-match trends, home vs away, results vs top / middle / bottom opponents, discipline, referee history.
+- Season diagnosis: points vs expected points, rolling 5-match trends, home vs away, results vs top / middle / bottom opponents, discipline.
 - Multi-season trend since 2005/06: which metrics declined and when.
 - Relegation race: relegation probability per matchday, direct rivals comparison, remaining fixture difficulty, survival points threshold derived from historical 17th-place totals.
 - Next match preview: model probabilities, opponent profile, and how much the result moves relegation probability.
+
+Referee history is deferred with the referee source (section 5).
 
 ### 7. API (FastAPI, OpenAPI contract)
 
@@ -105,4 +107,6 @@ The dashboard reads data only through the API, with a client generated from the 
 ## Open items
 
 - Job queue library: ADR-0004 (proposed).
-- First season with xG in the football-data.co.uk CSVs: verify in M1. Models do not depend on xG; it is added where present.
+- Referee source: none verified. Referee analytics stay deferred until one exists.
+- Absolute kickoff instants: no verified source. The pre-kickoff guard uses the match date until one exists.
+- xG: present only in the 2026/27 football-data files (verified in M1). Earlier seasons report goals, shots, shots on target, corners, fouls and cards. Models do not depend on xG.

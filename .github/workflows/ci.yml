@@ -16,6 +16,22 @@ jobs:
   python:
     name: Python lint, types, tests
     runs-on: ubuntu-latest
+    services:
+      # The integration tests need a real PostgreSQL. The credentials are
+      # placeholders and the database lives only for the job.
+      postgres:
+        image: postgres:18.7-alpine
+        env:
+          POSTGRES_USER: lmi
+          POSTGRES_DB: lmi
+          POSTGRES_PASSWORD: placeholder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U lmi -d lmi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,8 +52,19 @@ jobs:
         run: uv run ruff format --check .
       - name: Type check
         run: uv run mypy apps/api apps/worker packages
-      - name: Test
-        run: uv run pytest
+      - name: Test (unit)
+        run: uv run pytest -m "not integration"
+      # The integration step runs the migration and the seed against the service
+      # database, so it also proves the schema on a clean server.
+      - name: Test (integration)
+        env:
+          LMI_ALLOW_DESTRUCTIVE_TESTS: "1"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: lmi
+          POSTGRES_PASSWORD: placeholder
+          POSTGRES_DB: lmi
+        run: uv run pytest -m integration
 
   web:
     name: Dashboard lint, types, build

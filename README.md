@@ -39,7 +39,7 @@ Prerequisites: Docker with Compose, and `make`. The stack itself needs nothing e
 
    This copies `.env.example` to `.env` when `.env` is missing, then installs both toolchains. If you only want to run the Docker stack, `cp .env.example .env` is enough and uv and pnpm are not required.
 
-2. Edit `.env` and replace the placeholder `POSTGRES_PASSWORD`. The Compose stack refuses to start without a value. Keep the password to letters, digits and `- _ . ~`, because it is inserted into the database URL.
+2. Edit `.env` and replace the placeholder `POSTGRES_PASSWORD`. The Compose stack refuses to start without a value. Any character is accepted except a newline: the services build the connection URL in code instead of interpolating it into a string.
 
 3. Build and start the stack:
 
@@ -47,11 +47,11 @@ Prerequisites: Docker with Compose, and `make`. The stack itself needs nothing e
    make up
    ```
 
-   The command builds the images, waits until db, redis, api and web are healthy, then starts the worker.
+   The command builds the images, applies the schema and the seed with the one-shot `migrate` service, waits until db, redis, api and web are healthy, then starts the worker.
 
 4. Open <http://localhost:3000> for the dashboard and <http://localhost:8000/docs> for the OpenAPI documentation. The dashboard shows `API status: online` when it can reach the API.
 
-The worker is a one-shot job: it runs the ingestion command and exits with status 0. A stopped worker container is the expected end state, not an error.
+The worker is a one-shot job: it runs the ingestion command and exits with status 0. A stopped worker container is the expected end state, not an error. The `migrate` service is the other one-shot job: it applies the migrations and the reference-data seed, and `api` and `worker` wait for it to exit 0.
 
 `make clean` stops the stack and deletes the containers and the database volume of the `lmi` Compose project.
 
@@ -66,7 +66,8 @@ The worker is a one-shot job: it runs the ingestion command and exits with statu
 | `make logs` | Follow the logs of every service |
 | `make ps` | Show the state of every service |
 | `make lint` | Run Python and web linters, formatters and type checks |
-| `make test` | Run the Python test suite |
+| `make test` | Run the Python unit test suite (no database needed) |
+| `make test-integration` | Run the integration tests against a throwaway PostgreSQL container, setting `LMI_ALLOW_DESTRUCTIVE_TESTS=1` for it |
 | `make build` | Build the web application and every Docker image |
 | `make clean` | Stop the stack and delete its volumes (project lmi only) |
 
@@ -79,7 +80,7 @@ apps/worker/         Python ingestion, model fitting and simulation jobs
 packages/core/       Shared Python domain package
 docs/adr/            Architecture decision records
 docs/spec/           Specifications
-docker-compose.yml   Local stack: db, redis, api, worker, web
+docker-compose.yml   Local stack: db, redis, migrate, api, worker, web
 Makefile             Developer entry points
 .github/workflows/   GitHub Actions CI
 ```
