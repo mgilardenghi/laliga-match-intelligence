@@ -6,7 +6,9 @@ second identical run that changes nothing, a later file that plays ten more
 matches, a date move that must reach only the scheduled rows, a fixture list that
 omits a stored match, a file with one unusable row, a write that fails after the
 matches were inserted, a download that fails, a run lock held elsewhere, a run
-interrupted before it finished, and a backfill whose seasons ``status`` reports.
+interrupted before it finished, a backfill whose seasons ``status`` reports, and
+the status report itself: the prefix of every line, and a digest that follows a
+change of the matches, the statistics and the odds.
 
 The tests need a live PostgreSQL and are opt-in through ``-m integration``. The
 ``migrated_engine`` fixture drops and recreates the public schema, so it refuses
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
@@ -46,7 +49,7 @@ from lmi_worker.ingest.pipeline import JobResult, run_jobs
 from lmi_worker.ingest.plan import Job, source_url
 from lmi_worker.ingest.runs import ABANDONED_ERROR, run_lock, start_run
 from lmi_worker.seasons import SeasonCode
-from lmi_worker.status import collect_status
+from lmi_worker.status import collect_status, format_status
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import aliased
 
@@ -599,6 +602,7 @@ def test_an_odds_write_that_raises_rolls_the_whole_match_transaction_back(
     assert result.status == "failed"
     assert result.error == "RuntimeError: simulated odds write failure"
     assert len(reached) == matches
+    assert (result.rows_upserted, result.rows_removed) == (0, 0)
     assert _count(db, Match) == 0
     assert _count(db, MatchStat) == 0
     assert _count(db, MatchOdd) == 0
@@ -606,6 +610,9 @@ def test_an_odds_write_that_raises_rolls_the_whole_match_transaction_back(
     run = _runs(db)[0]
     assert run.status == "failed"
     assert run.error == "RuntimeError: simulated odds write failure"
+    # The data transaction rolled back, so the run row must not report matches it
+    # did not store.
+    assert (run.rows_upserted, run.rows_removed) == (0, 0)
 
 
 def test_a_fetch_error_fails_the_run_and_is_recorded_on_the_run_row(
@@ -728,3 +735,78 @@ def test_a_failed_backfill_season_does_not_stop_the_next_one(
     ]
     assert _match_rows(db, "2005-06") == []
     assert len(_match_rows(db, "2006-07")) == 12
+
+
+_REPORT_PREFIXES = ("season ", "table ", "run ", "digest ")
+"""The only openings a status report line may have."""
+
+
+def test_the_status_report_labels_every_line_and_keeps_run_facts_on_run_lines(
+    migrated_engine: MigratedDatabase,
+) -> None:
+    db = migrated_engine
+    empty = format_status(collect_status(db.engine)).splitlines()
+
+    assert all(line.startswith(_REPORT_PREFIXES) for line in empty)
+    assert any(line.startswith("season ") for line in empty)
+    assert any(line.startswith("table ") for line in empty)
+    assert not any(line.startswith("run ") for line in empty)
+    assert len([line for line in empty if line.startswith("digest ")]) == 4
+
+    _full_flow(db)
+    report = collect_status(db.engine)
+    lines = format_status(report).splitlines()
+
+    assert report.runs
+    assert all(line.startswith(_REPORT_PREFIXES) for line in lines)
+    run_lines = [line for line in lines if line.startswith("run ")]
+    assert len(run_lines) == len(report.runs)
+    for run in report.runs:
+        assert any(line.startswith(f"run {run.source} {run.season} ") for line in run_lines)
+    # The acceptance comparison filters the lines starting with `run` and compares
+    # the rest, so no other line may carry a value that changes between two runs.
+    assert [line for line in lines if " upserted=" in line] == run_lines
+
+
+def test_the_status_digest_tracks_a_change_of_each_stored_component(
+    migrated_engine: MigratedDatabase,
+) -> None:
+    db = migrated_engine
+    _full_flow(db)
+    match_id = _match_id(db, CURRENT.code, FIXTURES[0])
+    before = collect_status(db.engine)
+
+    with db.factories.begin() as session:
+        session.execute(
+            update(Match).where(Match.id == match_id).values(kickoff_date=date(2026, 9, 1))
+        )
+    after_match = collect_status(db.engine)
+
+    assert after_match.digest_matches != before.digest_matches
+    assert after_match.digest_stats == before.digest_stats
+    assert after_match.digest_odds == before.digest_odds
+    assert after_match.digest != before.digest
+
+    with db.factories.begin() as session:
+        session.execute(
+            update(MatchStat).where(MatchStat.match_id == match_id).values(home_shots=99)
+        )
+    after_stats = collect_status(db.engine)
+
+    assert after_stats.digest_matches == after_match.digest_matches
+    assert after_stats.digest_stats != after_match.digest_stats
+    assert after_stats.digest_odds == after_match.digest_odds
+    assert after_stats.digest != after_match.digest
+
+    with db.factories.begin() as session:
+        session.execute(
+            update(MatchOdd)
+            .where(MatchOdd.match_id == match_id, MatchOdd.bookmaker == "bet365")
+            .values(home=Decimal("2.500"))
+        )
+    after_odds = collect_status(db.engine)
+
+    assert after_odds.digest_matches == after_stats.digest_matches
+    assert after_odds.digest_stats == after_stats.digest_stats
+    assert after_odds.digest_odds != after_stats.digest_odds
+    assert after_odds.digest != after_stats.digest

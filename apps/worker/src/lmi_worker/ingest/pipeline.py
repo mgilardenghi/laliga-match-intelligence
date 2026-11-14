@@ -77,7 +77,12 @@ class JobResult:
 
 @dataclass
 class _Progress:
-    """The counters the runner already knows when a later step fails."""
+    """The counters of the data transaction that committed.
+
+    The runner fills them only after :func:`_load` returned, which it does after
+    the transaction committed. A write that was rolled back therefore leaves
+    them at zero, so the run row never reports rows it did not store.
+    """
 
     rows_upserted: int = 0
     rows_removed: int = 0
@@ -234,6 +239,10 @@ def _load(
     fixture list fails before it too. The caller's session context commits on
     success and rolls back on any exception.
 
+    ``progress`` is filled only after the transaction committed. Until then the
+    runner holds no evidence that a row was stored, so a failure anywhere in
+    this function leaves the counters at zero.
+
     Raises:
         ValueError: the snapshot has rejected rows.
         UnknownTeamNames: a source name is absent from the alias table.
@@ -254,11 +263,13 @@ def _load(
             if fixtures is None:
                 raise ValueError("the openfootball fixture list is missing")
             plan = _openfootball_plan(session, job, season.id, fixtures)
-        progress.rows_upserted = plan.rows_upserted
-        progress.rows_removed = plan.rows_removed
         apply_plan(session, season.id, plan)
         if fixtures is not None:
             _assert_full_season_stored(session, season.id, len(fixtures))
+        rows_upserted = plan.rows_upserted
+        rows_removed = plan.rows_removed
+    progress.rows_upserted = rows_upserted
+    progress.rows_removed = rows_removed
 
 
 def _football_data_plan(
