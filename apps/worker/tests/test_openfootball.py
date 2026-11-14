@@ -269,6 +269,15 @@ def test_rejects_an_unusable_snapshot(content: bytes, reason: str) -> None:
         parse_json(content)
 
 
+def test_a_self_fixture_is_reported_before_the_fixture_count() -> None:
+    # One fixture between one team is not a complete round robin either, so the
+    # count check would report a confusing count; the self-fixture check must win.
+    content = _document((1, "2026-08-15", "Alpha FC", "Alpha FC"))
+
+    with pytest.raises(OfSnapshotError, match="'Alpha FC' cannot play itself"):
+        parse_json(content)
+
+
 def test_round_robin_rejects_a_missing_ordered_pair() -> None:
     """A missing pair only reaches this rule directly.
 

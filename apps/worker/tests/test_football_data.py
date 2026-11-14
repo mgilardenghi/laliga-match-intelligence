@@ -307,11 +307,18 @@ def test_rejects_half_time_goals_above_the_full_time_score(row: str, column: str
     assert "exceed" in rejection.reason
 
 
-def test_rejects_a_row_with_only_one_half_time_goal() -> None:
-    rejection = _rejection_of(_GOOD_ROW, "SP1,12/09/20,Gamma CD,Alpha FC,0,1,A,,1,10,8")
+@pytest.mark.parametrize(
+    ("row", "empty_column"),
+    [
+        ("SP1,12/09/20,Gamma CD,Alpha FC,0,1,A,,1,10,8", "HTHG"),
+        ("SP1,12/09/20,Gamma CD,Alpha FC,1,0,H,1,,10,8", "HTAG"),
+    ],
+)
+def test_rejects_a_row_with_only_one_half_time_goal(row: str, empty_column: str) -> None:
+    rejection = _rejection_of(_GOOD_ROW, row)
 
-    assert "HTHG" in rejection.reason
-    assert "HTAG" in rejection.reason
+    assert "HTHG/HTAG" in rejection.reason
+    assert f"{empty_column} is empty" in rejection.reason
 
 
 def test_empty_half_time_goals_stay_none() -> None:
