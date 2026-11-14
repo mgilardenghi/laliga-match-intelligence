@@ -119,6 +119,15 @@ class Match(Base):
             "ht_away_goals IS NULL OR ht_away_goals >= 0",
             name="ht_away_goals_non_negative",
         ),
+        CheckConstraint(
+            "(ht_home_goals IS NULL) = (ht_away_goals IS NULL)",
+            name="ht_goals_both_or_neither",
+        ),
+        CheckConstraint(
+            "ht_home_goals IS NULL OR home_goals IS NULL "
+            "OR (ht_home_goals <= home_goals AND ht_away_goals <= away_goals)",
+            name="ht_goals_not_above_ft",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
@@ -135,7 +144,10 @@ class Match(Base):
     ht_away_goals: Mapped[int | None] = mapped_column(Integer, nullable=True)
     result: Mapped[str | None] = mapped_column(CHAR(1), nullable=True)
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="The loader sets updated_at = now() on every UPDATE that changes the row.",
     )
 
 
@@ -223,6 +235,14 @@ class IngestionRun(Base):
     __table_args__ = (
         CheckConstraint("status IN ('running', 'succeeded', 'failed')", name="status_valid"),
         CheckConstraint(
+            "(status = 'running') = (finished_at IS NULL)",
+            name="finished_matches_status",
+        ),
+        CheckConstraint(
+            "source IN ('football_data', 'openfootball')",
+            name="source_valid",
+        ),
+        CheckConstraint(
             "rows_read >= 0",
             name="rows_read_non_negative",
         ),
@@ -281,3 +301,9 @@ class IngestionRejection(Base):
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     raw: Mapped[dict[str, object]] = mapped_column(postgresql.JSONB, nullable=False)
+
+
+Index(
+    "ix_ingestion_rejections_run_id",
+    IngestionRejection.run_id,
+)

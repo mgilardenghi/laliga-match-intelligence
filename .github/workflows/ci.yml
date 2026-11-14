@@ -58,6 +58,7 @@ jobs:
       # database, so it also proves the schema on a clean server.
       - name: Test (integration)
         env:
+          LMI_ALLOW_DESTRUCTIVE_TESTS: "1"
           POSTGRES_HOST: localhost
           POSTGRES_PORT: "5432"
           POSTGRES_USER: lmi

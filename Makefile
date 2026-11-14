@@ -62,7 +62,7 @@ test-integration: ## Run the integration tests against a throwaway PostgreSQL co
 		sleep 1; \
 	done; \
 	echo "the test database did not become ready" >&2; docker rm -f $(TEST_DB) >/dev/null; exit 1
-	@POSTGRES_HOST=localhost POSTGRES_PORT=$(TEST_DB_PORT) POSTGRES_USER=lmi \
+	@LMI_ALLOW_DESTRUCTIVE_TESTS=1 POSTGRES_HOST=localhost POSTGRES_PORT=$(TEST_DB_PORT) POSTGRES_USER=lmi \
 		POSTGRES_PASSWORD=placeholder POSTGRES_DB=lmi \
 		uv run pytest -m integration; \
 		status=$$?; docker rm -f $(TEST_DB) >/dev/null 2>&1; exit $$status

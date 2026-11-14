@@ -18,6 +18,12 @@ rewriting anything.
 Every test gets an empty ``public`` schema, so the tests are independent of each
 other and of their order. Nothing here prints the connection URL or a password:
 an assertion message renders the command output with URL credentials redacted.
+
+The ``empty_database`` fixture first calls
+:func:`lmi_core.db.testing.require_disposable_database` and refuses to run unless
+``LMI_ALLOW_DESTRUCTIVE_TESTS=1`` and ``DATABASE_URL`` is unset, because it drops
+the schema it connects to. ``make test-integration`` and the CI integration step
+set the opt-in for their throwaway database.
 """
 
 import os
@@ -32,6 +38,7 @@ from lmi_core.config import Settings
 from lmi_core.db.models import Season, Team
 from lmi_core.db.seed import load_alias_rows
 from lmi_core.db.session import make_engine, session_factory
+from lmi_core.db.testing import require_disposable_database
 from sqlalchemy import func, select, table, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -157,10 +164,16 @@ def empty_database() -> Iterator[tuple[Engine, Settings]]:
     public``, so the tests do not depend on each other or on their order.
 
     Raises:
-        pytest.fail: one of the ``POSTGRES_*`` variables is missing. The test is
-            not skipped: an integration run without a database is a
-            configuration error, and the message names the variable to set.
+        pytest.fail: the destructive-test guard refused the environment, or one of
+            the ``POSTGRES_*`` variables is missing. The test is not skipped: an
+            integration run without a database is a configuration error, and the
+            message names the variable to set.
     """
+    try:
+        require_disposable_database()
+    except RuntimeError as refusal:
+        pytest.fail(str(refusal), pytrace=False)
+
     missing = [name for name in POSTGRES_ENVIRONMENT_VARIABLES if not os.environ.get(name)]
     if missing:
         pytest.fail(
@@ -241,7 +254,14 @@ def test_migrate_creates_the_schema_and_is_idempotent(
                 text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
             ).scalars()
         }
+        stored_indexes = {
+            str(name)
+            for name in connection.execute(
+                text("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'")
+            ).scalars()
+        }
     assert stored_tables - {"alembic_version"} == DOMAIN_TABLES
+    assert "ix_ingestion_rejections_run_id" in stored_indexes
 
     counts = row_counts(engine)
     assert counts["seasons"] == 22
@@ -386,6 +406,30 @@ CHECK_VIOLATIONS = [
         ),
         id="unknown-alias-source",
     ),
+    pytest.param(
+        CheckViolation(
+            constraint="ck_matches_ht_goals_both_or_neither",
+            statement=(
+                "INSERT INTO matches (season_id, kickoff_date, home_team_id, away_team_id, "
+                "status, home_goals, away_goals, ht_away_goals, result) "
+                "VALUES (:season_id, DATE '2024-08-17', :home_team_id, :away_team_id, "
+                "'played', 1, 0, 0, 'H')"
+            ),
+        ),
+        id="half-time-goals-half-set",
+    ),
+    pytest.param(
+        CheckViolation(
+            constraint="ck_matches_ht_goals_not_above_ft",
+            statement=(
+                "INSERT INTO matches (season_id, kickoff_date, home_team_id, away_team_id, "
+                "status, home_goals, away_goals, ht_home_goals, ht_away_goals, result) "
+                "VALUES (:season_id, DATE '2024-08-17', :home_team_id, :away_team_id, "
+                "'played', 1, 0, 3, 0, 'H')"
+            ),
+        ),
+        id="half-time-goals-above-full-time",
+    ),
 ]
 """Negative inserts, each rejected by exactly one named CHECK constraint."""
 
@@ -426,3 +470,81 @@ def test_valid_match_and_odds_are_accepted_and_duplicates_rejected(seeded: Seede
         )
 
     assert "uq_matches_season_id_home_team_id_away_team_id" in str(rejected.value)
+
+
+def test_running_ingestion_run_with_finished_at_is_rejected(seeded: Seeded) -> None:
+    statement = text(
+        "INSERT INTO ingestion_runs "
+        "(id, source, season_code, loader_version, status, finished_at) "
+        "VALUES ('00000000-0000-0000-0000-000000000001', 'football_data', "
+        "'2024-25', 'test', 'running', now())"
+    )
+
+    with pytest.raises(IntegrityError) as rejected, seeded.engine.begin() as connection:
+        connection.execute(statement)
+
+    assert "ck_ingestion_runs_finished_matches_status" in str(rejected.value)
+
+
+def test_finished_ingestion_run_without_finished_at_is_rejected(seeded: Seeded) -> None:
+    statement = text(
+        "INSERT INTO ingestion_runs "
+        "(id, source, season_code, loader_version, status, finished_at) "
+        "VALUES ('00000000-0000-0000-0000-000000000002', 'football_data', "
+        "'2024-25', 'test', 'succeeded', NULL)"
+    )
+
+    with pytest.raises(IntegrityError) as rejected, seeded.engine.begin() as connection:
+        connection.execute(statement)
+
+    assert "ck_ingestion_runs_finished_matches_status" in str(rejected.value)
+
+
+def test_unknown_ingestion_source_is_rejected(seeded: Seeded) -> None:
+    statement = text(
+        "INSERT INTO ingestion_runs "
+        "(id, source, season_code, loader_version, status) "
+        "VALUES ('00000000-0000-0000-0000-000000000003', 'another_source', "
+        "'2024-25', 'test', 'running')"
+    )
+
+    with pytest.raises(IntegrityError) as rejected, seeded.engine.begin() as connection:
+        connection.execute(statement)
+
+    assert "ck_ingestion_runs_source_valid" in str(rejected.value)
+
+
+def test_valid_played_match_and_ingestion_run_states_are_accepted(seeded: Seeded) -> None:
+    with seeded.engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO matches (season_id, kickoff_date, home_team_id, away_team_id, "
+                "status, home_goals, away_goals, ht_home_goals, ht_away_goals, result) "
+                "VALUES (:season_id, DATE '2024-08-17', :home_team_id, :away_team_id, "
+                "'played', 2, 1, 1, 1, 'H')"
+            ),
+            {
+                "season_id": seeded.season_id,
+                "home_team_id": seeded.home_team_id,
+                "away_team_id": seeded.away_team_id,
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO ingestion_runs "
+                "(id, source, season_code, loader_version, status) "
+                "VALUES ('00000000-0000-0000-0000-000000000004', 'openfootball', "
+                "'2024-25', 'test', 'running')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO ingestion_runs "
+                "(id, source, season_code, loader_version, status, finished_at) "
+                "VALUES ('00000000-0000-0000-0000-000000000005', 'football_data', "
+                "'2024-25', 'test', 'succeeded', now())"
+            )
+        )
+
+    assert count_rows(seeded.engine, "matches") == 1
+    assert count_rows(seeded.engine, "ingestion_runs") == 2
