@@ -67,7 +67,7 @@ The worker is a one-shot job: it runs the ingestion command and exits with statu
 | `make ps` | Show the state of every service |
 | `make lint` | Run Python and web linters, formatters and type checks |
 | `make test` | Run the Python unit test suite (no database needed) |
-| `make test-integration` | Run the integration tests against a throwaway PostgreSQL container |
+| `make test-integration` | Run the integration tests against a throwaway PostgreSQL container, setting `LMI_ALLOW_DESTRUCTIVE_TESTS=1` for it |
 | `make build` | Build the web application and every Docker image |
 | `make clean` | Stop the stack and delete its volumes (project lmi only) |
 

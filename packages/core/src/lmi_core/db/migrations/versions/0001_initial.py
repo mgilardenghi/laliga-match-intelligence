@@ -88,6 +88,7 @@ def upgrade() -> None:
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),
             nullable=False,
+            comment="The loader sets updated_at = now() on every UPDATE that changes the row.",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_matches"),
         sa.ForeignKeyConstraint(["season_id"], ["seasons.id"], name="fk_matches_season_id_seasons"),
@@ -139,6 +140,15 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "ht_away_goals IS NULL OR ht_away_goals >= 0",
             name="ht_away_goals_non_negative",
+        ),
+        sa.CheckConstraint(
+            "(ht_home_goals IS NULL) = (ht_away_goals IS NULL)",
+            name="ht_goals_both_or_neither",
+        ),
+        sa.CheckConstraint(
+            "ht_home_goals IS NULL OR home_goals IS NULL "
+            "OR (ht_home_goals <= home_goals AND ht_away_goals <= away_goals)",
+            name="ht_goals_not_above_ft",
         ),
     )
 
@@ -282,6 +292,14 @@ def upgrade() -> None:
             "status IN ('running', 'succeeded', 'failed')",
             name="status_valid",
         ),
+        sa.CheckConstraint(
+            "(status = 'running') = (finished_at IS NULL)",
+            name="finished_matches_status",
+        ),
+        sa.CheckConstraint(
+            "source IN ('football_data', 'openfootball')",
+            name="source_valid",
+        ),
         sa.CheckConstraint("rows_read >= 0", name="rows_read_non_negative"),
         sa.CheckConstraint("rows_upserted >= 0", name="rows_upserted_non_negative"),
         sa.CheckConstraint("rows_removed >= 0", name="rows_removed_non_negative"),
@@ -309,6 +327,12 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
     )
+    op.create_index(
+        "ix_ingestion_rejections_run_id",
+        "ingestion_rejections",
+        ["run_id"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
@@ -316,6 +340,10 @@ def downgrade() -> None:
     op.drop_index(
         "ix_ingestion_runs_source_season_code_started_at",
         table_name="ingestion_runs",
+    )
+    op.drop_index(
+        "ix_ingestion_rejections_run_id",
+        table_name="ingestion_rejections",
     )
     op.drop_table("ingestion_rejections")
     op.drop_table("ingestion_runs")
