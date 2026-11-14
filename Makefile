@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose
 
-.PHONY: help setup up down logs ps lint test test-integration build clean
+.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill lint test test-integration build clean
 
 # Throwaway database for the integration tests. Same image as Compose, a host
 # port that is unlikely to collide, and placeholder credentials only.
@@ -12,7 +12,7 @@ TEST_DB_IMAGE := postgres:18.7-alpine
 TEST_DB_PORT := 55432
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\n"} /^[a-z-]+:.*## / {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\n"} /^[a-z-]+:.*## / {printf "  %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 setup: ## Create .env if missing and install Python and Node dependencies
 	@if [ ! -f .env ]; then cp .env.example .env; fi
@@ -26,7 +26,9 @@ up: ## Build and start the local Docker Compose stack, then wait for health
 	# are already started or already finished here, and the exit code of the
 	# migration job is checked explicitly.
 	$(COMPOSE) up -d --build --wait db redis
-	$(COMPOSE) up -d migrate
+	# The migration job is built here like the other images: a changed migration or
+	# seed must never be applied by the image already on disk.
+	$(COMPOSE) up -d --build migrate
 	$(COMPOSE) wait migrate
 	$(COMPOSE) up -d --build --wait --no-deps api web
 	$(COMPOSE) up -d --build --no-deps worker
@@ -39,6 +41,21 @@ logs: ## Follow the logs of every service
 
 ps: ## Show the state of every service
 	$(COMPOSE) ps
+
+ingest-deps:
+	# `up` starts the migration job from the image already on disk, so a schema or
+	# seed change would be applied by a stale image. The explicit `--build` here
+	# and the wait on the job make the ingestion run against the current schema.
+	$(COMPOSE) up -d --wait db redis
+	$(COMPOSE) up -d --build migrate
+	$(COMPOSE) wait migrate
+	$(COMPOSE) build worker
+
+ingest: ingest-deps ## Run the football-data and openfootball ingestion for the current season (network)
+	$(COMPOSE) run --rm --no-deps worker python -m lmi_worker ingest $(ARGS)
+
+ingest-backfill: ingest-deps ## Run the ingestion for every season from 2005-06 through the current one
+	$(COMPOSE) run --rm --no-deps worker python -m lmi_worker ingest --backfill $(ARGS)
 
 lint: ## Run Python and web linters, formatters and type checks
 	uv run ruff check .

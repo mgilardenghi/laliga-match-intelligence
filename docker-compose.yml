@@ -88,9 +88,14 @@ services:
     environment:
       <<: *database_environment
       REDIS_URL: redis://redis:6379/0
-    # One-shot job: run the ingestion command and exit; `restart: "no"` keeps it
+    # One-shot job: print the database status and exit; `restart: "no"` keeps it
     # from being relaunched by the Docker daemon.
-    command: ["python", "-m", "lmi_worker", "ingest"]
+    #
+    # The default command must never contact a live data source: a CI run and the
+    # plain `make up` start have to work offline, so this worker only reads the
+    # database and prints a status report. Ingestion downloads the source files,
+    # so it is an explicit command: `make ingest` or `make ingest-backfill`.
+    command: ["python", "-m", "lmi_worker", "status"]
     restart: "no"
     depends_on:
       db:

@@ -105,13 +105,16 @@ jobs:
       - name: Create the env file from the committed template
         run: cp .env.example .env
       # `make up` is the documented one-command start: it waits for the
-      # long-running services and then starts the one-shot worker.
+      # long-running services and then starts the one-shot worker, which only
+      # reports the database status. CI never runs the ingestion, so no step in
+      # this job contacts a live data source.
       - name: Start the stack
         run: make up
-      # The worker is a one-shot job. Wait for it so a failed ingestion fails
+      # The worker is a one-shot job that runs the no-network `status` command:
+      # it reads the database and prints a report. Wait for it so a failure fails
       # the job instead of leaving a stopped container behind a green run, with
       # a bound so a stalled job cannot hold the run until the global limit.
-      - name: Check the worker job exited cleanly
+      - name: Check the worker status job exited cleanly
         timeout-minutes: 15
         run: docker compose wait worker
       - name: Check the API health endpoint
