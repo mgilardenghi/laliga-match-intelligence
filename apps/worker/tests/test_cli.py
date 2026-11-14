@@ -6,6 +6,10 @@ database configuration for both commands. Every command that needs configuration
 runs with the ``POSTGRES_*`` variables removed, so the configuration error is the
 one a fresh shell sees.
 
+One test points the configuration at a closed port: ``ingest`` checks the database
+once before the first job, so an unreachable server is one line on stderr and exit
+code 1 instead of a traceback per job, and no file is downloaded.
+
 One test pins the log contract of a finished ingestion over a faked runner: one
 line per job plus the summary, which is what the acceptance run reads. The engine
 and the runner are replaced there, so no connection is opened and no file is
@@ -71,11 +75,28 @@ _LOCKED = JobResult(
 """A job another process was already running, so it has no run row."""
 
 
+class _ConnectionStand:
+    """A stand-in connection, so the database preflight needs no server."""
+
+    def __enter__(self) -> _ConnectionStand:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        pass
+
+    def execute(self, statement: object) -> None:
+        pass
+
+
 class _EngineStand:
     """A stand-in engine, so a faked runner needs no database connection."""
 
     def __init__(self) -> None:
         self.disposed = False
+
+    def connect(self) -> _ConnectionStand:
+        """Answer the preflight statement the command runs before the first job."""
+        return _ConnectionStand()
 
     def dispose(self) -> None:
         self.disposed = True
@@ -86,6 +107,27 @@ def unconfigured(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Remove every database setting for the duration of one test."""
     for name in _CONFIGURATION_VARIABLES:
         monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+_UNREACHABLE_DATABASE = {
+    "POSTGRES_HOST": "127.0.0.1",
+    "POSTGRES_PORT": "1",
+    "POSTGRES_USER": "placeholder",
+    "POSTGRES_PASSWORD": "placeholder",
+    "POSTGRES_DB": "placeholder",
+}
+"""Settings that point at a port nothing listens on, so a connection fails at once."""
+
+
+@pytest.fixture
+def unreachable_database(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Point the database settings at a closed port for the duration of one test."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    for name, value in _UNREACHABLE_DATABASE.items():
+        monkeypatch.setenv(name, value)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -146,6 +188,20 @@ def test_the_default_season_after_the_seeded_range_exits_two_without_a_connectio
     assert code == 2
     assert fetcher.requested == []
     assert "2027-28" in capsys.readouterr().err
+
+
+def test_ingest_against_an_unreachable_database_exits_one_without_a_traceback(
+    unreachable_database: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fetcher = FakeFetcher({})
+
+    code = main(["ingest", "--season", "2026-27"], today=TODAY, fetcher=fetcher)
+
+    assert code == 1
+    error = capsys.readouterr().err
+    assert error.strip() == "ingest: cannot reach the database"
+    assert "Traceback" not in error
+    assert fetcher.requested == []
 
 
 def test_the_command_line_logs_one_line_per_job_and_the_summary(
