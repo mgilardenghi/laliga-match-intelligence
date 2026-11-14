@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-_SEASON_PATTERN = re.compile(r"^(?P<start>\d{4})-(?P<end>\d{2})$")
+_SEASON_PATTERN = re.compile(r"(?P<start>[0-9]{4})-(?P<end>[0-9]{2})")
 _SEASON_START_MONTH = 7
 _DEFAULT_FIRST_SEASON = "2005-06"
 
@@ -35,7 +35,7 @@ class SeasonCode:
     @classmethod
     def parse(cls, text: str) -> SeasonCode:
         """Build a season from its canonical ``YYYY-YY`` form."""
-        match = _SEASON_PATTERN.match(text)
+        match = _SEASON_PATTERN.fullmatch(text)
         if match is None:
             raise ValueError(
                 f"invalid season code {text!r}: expected 'YYYY-YY', for example '2026-27'"

@@ -11,7 +11,12 @@ from itertools import permutations
 from pathlib import Path
 
 import pytest
-from lmi_worker.sources.openfootball import OfFixture, OfSnapshotError, parse_json
+from lmi_worker.sources.openfootball import (
+    OfFixture,
+    OfSnapshotError,
+    _validate_round_robin,
+    parse_json,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -125,6 +130,45 @@ def test_team_names_are_nfc_with_collapsed_whitespace() -> None:
             "duplicate",
         ),
         (
+            # A self-fixture keeps the count at 12 fixtures and the team count at 4,
+            # so only the self-fixture rule can reject it.
+            _document(
+                (1, "2026-08-15", "Alpha FC", "Alpha FC"),
+                (1, "2026-08-16", "Gamma CD", "Delta SC"),
+                (2, "2026-08-22", "Alpha FC", "Gamma CD"),
+                (2, "2026-08-23", "Beta CF", "Delta SC"),
+                (3, "2026-08-29", "Alpha FC", "Delta SC"),
+                (3, "2026-08-30", "Beta CF", "Gamma CD"),
+                (4, "2026-09-12", "Beta CF", "Alpha FC"),
+                (4, "2026-09-13", "Delta SC", "Gamma CD"),
+                (5, "2026-09-19", "Gamma CD", "Alpha FC"),
+                (5, "2026-09-20", "Delta SC", "Beta CF"),
+                (6, "2026-09-26", "Delta SC", "Alpha FC"),
+                (6, "2026-09-27", "Gamma CD", "Beta CF"),
+            ),
+            "'Alpha FC' cannot play itself",
+        ),
+        (
+            # Swapping the matchday of two fixtures keeps the pair set, the count
+            # and the even matchday distribution, but Alpha FC plays twice on
+            # matchday 1.
+            _document(
+                (1, "2026-08-15", "Alpha FC", "Beta CF"),
+                (1, "2026-08-22", "Alpha FC", "Gamma CD"),
+                (2, "2026-08-16", "Gamma CD", "Delta SC"),
+                (2, "2026-08-23", "Beta CF", "Delta SC"),
+                (3, "2026-08-29", "Alpha FC", "Delta SC"),
+                (3, "2026-08-30", "Beta CF", "Gamma CD"),
+                (4, "2026-09-12", "Beta CF", "Alpha FC"),
+                (4, "2026-09-13", "Delta SC", "Gamma CD"),
+                (5, "2026-09-19", "Gamma CD", "Alpha FC"),
+                (5, "2026-09-20", "Delta SC", "Beta CF"),
+                (6, "2026-09-26", "Delta SC", "Alpha FC"),
+                (6, "2026-09-27", "Gamma CD", "Beta CF"),
+            ),
+            "matchday 1: 'Alpha FC' appears more than once",
+        ),
+        (
             # Three teams need six fixtures; five is one short.
             _document(
                 (1, "2026-08-15", "Alpha FC", "Beta CF"),
@@ -207,6 +251,8 @@ def test_team_names_are_nfc_with_collapsed_whitespace() -> None:
         "no-matches-field",
         "empty-matches",
         "duplicate-pair",
+        "self-fixture",
+        "team-twice-on-a-matchday",
         "one-fixture-short",
         "uneven-matchdays",
         "three-teams-uneven",
@@ -221,6 +267,20 @@ def test_team_names_are_nfc_with_collapsed_whitespace() -> None:
 def test_rejects_an_unusable_snapshot(content: bytes, reason: str) -> None:
     with pytest.raises(OfSnapshotError, match=reason):
         parse_json(content)
+
+
+def test_round_robin_rejects_a_missing_ordered_pair() -> None:
+    """A missing pair only reaches this rule directly.
+
+    ``parse_json`` runs ``_validate_fixture_count`` first, and that check rejects
+    a list one fixture short before the pair invariant is reached, so the test
+    calls ``_validate_round_robin`` with the 12-fixture list minus the
+    ``(Gamma CD, Beta CF)`` fixture.
+    """
+    incomplete = [fixture for fixture in _EXPECTED if fixture != _EXPECTED[-1]]
+
+    with pytest.raises(OfSnapshotError, match="'Gamma CD' vs 'Beta CF'"):
+        _validate_round_robin(incomplete)
 
 
 def test_a_two_team_list_parses() -> None:
