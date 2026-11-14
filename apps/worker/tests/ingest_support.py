@@ -13,7 +13,8 @@ fixture list that carried them would still contribute only dates and matchdays.
 The football-data builder always writes an odds price of ``2.0625`` and, when
 enabled, an expected-goals value of ``1.225``. Both sit exactly on a rounding
 boundary, so a second identical run proves that the loader's ``ROUND_HALF_UP``
-quantization does not report a phantom change.
+quantization does not report a phantom change. A test that needs one row the
+parser must refuse overwrites individual cells of that row by index.
 """
 
 import csv
@@ -177,13 +178,16 @@ def football_data_csv(
     bom: bool = False,
     crlf: bool = False,
     raw_names: Mapping[str, str] | None = None,
+    cell_overrides: Mapping[int, Mapping[str, str]] | None = None,
 ) -> bytes:
     """Return a football-data season file of played matches.
 
     ``matches`` are canonical team names; the builder maps them onto the
     football-data aliases of the packaged alias table. ``raw_names`` replaces the
     alias of the teams it names, which is how a test writes a name that the alias
-    table must reject.
+    table must reject. ``cell_overrides`` replaces named cells of the row at a
+    zero-based index and may only name a column of the header, which is how a test
+    writes a row the parser must reject.
 
     Every row is a home win with the same score and the same statistics. The
     optional switches add the vintage columns of the season files: a byte order
@@ -192,6 +196,7 @@ def football_data_csv(
     """
     aliases = aliases_of("football_data")
     overrides = {} if raw_names is None else raw_names
+    cells = {} if cell_overrides is None else cell_overrides
     header = ["Div", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR"]
     if include_time:
         header.append("Time")
@@ -223,6 +228,7 @@ def football_data_csv(
             row["AxG"] = "0.875"
         if include_odds:
             row.update(_FD_ODDS_VALUES)
+        row.update(cells.get(index, {}))
         rows.append(row)
 
     buffer = io.StringIO(newline="")
