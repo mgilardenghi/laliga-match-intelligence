@@ -37,7 +37,7 @@ from lmi_worker.ingest.plan import Job
 from lmi_worker.seasons import SeasonCode
 
 TODAY = date(2026, 11, 14)
-"""A date inside the 2026-27 season, the newest seeded season."""
+"""A date inside the 2026-27 season, the season in progress."""
 
 _CONFIGURATION_VARIABLES = (
     "DATABASE_URL",
@@ -183,11 +183,11 @@ def test_the_default_season_after_the_seeded_range_exits_two_without_a_connectio
     monkeypatch.setattr(cli, "make_engine", refuse_engine)
     fetcher = FakeFetcher({})
 
-    code = main(["ingest"], today=date(2027, 7, 1), fetcher=fetcher)
+    code = main(["ingest"], today=date(2031, 7, 1), fetcher=fetcher)
 
     assert code == 2
     assert fetcher.requested == []
-    assert "2027-28" in capsys.readouterr().err
+    assert "2031-32" in capsys.readouterr().err
 
 
 def test_ingest_against_an_unreachable_database_exits_one_without_a_traceback(

@@ -3,8 +3,9 @@
 from datetime import date
 
 import pytest
+from lmi_core.db.seed import SEASON_START_YEARS
 from lmi_worker.ingest.plan import Job, PlanError, plan_jobs, source_url
-from lmi_worker.seasons import SeasonCode
+from lmi_worker.seasons import SeasonCode, current_season
 
 TODAY = date(2026, 11, 14)
 
@@ -88,16 +89,23 @@ def test_football_data_alone_never_plans_openfootball() -> None:
     assert all(job.source == "football_data" for job in jobs)
 
 
-@pytest.mark.parametrize("season", ["2004-05", "2027-28"])
+@pytest.mark.parametrize("season", ["2004-05", "2031-32"])
 def test_a_season_outside_the_covered_range_is_rejected(season: str) -> None:
     with pytest.raises(PlanError):
         plan_jobs(season=season, today=TODAY)
 
 
-@pytest.mark.parametrize("season", ["2004-05", "2027-28"])
+@pytest.mark.parametrize("season", ["2004-05", "2031-32"])
 def test_a_backfill_through_outside_the_covered_range_is_rejected(season: str) -> None:
     with pytest.raises(PlanError):
         plan_jobs(backfill_through=season, today=TODAY)
+
+
+def test_the_seed_runs_at_least_one_season_ahead_of_the_current_season() -> None:
+    # Fails from the day the current season is the last seeded season but one,
+    # a year before ingestion would raise MissingSeason. Extend SEASON_START_YEARS
+    # in lmi_core.db.seed when this fails.
+    assert max(SEASON_START_YEARS) >= current_season(date.today()).start_year + 1
 
 
 def test_a_malformed_season_is_rejected() -> None:
@@ -125,14 +133,14 @@ def test_the_season_turns_on_the_first_of_july() -> None:
 
 
 def test_a_season_after_the_seeded_range_is_rejected() -> None:
-    on_30_june_2027 = plan_jobs(today=date(2027, 6, 30))
+    on_30_june_2031 = plan_jobs(today=date(2031, 6, 30))
 
-    assert on_30_june_2027 == [
-        Job(source="openfootball", season=_season("2026-27")),
-        Job(source="football_data", season=_season("2026-27")),
+    assert on_30_june_2031 == [
+        Job(source="openfootball", season=_season("2030-31")),
+        Job(source="football_data", season=_season("2030-31")),
     ]
     with pytest.raises(PlanError):
-        plan_jobs(today=date(2027, 7, 1))
+        plan_jobs(today=date(2031, 7, 1))
 
 
 def test_source_urls_follow_the_source_layouts() -> None:

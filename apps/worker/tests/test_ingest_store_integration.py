@@ -324,7 +324,7 @@ def test_get_season_raises_missing_season_for_an_unseeded_code(
         get_season(session, "2004-05")
 
     assert "2004-05" in str(missing.value)
-    assert "2005-06..2026-27" in str(missing.value)
+    assert "2005-06..2030-31" in str(missing.value)
 
 
 def test_get_season_rejects_a_contradictory_football_data_code(

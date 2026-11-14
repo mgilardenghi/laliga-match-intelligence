@@ -21,22 +21,22 @@ def _write_csv(tmp_path: Path, *rows: str) -> Path:
     return path
 
 
-def test_expected_seasons_covers_2005_to_2027() -> None:
+def test_expected_seasons_covers_2005_to_2031() -> None:
     seasons = expected_seasons()
 
-    assert len(seasons) == 22
+    assert len(seasons) == 26
     assert seasons[0].code == "2005-06"
     assert seasons[0].start_year == 2005
     assert seasons[0].fd_code == "0506"
-    assert seasons[-1].code == "2026-27"
-    assert seasons[-1].start_year == 2026
-    assert seasons[-1].fd_code == "2627"
+    assert seasons[-1].code == "2030-31"
+    assert seasons[-1].start_year == 2030
+    assert seasons[-1].fd_code == "3031"
 
 
 def test_expected_seasons_has_no_duplicate_codes() -> None:
     seasons = expected_seasons()
 
-    assert [season.start_year for season in seasons] == list(range(2005, 2027))
+    assert [season.start_year for season in seasons] == list(range(2005, 2031))
     assert len({season.code for season in seasons}) == len(seasons)
     assert len({season.fd_code for season in seasons}) == len(seasons)
 

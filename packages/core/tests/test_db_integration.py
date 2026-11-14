@@ -73,9 +73,9 @@ from free input.
 """
 
 EXPECTED_SEASON_CODES = [
-    f"{start_year}-{(start_year + 1) % 100:02d}" for start_year in range(2005, 2027)
+    f"{start_year}-{(start_year + 1) % 100:02d}" for start_year in range(2005, 2031)
 ]
-"""Every season code from ``2005-06`` to ``2026-27``, oldest first."""
+"""Every season code from ``2005-06`` to ``2030-31``, oldest first."""
 
 _URL_USERINFO = re.compile(r"://[^@\s/]*@")
 
@@ -264,7 +264,7 @@ def test_migrate_creates_the_schema_and_is_idempotent(
     assert "ix_ingestion_rejections_run_id" in stored_indexes
 
     counts = row_counts(engine)
-    assert counts["seasons"] == 22
+    assert counts["seasons"] == 26
     assert season_codes(engine) == EXPECTED_SEASON_CODES
 
     alias_rows = load_alias_rows()

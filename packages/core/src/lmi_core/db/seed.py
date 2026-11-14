@@ -30,8 +30,12 @@ from sqlalchemy.orm import Session
 from lmi_core.db.models import Season, Team, TeamAlias
 from lmi_core.db.session import session_factory
 
-SEASON_START_YEARS = range(2005, 2027)
-"""First year of every covered season, 2005-06 through 2026-27."""
+SEASON_START_YEARS = range(2005, 2031)
+"""First year of every covered season, 2005-06 through 2030-31.
+
+Ingestion of a season with no seeded row fails, so the range runs ahead of the
+current season. A worker test fails once the current season is the last one
+seeded but one, which leaves a year to extend this range."""
 
 ALIAS_SOURCES = ("football_data", "openfootball")
 """The sources allowed by the ``ck_team_aliases_source_valid`` check constraint."""
