@@ -26,7 +26,9 @@ up: ## Build and start the local Docker Compose stack, then wait for health
 	# are already started or already finished here, and the exit code of the
 	# migration job is checked explicitly.
 	$(COMPOSE) up -d --build --wait db redis
-	$(COMPOSE) up -d migrate
+	# The migration job is built here like the other images: a changed migration or
+	# seed must never be applied by the image already on disk.
+	$(COMPOSE) up -d --build migrate
 	$(COMPOSE) wait migrate
 	$(COMPOSE) up -d --build --wait --no-deps api web
 	$(COMPOSE) up -d --build --no-deps worker

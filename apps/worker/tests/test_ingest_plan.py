@@ -124,6 +124,17 @@ def test_the_season_turns_on_the_first_of_july() -> None:
     ]
 
 
+def test_a_season_after_the_seeded_range_is_rejected() -> None:
+    on_30_june_2027 = plan_jobs(today=date(2027, 6, 30))
+
+    assert on_30_june_2027 == [
+        Job(source="openfootball", season=_season("2026-27")),
+        Job(source="football_data", season=_season("2026-27")),
+    ]
+    with pytest.raises(PlanError):
+        plan_jobs(today=date(2027, 7, 1))
+
+
 def test_source_urls_follow_the_source_layouts() -> None:
     fd_url = source_url(Job(source="football_data", season=_season("2026-27")))
     of_url = source_url(Job(source="openfootball", season=_season("2026-27")))
