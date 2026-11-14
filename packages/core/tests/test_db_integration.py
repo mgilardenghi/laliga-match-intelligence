@@ -430,6 +430,18 @@ CHECK_VIOLATIONS = [
         ),
         id="half-time-goals-above-full-time",
     ),
+    pytest.param(
+        CheckViolation(
+            constraint="ck_matches_ht_goals_not_above_ft",
+            statement=(
+                "INSERT INTO matches (season_id, kickoff_date, home_team_id, away_team_id, "
+                "status, home_goals, away_goals, ht_home_goals, ht_away_goals, result) "
+                "VALUES (:season_id, DATE '2024-08-17', :home_team_id, :away_team_id, "
+                "'played', 1, 1, 0, 2, 'D')"
+            ),
+        ),
+        id="half-time-away-goals-above-full-time",
+    ),
 ]
 """Negative inserts, each rejected by exactly one named CHECK constraint."""
 
