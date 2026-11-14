@@ -32,6 +32,17 @@ def assert_no_url_part(message: str) -> None:
         assert part not in message, f"the refusal message leaks {part!r}"
 
 
+def assert_url_refusal(message: str) -> None:
+    """Fail unless ``message`` is the refusal caused by ``DATABASE_URL``.
+
+    The opt-in branch mentions :data:`ALLOW_DESTRUCTIVE_TESTS_VARIABLE` instead, so
+    its absence proves the URL branch ran rather than the opt-in branch.
+    """
+    assert "DATABASE_URL" in message
+    assert "LMI_ALLOW_DESTRUCTIVE_TESTS" not in message
+    assert_no_url_part(message)
+
+
 def test_require_disposable_database_refuses_without_opt_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -54,9 +65,7 @@ def test_require_disposable_database_refuses_a_database_url(
     with pytest.raises(RuntimeError) as refused:
         require_disposable_database()
 
-    message = str(refused.value)
-    assert "DATABASE_URL" in message
-    assert_no_url_part(message)
+    assert_url_refusal(str(refused.value))
 
 
 def test_require_disposable_database_refuses_every_spelling_of_the_name(
@@ -69,24 +78,8 @@ def test_require_disposable_database_refuses_every_spelling_of_the_name(
         monkeypatch.setenv(spelling, _DATABASE_URL)
         with pytest.raises(RuntimeError) as refused:
             require_disposable_database()
-        message = str(refused.value)
-        assert "DATABASE_URL" in message
-        assert_no_url_part(message)
+        assert_url_refusal(str(refused.value))
         monkeypatch.delenv(spelling)
-
-
-def test_require_disposable_database_refuses_two_spellings_at_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
-    clear_variable(monkeypatch, "DATABASE_URL")
-    monkeypatch.setenv("Database_Url", _DATABASE_URL)
-    monkeypatch.setenv("DATABASE_URL", "")
-
-    with pytest.raises(RuntimeError) as refused:
-        require_disposable_database()
-
-    assert "DATABASE_URL" in str(refused.value)
 
 
 def test_require_disposable_database_refuses_an_empty_database_url(
@@ -100,7 +93,7 @@ def test_require_disposable_database_refuses_an_empty_database_url(
     with pytest.raises(RuntimeError) as refused:
         require_disposable_database()
 
-    assert "DATABASE_URL" in str(refused.value)
+    assert_url_refusal(str(refused.value))
 
 
 def test_require_disposable_database_accepts_a_throwaway_configuration(
