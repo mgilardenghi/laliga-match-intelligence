@@ -59,20 +59,34 @@ def test_require_disposable_database_refuses_a_database_url(
     assert_no_url_part(message)
 
 
-def test_require_disposable_database_refuses_a_lower_case_database_url(
+def test_require_disposable_database_refuses_every_spelling_of_the_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pydantic settings match environment names in any letter case."""
     monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
     clear_variable(monkeypatch, "DATABASE_URL")
-    monkeypatch.setenv("database_url", _DATABASE_URL)
+    for spelling in ("database_url", "Database_Url"):
+        monkeypatch.setenv(spelling, _DATABASE_URL)
+        with pytest.raises(RuntimeError) as refused:
+            require_disposable_database()
+        message = str(refused.value)
+        assert "DATABASE_URL" in message
+        assert_no_url_part(message)
+        monkeypatch.delenv(spelling)
+
+
+def test_require_disposable_database_refuses_two_spellings_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LMI_ALLOW_DESTRUCTIVE_TESTS", "1")
+    clear_variable(monkeypatch, "DATABASE_URL")
+    monkeypatch.setenv("Database_Url", _DATABASE_URL)
+    monkeypatch.setenv("DATABASE_URL", "")
 
     with pytest.raises(RuntimeError) as refused:
         require_disposable_database()
 
-    message = str(refused.value)
-    assert "DATABASE_URL" in message
-    assert_no_url_part(message)
+    assert "DATABASE_URL" in str(refused.value)
 
 
 def test_require_disposable_database_refuses_an_empty_database_url(
