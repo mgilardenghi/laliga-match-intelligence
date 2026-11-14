@@ -74,7 +74,11 @@ class _FrozenModel(BaseModel):
 
 
 class FdRejection(_FrozenModel):
-    """One row that was skipped, with the reason and the raw cells."""
+    """One row that was skipped, with the reason and the raw cells.
+
+    ``row_number`` is the CSV record number, where the header is record 1. It is
+    not a file line number, because a quoted field may span several lines.
+    """
 
     row_number: int
     reason: str
@@ -156,6 +160,7 @@ def parse_csv(content: bytes) -> FdSnapshot:
     matches: list[FdMatch] = []
     rejections: list[FdRejection] = []
     data_rows = 0
+    # ``row_number`` counts CSV records, not file lines: the header is record 1.
     for row_number, raw_row in enumerate(reader, start=2):
         # A short row gives ``None`` values, extra fields land under key ``None``.
         cells, short_columns, extra_values = _split_row(cast("dict[str | None, object]", raw_row))
@@ -247,8 +252,12 @@ def _build_match(cells: Mapping[str, str], header: frozenset[str]) -> FdMatch:
     """Turn one row into a match, or raise :class:`_RowError` naming the column."""
     home = _team_name(cells, "HomeTeam")
     away = _team_name(cells, "AwayTeam")
+    if home == away:
+        raise _RowError(f"HomeTeam/AwayTeam: a team cannot play itself ({home!r})")
     fthg = _required_int(cells, "FTHG")
     ftag = _required_int(cells, "FTAG")
+    ftr = _result(cells, fthg=fthg, ftag=ftag)
+    hthg, htag = _half_time_goals(cells, fthg=fthg, ftag=ftag)
     return FdMatch(
         date=_date(cells, "Date"),
         time=_time(cells, "Time"),
@@ -256,9 +265,9 @@ def _build_match(cells: Mapping[str, str], header: frozenset[str]) -> FdMatch:
         away=away,
         fthg=fthg,
         ftag=ftag,
-        ftr=_result(cells, fthg=fthg, ftag=ftag),
-        hthg=_int_value(cells, "HTHG"),
-        htag=_int_value(cells, "HTAG"),
+        ftr=ftr,
+        hthg=hthg,
+        htag=htag,
         stats=FdStats(
             home_shots=_int_value(cells, "HS"),
             away_shots=_int_value(cells, "AS"),
@@ -313,6 +322,29 @@ def _required_int(cells: Mapping[str, str], column: str) -> int:
     if number is None:
         raise _RowError(f"{column}: value is missing")
     return number
+
+
+def _half_time_goals(
+    cells: Mapping[str, str], *, fthg: int, ftag: int
+) -> tuple[int | None, int | None]:
+    """Read both half-time goal counts.
+
+    An empty column yields ``None`` for both, never a rejection. A value in only
+    one column is a rejection, and neither count may exceed its full-time score.
+    """
+    hthg = _int_value(cells, "HTHG")
+    htag = _int_value(cells, "HTAG")
+    if (hthg is None) != (htag is None):
+        empty = "HTAG" if htag is None else "HTHG"
+        raise _RowError(f"HTHG/HTAG: either both half-time goals or neither, but {empty} is empty")
+    if hthg is None or htag is None:
+        return None, None
+    for column, half_time, full_time in (("HTHG", hthg, fthg), ("HTAG", htag, ftag)):
+        if half_time > full_time:
+            raise _RowError(
+                f"{column}: {half_time} half-time goals exceed the {full_time} full-time goals"
+            )
+    return hthg, htag
 
 
 def _decimal_value(cells: Mapping[str, str], column: str) -> Decimal | None:
@@ -386,16 +418,22 @@ def _result(cells: Mapping[str, str], *, fthg: int, ftag: int) -> MatchResult:
 def _odds_quotes(cells: Mapping[str, str], header: frozenset[str]) -> list[OddsQuote]:
     """Build the canonical quotes of a row, in table order.
 
-    A group is emitted only when its three columns exist and all three values are
-    filled; a partially filled group is silently omitted. Two complete groups for
-    the same slot make the row ambiguous and reject it.
+    Every filled cell of a group whose three columns all exist in the header is
+    validated first, so one bad value rejects the row even when the other cells
+    of that group are empty. A group is then emitted only when all three values
+    are filled; a group with one or two valid values is silently omitted, never
+    rejected for being incomplete. Two complete groups for the same slot make
+    the row ambiguous and reject it.
     """
     quotes: list[OddsQuote] = []
     used: set[tuple[Bookmaker, bool]] = set()
     for bookmaker, is_closing, columns in _ODDS_GROUPS:
         if not all(column in header for column in columns):
             continue
-        if not all(_cell(cells, column) for column in columns):
+        # Validate the filled cells first: a bad value is a rejection on its own,
+        # whether or not the group ends up complete.
+        filled = [_odds_decimal(cells, column) for column in columns if _cell(cells, column)]
+        if len(filled) < len(columns):
             continue
         slot = (bookmaker, is_closing)
         if slot in used:
@@ -404,13 +442,8 @@ def _odds_quotes(cells: Mapping[str, str], header: frozenset[str]) -> list[OddsQ
                 f"{', '.join(columns)}: a second {bookmaker} {kind} quote makes the row ambiguous"
             )
         used.add(slot)
+        home, draw, away = filled
         quotes.append(
-            OddsQuote(
-                bookmaker=bookmaker,
-                is_closing=is_closing,
-                home=_odds_decimal(cells, columns[0]),
-                draw=_odds_decimal(cells, columns[1]),
-                away=_odds_decimal(cells, columns[2]),
-            )
+            OddsQuote(bookmaker=bookmaker, is_closing=is_closing, home=home, draw=draw, away=away)
         )
     return quotes
