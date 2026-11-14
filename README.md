@@ -4,9 +4,9 @@ A local system that predicts Spanish La Liga matches, simulates the rest of the 
 
 ## Status
 
-Milestone M0 is done: monorepo skeleton, Docker Compose stack, CI, and pinned tool and image versions.
+Milestone M1 is done: ingestion, team-name normalization, database schema and migrations.
 
-M1 is next: ingestion, team-name normalization, database schema and migrations.
+M2 is next: the core API for teams, matches and standings.
 
 Scope and acceptance criteria live in the [MVP specification](docs/spec/mvp.md). Technical decisions are recorded in the [architecture decision records](docs/adr/).
 
@@ -51,7 +51,7 @@ Prerequisites: Docker with Compose, and `make`. The stack itself needs nothing e
 
 4. Open <http://localhost:3000> for the dashboard and <http://localhost:8000/docs> for the OpenAPI documentation. The dashboard shows `API status: online` when it can reach the API.
 
-The worker is a one-shot job: it runs the ingestion command and exits with status 0. A stopped worker container is the expected end state, not an error. The `migrate` service is the other one-shot job: it applies the migrations and the reference-data seed, and `api` and `worker` wait for it to exit 0.
+The worker is a one-shot job: by default it runs `python -m lmi_worker status`, which prints a report of the ingested data and needs no network, then exits with status 0. A stopped worker container is the expected end state, not an error. Ingestion is a separate, explicit command that downloads the source files: `make ingest` ingests the current season and `make ingest-backfill` ingests every season from 2005-06 on. The `migrate` service is the other one-shot job: it applies the migrations and the reference-data seed, and `api` and `worker` wait for it to exit 0.
 
 `make clean` stops the stack and deletes the containers and the database volume of the `lmi` Compose project.
 
@@ -65,6 +65,8 @@ The worker is a one-shot job: it runs the ingestion command and exits with statu
 | `make down` | Stop the stack and keep its volumes |
 | `make logs` | Follow the logs of every service |
 | `make ps` | Show the state of every service |
+| `make ingest` | Run the football-data and openfootball ingestion for the current season (network) |
+| `make ingest-backfill` | Run the ingestion for every season from 2005-06 through the current one |
 | `make lint` | Run Python and web linters, formatters and type checks |
 | `make test` | Run the Python unit test suite (no database needed) |
 | `make test-integration` | Run the integration tests against a throwaway PostgreSQL container, setting `LMI_ALLOW_DESTRUCTIVE_TESTS=1` for it |

@@ -341,12 +341,16 @@ source = { editable = "apps/worker" }
 dependencies = [
     { name = "httpx" },
     { name = "lmi-core" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx" },
     { name = "lmi-core", editable = "packages/core" },
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
 ]
 
 [[package]]
