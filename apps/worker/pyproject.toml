@@ -3,7 +3,7 @@ name = "lmi-worker"
 version = "0.1.0"
 description = "Ingestion, model fitting and simulation jobs for LMI."
 requires-python = ">=3.14,<3.15"
-dependencies = ["httpx", "lmi-core"]
+dependencies = ["httpx", "lmi-core", "pydantic", "sqlalchemy"]
 
 [tool.uv.sources]
 lmi-core = { workspace = true }
