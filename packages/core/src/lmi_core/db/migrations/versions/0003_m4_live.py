@@ -55,7 +55,8 @@ END $$;
 """Reject every write a table must never receive."""
 
 _GUARD_PREDICTIONS_INSERT = """
-CREATE FUNCTION lmi_predictions_guard_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION lmi_predictions_guard_insert() RETURNS trigger LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 DECLARE kd date; st text;
 BEGIN
   NEW.created_at := now();
