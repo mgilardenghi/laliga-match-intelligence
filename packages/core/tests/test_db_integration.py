@@ -10,7 +10,7 @@ database.
 The tests drive the real command ``python -m lmi_core.db migrate`` in a
 subprocess, so they cover the migration, the seed and the exit code that gates
 the Compose stack, not only the ORM metadata. They reproduce the evidence of a
-correct deployment: eight domain tables plus ``alembic_version``, 22 seasons,
+correct deployment: fifteen domain tables plus ``alembic_version``, 22 seasons,
 one team per distinct canonical name, one alias row per CSV row, a second run
 that inserts nothing, and a conflicting alias remap that fails without
 rewriting anything.
@@ -64,12 +64,16 @@ DOMAIN_TABLES = frozenset(
         "match_odds",
         "match_stats",
         "matches",
+        "prediction_runs",
+        "predictions",
         "seasons",
+        "simulation_runs",
+        "simulation_team_results",
         "team_aliases",
         "teams",
     }
 )
-"""The eight tables of the schema, excluding ``alembic_version``.
+"""The fifteen tables of the schema, excluding ``alembic_version``.
 
 Also the only names :func:`count_rows` accepts, so no table name is interpolated
 from free input.

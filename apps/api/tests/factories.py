@@ -68,6 +68,7 @@ def create_match(
     away_goals: int | None = None,
     ht_home_goals: int | None = None,
     ht_away_goals: int | None = None,
+    withdrawn_at: datetime.datetime | None = None,
 ) -> Match:
     """Insert one fixture and return the ORM row with its generated id.
 
@@ -82,10 +83,24 @@ def create_match(
     half-time score of a played match and default to unknown; the schema
     requires them to be given together and to be at most the full-time score.
 
+    ``withdrawn_at`` is the stamp of a withdrawn fixture, the one the source no
+    longer lists but which is kept because a stored prediction references it. It
+    is given together with ``status="withdrawn"`` and never on its own, because
+    the schema ties the stamp to the status in both directions.
+
     Raises:
         ValueError: the match is played and one of the goal counts is missing,
             because a played row without a complete score cannot be stored.
+        ValueError: ``withdrawn_at`` is given for a status other than
+            ``withdrawn``, or the status is ``withdrawn`` without the stamp,
+            because the ``withdrawn_at_matches_status`` check would reject the
+            row anyway.
     """
+    if withdrawn_at is not None and status != "withdrawn":
+        raise ValueError("withdrawn_at is only valid on a withdrawn match")
+    if status == "withdrawn" and withdrawn_at is None:
+        raise ValueError("a withdrawn match needs its withdrawn_at stamp")
+
     if status == "played":
         result = _result(home_goals, away_goals)
     else:
@@ -108,6 +123,7 @@ def create_match(
         ht_home_goals=ht_home_goals,
         ht_away_goals=ht_away_goals,
         result=result,
+        withdrawn_at=withdrawn_at,
     )
     session.add(row)
     session.flush()

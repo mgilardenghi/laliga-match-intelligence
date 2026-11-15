@@ -209,7 +209,7 @@ def test_upgrade_creates_the_backtest_tables_and_downgrade_restores_0001(
     upgrade(database, "0001")
     assert table_names(database.engine) == TABLES_0001 | {"alembic_version"}
 
-    upgrade(database, "head")
+    upgrade(database, "0002")
 
     assert table_names(database.engine) == TABLES_0001 | BACKTEST_TABLES | {"alembic_version"}
 
@@ -269,7 +269,7 @@ def test_upgrade_creates_the_backtest_tables_and_downgrade_restores_0001(
 
 
 def test_the_migration_chain_has_exactly_one_head() -> None:
-    assert ScriptDirectory(str(MIGRATIONS_DIR)).get_heads() == ["0002"]
+    assert ScriptDirectory(str(MIGRATIONS_DIR)).get_heads() == ["0003"]
 
 
 @dataclass(frozen=True)

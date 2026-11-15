@@ -51,6 +51,7 @@ class RunOutcome:
     rows_read: int = 0
     rows_upserted: int = 0
     rows_removed: int = 0
+    rows_withdrawn: int = 0
     rows_rejected: int = 0
     content_sha256: str | None = None
     error: str | None = None
@@ -190,6 +191,7 @@ def finish_run(factories: sessionmaker[Session], run_id: UUID, outcome: RunOutco
                 rows_read=outcome.rows_read,
                 rows_upserted=outcome.rows_upserted,
                 rows_removed=outcome.rows_removed,
+                rows_withdrawn=outcome.rows_withdrawn,
                 rows_rejected=outcome.rows_rejected,
                 content_sha256=outcome.content_sha256,
                 error=outcome.error,

@@ -1,10 +1,12 @@
 """Command line entry point for the LMI worker.
 
-Two commands exist in M1. ``ingest`` downloads one source file per planned job,
-loads it and records every run; ``status`` prints the current state of the data
-without touching the network. ``python -m lmi_worker`` runs the same entry point,
-and the Compose worker uses ``status`` so starting the stack never contacts a
-source.
+``ingest`` and ``status`` exist since M1. ``ingest`` downloads one source file
+per planned job, loads it and records every run; ``status`` prints the current
+state of the data without touching the network. The M4 commands ``predict``,
+``simulate`` and ``daily`` are registered here, but their bodies land in a later
+M4 task, so each of them is a stub that exits with code 2. ``python -m
+lmi_worker`` runs the same entry point, and the Compose worker uses ``status``
+so starting the stack never contacts a source.
 
 The plan is built before the settings and the engine on purpose: a usage error,
 an out-of-range season or an impossible source selection therefore exits with
@@ -80,7 +82,18 @@ def build_parser() -> argparse.ArgumentParser:
         "status",
         help="Print the stored seasons, table counts, latest runs and digest.",
     )
-
+    subparsers.add_parser(
+        "predict",
+        help="Fit the model and store the live predictions (not implemented yet).",
+    )
+    subparsers.add_parser(
+        "simulate",
+        help="Run the season simulator (not implemented yet).",
+    )
+    subparsers.add_parser(
+        "daily",
+        help="Run the daily ingestion, fitting and prediction job (not implemented yet).",
+    )
     add_backtest_parser(subparsers)
     return parser
 
@@ -105,6 +118,18 @@ def main(
         return _status()
     if args.command == "backtest":
         return run_backtest_command(args)
+    if args.command == "predict":
+        from lmi_worker.predict import main as predict_main
+
+        return predict_main()
+    if args.command == "simulate":
+        from lmi_worker.simulate import main as simulate_main
+
+        return simulate_main()
+    if args.command == "daily":
+        from lmi_worker.daily import main as daily_main
+
+        return daily_main()
     raise ValueError(f"unhandled command: {args.command}")
 
 
@@ -209,13 +234,14 @@ def _log_result(result: JobResult) -> None:
     """Log the one-line outcome of one job."""
     run_id = "none" if result.run_id is None else str(result.run_id)
     logger.info(
-        "%s %s %s read=%d upserted=%d removed=%d rejected=%d run=%s",
+        "%s %s %s read=%d upserted=%d removed=%d withdrawn=%d rejected=%d run=%s",
         result.job.source,
         result.job.season.code,
         result.status,
         result.rows_read,
         result.rows_upserted,
         result.rows_removed,
+        result.rows_withdrawn,
         result.rows_rejected,
         run_id,
     )
