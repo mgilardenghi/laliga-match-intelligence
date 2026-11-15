@@ -307,3 +307,147 @@ Index(
     "ix_ingestion_rejections_run_id",
     IngestionRejection.run_id,
 )
+
+BACKTEST_MODEL_NAMES = ("home_win", "base_rate", "market", "elo", "dixon_coles")
+"""The models a backtest scores, in report order."""
+
+_BACKTEST_MODEL_NAMES_SQL = ", ".join(f"'{name}'" for name in BACKTEST_MODEL_NAMES)
+"""The model names as one SQL list literal, so both CHECK constraints agree."""
+
+
+class BacktestRun(Base):
+    """One execution of the walk-forward backtest.
+
+    A run is inserted as ``running`` before any metric row exists and is then
+    moved to ``succeeded`` or ``failed``. Every other column is written by the
+    worker and never updated afterwards.
+    """
+
+    __tablename__ = "backtest_runs"
+    __table_args__ = (
+        CheckConstraint("status IN ('running', 'succeeded', 'failed')", name="status_valid"),
+        CheckConstraint(
+            "(status = 'running') = (finished_at IS NULL)",
+            name="finished_matches_status",
+        ),
+        CheckConstraint("step_days >= 1", name="step_days_at_least_one"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    started_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    seed: Mapped[int] = mapped_column(Integer, nullable=False)
+    from_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    step_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    code_version: Mapped[str] = mapped_column(Text, nullable=False)
+    config: Mapped[dict[str, object]] = mapped_column(postgresql.JSONB, nullable=False)
+    data_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    n_matches: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+Index(
+    "ix_backtest_runs_status_started_at",
+    BacktestRun.status,
+    text("started_at DESC"),
+)
+
+
+class BacktestMetric(Base):
+    """One metric row per run, model, season and subset.
+
+    ``season_id`` is NULL for the row that covers every scored season. The
+    tables of M3 reference ``seasons`` only: per-match backtest predictions are
+    not stored here.
+    """
+
+    __tablename__ = "backtest_metrics"
+    __table_args__ = (
+        CheckConstraint(f"model IN ({_BACKTEST_MODEL_NAMES_SQL})", name="model_valid"),
+        CheckConstraint("subset IN ('all', 'common')", name="subset_valid"),
+        CheckConstraint("n_matches > 0", name="n_matches_positive"),
+        CheckConstraint("n_fixtures >= n_matches", name="n_fixtures_at_least_n_matches"),
+        CheckConstraint("log_loss >= 0", name="log_loss_non_negative"),
+        CheckConstraint("brier BETWEEN 0 AND 2", name="brier_in_range"),
+        CheckConstraint("rps BETWEEN 0 AND 1", name="rps_in_range"),
+        CheckConstraint("accuracy BETWEEN 0 AND 1", name="accuracy_in_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id"), nullable=True)
+    subset: Mapped[str] = mapped_column(Text, nullable=False)
+    n_matches: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_fixtures: Mapped[int] = mapped_column(Integer, nullable=False)
+    log_loss: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    brier: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    rps: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    accuracy: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+
+
+# Two partial unique indexes instead of one unique constraint that includes
+# season_id: a unique constraint does not treat two NULLs as equal, so it would
+# accept a second overall row. ``NULLS NOT DISTINCT`` needs PostgreSQL 15+.
+Index(
+    "ux_backtest_metrics_season",
+    BacktestMetric.run_id,
+    BacktestMetric.model,
+    BacktestMetric.subset,
+    BacktestMetric.season_id,
+    unique=True,
+    postgresql_where=text("season_id IS NOT NULL"),
+)
+Index(
+    "ux_backtest_metrics_overall",
+    BacktestMetric.run_id,
+    BacktestMetric.model,
+    BacktestMetric.subset,
+    unique=True,
+    postgresql_where=text("season_id IS NULL"),
+)
+
+
+class BacktestCalibration(Base):
+    """One calibration bin per run, model, outcome and bin index."""
+
+    __tablename__ = "backtest_calibration"
+    __table_args__ = (
+        UniqueConstraint("run_id", "model", "outcome", "bin_index"),
+        CheckConstraint(f"model IN ({_BACKTEST_MODEL_NAMES_SQL})", name="model_valid"),
+        CheckConstraint("outcome IN ('H', 'D', 'A')", name="outcome_valid"),
+        CheckConstraint("bin_index BETWEEN 0 AND 99", name="bin_index_in_range"),
+        CheckConstraint("n >= 0", name="n_non_negative"),
+        CheckConstraint(
+            "(n = 0) = (mean_predicted IS NULL)",
+            name="empty_bin_has_no_mean",
+        ),
+        CheckConstraint(
+            "(n = 0) = (observed_frequency IS NULL)",
+            name="empty_bin_has_no_frequency",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(CHAR(1), nullable=False)
+    bin_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    bin_lower: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    bin_upper: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    n: Mapped[int] = mapped_column(Integer, nullable=False)
+    mean_predicted: Mapped[float | None] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=True)
+    observed_frequency: Mapped[float | None] = mapped_column(
+        postgresql.DOUBLE_PRECISION, nullable=True
+    )
