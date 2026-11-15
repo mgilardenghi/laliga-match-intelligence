@@ -155,6 +155,40 @@ def test_list_matches_by_status_returns_only_that_status(
     assert page["items"][0]["result"] == "H"
 
 
+def test_list_matches_returns_a_withdrawn_match_with_and_without_the_status_filter(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A withdrawn fixture stays readable by the resource.
+
+    The row is kept because a stored prediction references it, so the list must
+    page it like any other fixture even though the source no longer lists it;
+    the status filter selects it explicitly.
+    """
+    season = create_season(db_session)
+    alpha = create_team(db_session, name="Test FC Alpha")
+    beta = create_team(db_session, name="Test FC Beta")
+    withdrawn = create_match(
+        db_session,
+        season=season,
+        home=alpha,
+        away=beta,
+        kickoff_date=datetime.date(2098, 8, 15),
+        status="withdrawn",
+        withdrawn_at=datetime.datetime(2098, 8, 10, 12, 0, tzinfo=datetime.UTC),
+    )
+
+    filtered = api_client.get("/v1/matches", params={"season": season.code, "status": "withdrawn"})
+    unfiltered = api_client.get("/v1/matches", params={"season": season.code})
+
+    assert filtered.status_code == 200
+    page = filtered.json()
+    assert [item["id"] for item in page["items"]] == [withdrawn.id]
+    assert page["items"][0]["status"] == "withdrawn"
+    assert page["total"] == 1
+    assert unfiltered.status_code == 200
+    assert [item["id"] for item in unfiltered.json()["items"]] == [withdrawn.id]
+
+
 def test_list_matches_between_two_dates_includes_both_boundaries(
     api_client: TestClient, db_session: Session
 ) -> None:

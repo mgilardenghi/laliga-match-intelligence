@@ -19,6 +19,12 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 strict = true
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+# Celery ships no type information. The project does not add the celery-types
+# stub package, because ADR-0003 fixes the dependency list.
+module = ["celery", "celery.*", "kombu", "kombu.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["apps/api/tests", "apps/worker/tests", "packages/core/tests"]
 # Integration tests need a live PostgreSQL. They are opt-in: `make test` and the

@@ -8,7 +8,10 @@ nothing behind.
 
 Every statement is checked against the plan. An insert must return its new id, an
 update or an upsert must touch exactly one row, and a delete must remove exactly
-the row the plan named. The delete of a match additionally carries ``status =
+the row the plan named. The removal of a match additionally treats a stored
+prediction as a reason to keep the row: a candidate that carries one is
+withdrawn, never deleted, so an immutable prediction and its foreign key stay
+valid. A delete of a candidate without a prediction carries ``status =
 'scheduled'``, so a guard that somehow addresses a played match fails loudly
 instead of erasing a result with its statistics and its odds.
 
@@ -20,11 +23,11 @@ sources loading the same season still serialise on the season lock.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import fields
+from dataclasses import dataclass, fields
 
-from lmi_core.db.models import Match, MatchOdd, MatchStat, Season
+from lmi_core.db.models import Match, MatchOdd, MatchStat, Prediction, Season
 from lmi_core.db.seed import SEASON_START_YEARS, season_code
-from sqlalchemy import delete, func, insert, select, text, update
+from sqlalchemy import delete, exists, func, insert, select, text, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
@@ -46,6 +49,20 @@ LOCK_CLASS = 0x4C4D49
 
 MARKET = "1x2"
 """The only market the loaders write; stored odds of other markets are untouched."""
+
+
+@dataclass(frozen=True)
+class AppliedRows:
+    """The two removal outcomes of one plan.
+
+    ``removed`` counts the candidates that were deleted and ``withdrawn`` the
+    candidates that were kept as a withdrawn row because a prediction references
+    them, so the two numbers together account for every candidate the plan named.
+    """
+
+    removed: int = 0
+    withdrawn: int = 0
+
 
 _COVERED_FIRST = season_code(min(SEASON_START_YEARS))
 _COVERED_LAST = season_code(max(SEASON_START_YEARS))
@@ -125,14 +142,19 @@ def load_season(session: Session, season_id: int) -> dict[MatchKey, StoredMatch]
     }
 
 
-def apply_plan(session: Session, season_id: int, plan: MergePlan) -> None:
+def apply_plan(session: Session, season_id: int, plan: MergePlan) -> AppliedRows:
     """Apply exactly the writes of ``plan``, in the order the plan depends on.
 
     Inserts run first, one match at a time, so a new match gets its id before its
     statistics and its odds are written. Updates follow, then the statistics and
-    odds upserts, then the odds deletes and finally the match deletes; a delete
-    cannot orphan a row that the same plan touches because the plan addresses
-    stored matches by id.
+    odds upserts, then the odds deletes and finally the removal of the matches the
+    plan no longer sees. A removal candidate that carries a stored prediction is
+    withdrawn and counted in :attr:`AppliedRows.withdrawn`; one without a
+    prediction is deleted and counted in :attr:`AppliedRows.removed`.
+
+    Returns:
+        The observed removal outcome of the plan. Every other write is already
+        visible in the session, so only the two removal branches need reporting.
 
     Raises:
         RuntimeError: one statement affected a different number of rows than the
@@ -152,8 +174,14 @@ def apply_plan(session: Session, season_id: int, plan: MergePlan) -> None:
         _upsert_odds(session, match_id, slot, prices)
     for match_id, slot in plan.odds_deletes:
         _delete_odds(session, match_id, slot)
+    removed = 0
+    withdrawn = 0
     for match_id in plan.deletes:
-        _delete_scheduled_match(session, match_id)
+        if _withdraw_or_delete_match(session, match_id):
+            withdrawn += 1
+        else:
+            removed += 1
+    return AppliedRows(removed=removed, withdrawn=withdrawn)
 
 
 def _match_state(match: Match) -> MatchState:
@@ -278,14 +306,23 @@ def _insert_odds(session: Session, match_id: int, odds: Mapping[OddsSlot, Prices
 
 
 def _update_match(session: Session, match_id: int, changes: dict[str, object]) -> None:
-    """Apply the planned column changes to one stored match and stamp ``updated_at``."""
+    """Apply the planned column changes to one stored match and stamp ``updated_at``.
+
+    A change of ``status`` to ``scheduled`` or ``played`` also clears
+    ``withdrawn_at`` in the same statement: a restored or newly played match loses
+    its withdrawal stamp at the moment its status changes, which is what the
+    ``(status = 'withdrawn') = (withdrawn_at IS NOT NULL)`` check requires.
+    """
+    values = dict(changes)
+    if values.get("status") in ("scheduled", "played"):
+        values["withdrawn_at"] = None
     rows = session.execute(
         update(Match)
         .where(Match.id == match_id)
-        .values(**changes, updated_at=func.now())
+        .values(**values, updated_at=func.now())
         .returning(Match.id)
     ).all()
-    _expect_rows(rows, 1, f"update matches for match {match_id} with {sorted(changes)}")
+    _expect_rows(rows, 1, f"update matches for match {match_id} with {sorted(values)}")
 
 
 def _upsert_stats(session: Session, match_id: int, stats: StatsState) -> None:
@@ -340,6 +377,48 @@ def _delete_odds(session: Session, match_id: int, slot: OddsSlot) -> None:
         rows,
         1,
         f"delete from match_odds match {match_id} slot {slot.bookmaker}/closing={slot.is_closing}",
+    )
+
+
+def _withdraw_or_delete_match(session: Session, match_id: int) -> bool:
+    """Remove one planned match, withdrawing it while a prediction references it.
+
+    A stored prediction is immutable and its foreign key restricts a delete, so
+    deleting the match would either fail or destroy a prediction a reader may
+    still score. The row is therefore kept as ``withdrawn`` with its withdrawal
+    stamp, and only a candidate without any prediction is deleted.
+
+    Returns:
+        ``True`` when the match was withdrawn, ``False`` when it was deleted.
+    """
+    predicted = bool(session.scalar(select(exists().where(Prediction.match_id == match_id))))
+    if predicted:
+        _withdraw_scheduled_match(session, match_id)
+        return True
+    _delete_scheduled_match(session, match_id)
+    return False
+
+
+def _withdraw_scheduled_match(session: Session, match_id: int) -> None:
+    """Withdraw one stored match, but only while it is still scheduled.
+
+    The statement carries ``status = 'scheduled'`` for the same reason the delete
+    does: a played match is a contradiction rather than a removal candidate, so
+    the statement affects no row and the caller fails instead of hiding a result.
+    """
+    rows = session.execute(
+        update(Match)
+        .where(
+            Match.id == match_id,
+            Match.status == "scheduled",
+        )
+        .values(status="withdrawn", withdrawn_at=func.now(), updated_at=func.now())
+        .returning(Match.id)
+    ).all()
+    _expect_rows(
+        rows,
+        1,
+        f"update matches to withdrawn where status = 'scheduled' for match {match_id}",
     )
 
 
