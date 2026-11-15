@@ -44,11 +44,12 @@ from lmi_core.results.schemas import (
 from lmi_worker import backtest
 from lmi_worker.backtest import format_table, run_backtest_command, scored_match_count
 from lmi_worker.cli import build_parser
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 if TYPE_CHECKING:
     from conftest import MigratedDatabase
+    from sqlalchemy.orm import Session
 
 _MATCHES_PER_WEEK = 10
 _WEEKS = 19
@@ -87,6 +88,9 @@ class _SessionStand:
 
     def execute(self, statement: object) -> list[tuple[int, str]]:
         return self.season_rows
+
+    def rollback(self) -> None:
+        """Do nothing: the stand holds no transaction to roll back."""
 
 
 def _synthetic_history(seasons: Sequence[tuple[int, int]]) -> MatchData:
@@ -558,18 +562,21 @@ def test_the_save_path_stores_one_run_and_the_no_save_path_is_reproducible(
     with migrated_engine.factories() as session:
         runs = list(session.scalars(select(BacktestRun)))
         assert [run.status for run in runs] == ["succeeded"]
-        stored_values = [
-            value
-            for row in session.scalars(
-                select(BacktestMetric).where(BacktestMetric.run_id == runs[0].id)
-            )
-            for value in (row.log_loss, row.brier, row.rps, row.accuracy)
-        ]
-    assert stored_values
-    # finish_run stores the digits the run computed: rounding before the write
-    # would still leave rows here, so one value must keep more than the display
-    # precision of the printed table.
-    assert any(value != round(value, backtest.DISPLAY_DIGITS) for value in stored_values)
+        rows = list(
+            session.scalars(select(BacktestMetric).where(BacktestMetric.run_id == runs[0].id))
+        )
+    stored_values = {
+        "log_loss": [row.log_loss for row in rows],
+        "brier": [row.brier for row in rows],
+        "rps": [row.rps for row in rows],
+        "accuracy": [row.accuracy for row in rows],
+    }
+    assert stored_values["log_loss"]
+    # finish_run stores the digits the run computed: rounding one metric before
+    # the write would still leave rows here, so each column on its own must keep
+    # a value beyond the display precision of the printed table.
+    for column, values in stored_values.items():
+        assert any(value != round(value, backtest.DISPLAY_DIGITS) for value in values), column
 
     documents = []
     for _ in range(2):
@@ -582,3 +589,43 @@ def test_the_save_path_stores_one_run_and_the_no_save_path_is_reproducible(
     assert documents[0]["run"]["data_fingerprint"] == documents[1]["run"]["data_fingerprint"]
     with migrated_engine.factories() as session:
         assert session.scalar(select(func.count()).select_from(BacktestRun)) == 1
+
+
+@pytest.mark.integration
+def test_a_database_error_after_the_run_starts_still_marks_it_failed(
+    migrated_engine: MigratedDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seasons = _lowest_seasons(migrated_engine)
+    data = _synthetic_history([(season_id, start_year) for season_id, _, start_year in seasons])
+
+    def load(other: object) -> MatchData:
+        return data
+
+    def abort(session: Session) -> dict[int, str]:
+        # The server rejects the statement, which aborts the transaction of the
+        # session the command opened: the exact state in which the failure of
+        # the run itself has to be written from a usable session again.
+        session.execute(text("SELECT 1 / 0"))
+        raise AssertionError("the server must reject the statement")
+
+    # _season_codes runs on the session start_run wrote through, so the error it
+    # raises leaves no clean transaction behind for the failed transition.
+    monkeypatch.setattr(backtest, "load_match_data", load)
+    monkeypatch.setattr(backtest, "_season_codes", abort)
+
+    arguments = ["backtest", "--models", ",".join(_METRIC_MODELS)]
+    arguments += ["--from-year", str(seasons[0][2])]
+
+    code = run_backtest_command(build_parser().parse_args(arguments))
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out == ""
+    # A separate session, so the assertion reads what the command committed and
+    # not what its own session still holds.
+    with migrated_engine.factories() as session:
+        runs = list(session.scalars(select(BacktestRun)))
+        assert [run.status for run in runs] == ["failed"]
+        assert runs[0].error is not None

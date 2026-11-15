@@ -367,10 +367,18 @@ def _season_codes(session: Session) -> dict[int, str]:
 
 
 def _mark_failed(session: Session, run_id: uuid.UUID | None, *, error: str) -> None:
-    """Record the failure of ``run_id`` on a best-effort basis."""
+    """Record the failure of ``run_id`` on a best-effort basis.
+
+    The caller's session may be the one whose transaction just aborted: the
+    query behind a failed step runs on it, and an aborted transaction rejects
+    every later statement, ``fail_run``'s own SELECT included. The rollback
+    first recovers the session, so the run is still transitioned out of
+    ``running``; a rollback that fails itself leaves the run to the caller.
+    """
     if run_id is None:
         return
     try:
+        session.rollback()
         fail_run(session, run_id, error=error)
     except ValueError, SQLAlchemyError:
         # The run may already have been finished, or the database may be gone;
