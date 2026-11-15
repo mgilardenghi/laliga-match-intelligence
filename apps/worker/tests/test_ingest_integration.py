@@ -343,6 +343,7 @@ def test_a_second_identical_run_changes_nothing(migrated_engine: MigratedDatabas
     assert [result.status for result in second] == ["succeeded", "succeeded", "succeeded"]
     assert [result.rows_upserted for result in second] == [0, 0, 0]
     assert [result.rows_removed for result in second] == [0, 0, 0]
+    assert [result.rows_withdrawn for result in second] == [0, 0, 0]
     assert [result.rows_rejected for result in second] == [0, 0, 0]
     after = collect_status(db.engine)
     assert after.seasons == before.seasons
@@ -504,13 +505,19 @@ def test_a_scheduled_fixture_missing_from_the_snapshot_is_deleted(
     assert result.rows_read == 380
     assert result.rows_upserted == 380
     assert result.rows_removed == 1
+    assert result.rows_withdrawn == 0
     with db.factories() as session:
         assert session.get(Match, stale) is None
     rows = _match_rows(db, CURRENT.code)
     assert len(rows) == 380
     assert sum(1 for row in rows if row[2] == "scheduled") == 380
     run = _runs(db)[0]
-    assert (run.status, run.rows_upserted, run.rows_removed) == ("succeeded", 380, 1)
+    assert (run.status, run.rows_upserted, run.rows_removed, run.rows_withdrawn) == (
+        "succeeded",
+        380,
+        1,
+        0,
+    )
 
 
 def test_a_played_fixture_missing_from_the_snapshot_fails_the_run_without_writing(

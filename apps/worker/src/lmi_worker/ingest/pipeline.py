@@ -71,6 +71,7 @@ class JobResult:
     rows_read: int = 0
     rows_upserted: int = 0
     rows_removed: int = 0
+    rows_withdrawn: int = 0
     rows_rejected: int = 0
     error: str | None = None
 
@@ -86,6 +87,7 @@ class _Progress:
 
     rows_upserted: int = 0
     rows_removed: int = 0
+    rows_withdrawn: int = 0
 
 
 def run_job(engine: Engine, job: Job, fetch: Fetcher) -> JobResult:
@@ -139,6 +141,7 @@ def run_job(engine: Engine, job: Job, fetch: Fetcher) -> JobResult:
                     rows_read=rows_read,
                     rows_upserted=progress.rows_upserted,
                     rows_removed=progress.rows_removed,
+                    rows_withdrawn=progress.rows_withdrawn,
                     rows_rejected=rows_rejected,
                     content_sha256=content_sha256,
                     error=error,
@@ -151,6 +154,7 @@ def run_job(engine: Engine, job: Job, fetch: Fetcher) -> JobResult:
                 rows_read=rows_read,
                 rows_upserted=progress.rows_upserted,
                 rows_removed=progress.rows_removed,
+                rows_withdrawn=progress.rows_withdrawn,
                 rows_rejected=rows_rejected,
                 error=error,
             )
@@ -164,6 +168,7 @@ def run_job(engine: Engine, job: Job, fetch: Fetcher) -> JobResult:
                     rows_read=rows_read,
                     rows_upserted=progress.rows_upserted,
                     rows_removed=progress.rows_removed,
+                    rows_withdrawn=progress.rows_withdrawn,
                     rows_rejected=rows_rejected,
                     content_sha256=content_sha256,
                     error=message,
@@ -177,6 +182,7 @@ def run_job(engine: Engine, job: Job, fetch: Fetcher) -> JobResult:
                 rows_read=rows_read,
                 rows_upserted=progress.rows_upserted,
                 rows_removed=progress.rows_removed,
+                rows_withdrawn=progress.rows_withdrawn,
                 rows_rejected=rows_rejected,
                 error=message,
             )
@@ -189,6 +195,7 @@ def run_job(engine: Engine, job: Job, fetch: Fetcher) -> JobResult:
                 rows_read=rows_read,
                 rows_upserted=progress.rows_upserted,
                 rows_removed=progress.rows_removed,
+                rows_withdrawn=progress.rows_withdrawn,
                 rows_rejected=rows_rejected,
                 content_sha256=content_sha256,
             ),
@@ -200,6 +207,7 @@ def run_job(engine: Engine, job: Job, fetch: Fetcher) -> JobResult:
             rows_read=rows_read,
             rows_upserted=progress.rows_upserted,
             rows_removed=progress.rows_removed,
+            rows_withdrawn=progress.rows_withdrawn,
             rows_rejected=rows_rejected,
         )
 
@@ -263,13 +271,15 @@ def _load(
             if fixtures is None:
                 raise ValueError("the openfootball fixture list is missing")
             plan = _openfootball_plan(session, job, season.id, fixtures)
-        apply_plan(session, season.id, plan)
+        applied = apply_plan(session, season.id, plan)
         if fixtures is not None:
             _assert_full_season_stored(session, season.id, len(fixtures))
         rows_upserted = plan.rows_upserted
-        rows_removed = plan.rows_removed
+        rows_removed = applied.removed
+        rows_withdrawn = applied.withdrawn
     progress.rows_upserted = rows_upserted
     progress.rows_removed = rows_removed
+    progress.rows_withdrawn = rows_withdrawn
 
 
 def _football_data_plan(
@@ -310,9 +320,16 @@ def _openfootball_plan(
 
 
 def _assert_full_season_stored(session: Session, season_id: int, expected: int) -> None:
-    """Fail unless the season stores exactly the fixtures of the snapshot."""
+    """Fail unless the season stores exactly the fixtures of the snapshot.
+
+    Only the matches that are not ``withdrawn`` are counted: a fixture the loader
+    no longer sees stays stored as a withdrawn row when a prediction references
+    it, and that row must not make the snapshot look incomplete.
+    """
     stored = session.scalar(
-        select(func.count()).select_from(Match).where(Match.season_id == season_id)
+        select(func.count())
+        .select_from(Match)
+        .where(Match.season_id == season_id, Match.status != "withdrawn")
     )
     if int(stored or 0) != expected:
         raise RuntimeError(

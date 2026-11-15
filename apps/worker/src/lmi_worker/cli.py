@@ -204,13 +204,14 @@ def _log_result(result: JobResult) -> None:
     """Log the one-line outcome of one job."""
     run_id = "none" if result.run_id is None else str(result.run_id)
     logger.info(
-        "%s %s %s read=%d upserted=%d removed=%d rejected=%d run=%s",
+        "%s %s %s read=%d upserted=%d removed=%d withdrawn=%d rejected=%d run=%s",
         result.job.source,
         result.job.season.code,
         result.status,
         result.rows_read,
         result.rows_upserted,
         result.rows_removed,
+        result.rows_withdrawn,
         result.rows_rejected,
         run_id,
     )

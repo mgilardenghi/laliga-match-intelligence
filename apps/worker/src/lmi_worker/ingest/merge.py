@@ -141,6 +141,10 @@ class MergePlan:
     ``updates`` holds only the columns that differ from the stored row, so a
     second identical run writes nothing. ``notes`` records differences that the
     merge deliberately does not apply.
+
+    ``deletes`` is the list of removal candidates: stored match ids a loader no
+    longer sees. Whether one of them is deleted or withdrawn depends on the
+    stored predictions the store finds, so this layer only names candidates.
     """
 
     inserts: list[FdRecord | OfRecord] = field(default_factory=list)
@@ -169,7 +173,11 @@ class MergePlan:
 
     @property
     def rows_removed(self) -> int:
-        """The number of stored matches the plan deletes."""
+        """The number of stored matches the plan proposes to remove.
+
+        A candidate is not necessarily deleted: the store withdraws the ones that
+        carry a stored prediction, so the applied count can be lower.
+        """
         return len(self.deletes)
 
 
@@ -331,6 +339,12 @@ def plan_openfootball(
     match keeps its date, time, status and goals; only a ``NULL`` matchday is
     filled, and a different non-NULL matchday is noted instead of changed.
 
+    A stored ``withdrawn`` match that the snapshot lists again is restored to
+    ``scheduled`` in the same update as its date and matchday, because a
+    deployment of the fixture exists after all. A stored ``withdrawn`` match the
+    snapshot omits stays withdrawn and is written nowhere. Every other stored
+    match the snapshot omits becomes a removal candidate for the store.
+
     Raises:
         SourceConflict: a stored played match is absent from the snapshot. A full
             fixture list must contain every played match, so its absence means
@@ -355,10 +369,14 @@ def plan_openfootball(
                 )
             continue
         changes = _openfootball_changes(existing.state, record)
+        if existing.state.status == "withdrawn":
+            # The fixture is deployed again: the row is restored in the same
+            # statement that fixes its date and matchday.
+            changes["status"] = "scheduled"
         if changes:
             plan.updates.append((existing.id, changes))
     for key, existing in stored.items():
-        if key in seen:
+        if key in seen or existing.state.status == "withdrawn":
             continue
         if existing.state.status == "played":
             missing.append(existing.id)

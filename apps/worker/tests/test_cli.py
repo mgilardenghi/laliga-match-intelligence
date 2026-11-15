@@ -215,11 +215,11 @@ def test_the_command_line_logs_one_line_per_job_and_the_summary(
     assert code == 1
     assert engine.disposed is True
     assert [record.getMessage() for record in caplog.records] == [
-        "football_data 2005-06 succeeded read=380 upserted=380 removed=0 rejected=0 "
-        "run=00000000-0000-0000-0000-000000000001",
-        "football_data 2006-07 failed read=380 upserted=0 removed=0 rejected=1 "
+        "football_data 2005-06 succeeded read=380 upserted=380 removed=0 withdrawn=0 "
+        "rejected=0 run=00000000-0000-0000-0000-000000000001",
+        "football_data 2006-07 failed read=380 upserted=0 removed=0 withdrawn=0 rejected=1 "
         "run=00000000-0000-0000-0000-000000000002",
-        "openfootball 2026-27 locked read=0 upserted=0 removed=0 rejected=0 run=none",
+        "openfootball 2026-27 locked read=0 upserted=0 removed=0 withdrawn=0 rejected=0 run=none",
         "ingest: 1 succeeded, 2 failed",
     ]
 
