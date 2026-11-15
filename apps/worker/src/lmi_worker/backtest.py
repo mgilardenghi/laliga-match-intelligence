@@ -87,6 +87,9 @@ _ODDS_LABELS: Final = ("pinnacle", "market_avg", "bet365", "none")
 _METRIC_COLUMNS: Final = ("coverage", "log_loss", "brier", "rps", "accuracy")
 """The value columns every metric table shows, right aligned at display precision."""
 
+_NO_DATA_LINE: Final = "no model has a forecast in this scope"
+"""The line a metric table carries when its scope has no row at all."""
+
 _MODEL_WIDTH = 12
 _COUNT_WIDTH = 5
 _VALUE_WIDTH = 12
@@ -280,26 +283,28 @@ def _backtest(args: argparse.Namespace, session: Session, started: float) -> int
     )
     try:
         report = run_backtest(data, config)
+        season_codes = _season_codes(session)
+        # The header of a run that is not stored yet: its identity stays null, and
+        # the save path replaces the whole response with the stored one below.
+        header = BacktestRunOut(
+            id=None,
+            started_at=None,
+            finished_at=None,
+            seed=args.seed,
+            from_year=args.from_year,
+            step_days=args.step_days,
+            code_version=installed_code_version(),
+            data_fingerprint=report.data_fingerprint,
+            n_matches=n_matches,
+        )
+        response = report_to_response(report, run=header, models=models, season_codes=season_codes)
     except Exception as error:
+        # Everything between start_run and finish_run sits under this guard: a
+        # run left running by an escaping exception would never be transitioned,
+        # because nothing else in the system does it.
         _mark_failed(session, run_id, error=str(error))
         print(f"backtest: {error}", file=sys.stderr)
         return 1
-
-    season_codes = _season_codes(session)
-    # The header of a run that is not stored yet: its identity stays null, and
-    # the save path replaces the whole response with the stored one below.
-    header = BacktestRunOut(
-        id=None,
-        started_at=None,
-        finished_at=None,
-        seed=args.seed,
-        from_year=args.from_year,
-        step_days=args.step_days,
-        code_version=installed_code_version(),
-        data_fingerprint=report.data_fingerprint,
-        n_matches=n_matches,
-    )
-    response = report_to_response(report, run=header, models=models, season_codes=season_codes)
 
     if run_id is not None:
         try:
@@ -448,8 +453,16 @@ def _coverage_lines(
 
 
 def _table_lines(title: str, rows: Sequence[MetricRow]) -> list[str]:
-    """Return one metric table: a title, its header and one row per model."""
+    """Return one metric table: a title, its header and one row per model.
+
+    The runner emits no row for a scope without a scored forecast, so a table
+    can be empty; :data:`_NO_DATA_LINE` says so instead of leaving a bare header
+    that reads like a rendering fault.
+    """
     lines = [title, _metric_header()]
+    if not rows:
+        lines.append(_NO_DATA_LINE)
+        return lines
     lines.extend(_metric_line(row) for row in rows)
     return lines
 

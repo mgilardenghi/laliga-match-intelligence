@@ -144,6 +144,30 @@ def test_rounding_is_display_only_and_leaves_coverage_exact() -> None:
         assert (displayed.observed_frequency is None) == (plain.observed_frequency is None)
 
 
+def test_a_coverage_that_needs_more_than_six_decimals_survives_rounding() -> None:
+    data = make_synthetic_league()
+    report = run_backtest(data, BacktestConfig(models=MODELS))
+    scores = list(report.scores)
+    replaced = replace(scores[0], n_matches=87, n_fixtures=90)
+    report = replace(report, scores=[replaced, *scores[1:]])
+
+    response = _response(report, data)
+    rounded = round_response(response, digits=DISPLAY_DECIMALS)
+
+    season_code = None if replaced.season_id is None else SEASON_CODES[replaced.season_id]
+    row = next(
+        row
+        for row in rounded.metrics
+        if (row.model, row.season_code, row.subset)
+        == (replaced.model, season_code, replaced.subset)
+    )
+    # The DTO rejects a coverage that drifts from n_matches / n_fixtures by more
+    # than 1e-12, so the ratio must stay exact: rounding it would make the row
+    # unbuildable, which is why round_response leaves this field alone.
+    assert round(87 / 90, DISPLAY_DECIMALS) != 87 / 90
+    assert row.coverage == 87 / 90
+
+
 def test_the_rounded_response_round_trips_through_its_json() -> None:
     data = make_synthetic_league()
     response = _response(run_backtest(data, BacktestConfig(models=MODELS)), data)

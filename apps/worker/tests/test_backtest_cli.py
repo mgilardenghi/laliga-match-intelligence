@@ -45,6 +45,7 @@ from lmi_worker import backtest
 from lmi_worker.backtest import format_table, run_backtest_command, scored_match_count
 from lmi_worker.cli import build_parser
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 if TYPE_CHECKING:
     from conftest import MigratedDatabase
@@ -339,6 +340,51 @@ def test_the_table_carries_the_header_the_counts_and_the_clip_note() -> None:
     assert again == text
 
 
+def test_a_season_without_a_common_row_says_so_instead_of_showing_a_header() -> None:
+    response = _season_without_a_common_row()
+    data = _small_history()
+
+    lines = format_table(
+        response, data=data, season_codes={_SMALL_SEASON: _SMALL_CODE}
+    ).splitlines()
+
+    season_start = lines.index(f"season {_SMALL_CODE} common")
+    assert lines[season_start + 2] == "no model has a forecast in this scope"
+    # Nothing invented follows the line: the next block starts right after the
+    # blank separator, so no numeric row sits under the short explanation.
+    assert lines[season_start + 3] == ""
+    assert lines[season_start + 4] == "overall all"
+
+
+def test_a_failure_after_the_run_starts_marks_it_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    data = _synthetic_history([(1, 2007), (2, 2008)])
+    _install_stands(monkeypatch, data=data, season_rows=[(1, "2007-08"), (2, "2008-09")])
+    failed: list[dict[str, object]] = []
+
+    def broken_season_codes(session: object) -> dict[int, str]:
+        raise SQLAlchemyError("gone")
+
+    def fail(other: object, run_id: UUID, *, error: str) -> None:
+        failed.append({"run_id": run_id, "error": error})
+
+    # Every step after start_run is under the same guard, so a failure below it
+    # must both exit non-zero and leave no run behind as running.
+    monkeypatch.setattr(backtest, "_season_codes", broken_season_codes)
+    monkeypatch.setattr(backtest, "fail_run", fail)
+
+    argv = ["backtest", "--models", ",".join(_METRIC_MODELS), "--step-days", "7"]
+    code = run_backtest_command(build_parser().parse_args(argv))
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out == ""
+    assert [entry["run_id"] for entry in failed] == [UUID(int=1)]
+    assert "gone" in str(failed[0]["error"])
+
+
 def test_json_output_is_the_only_thing_on_stdout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -407,6 +453,22 @@ def _response() -> ModelMetricsResponse:
         metrics=metrics,
         calibration=calibration,
     )
+
+
+def _season_without_a_common_row() -> ModelMetricsResponse:
+    """Return the hand-built contract with the overall rows only.
+
+    The runner omits a row whose ``n_matches`` is zero, so a season without an
+    eligible odds price carries no ``common`` row while the season still appears
+    in the report through its ``all`` rows.
+    """
+    base = _response()
+    metrics = [
+        _metric("home_win", _SMALL_CODE, "all", 4, 4, 1.5, 0.5, 0.25, 1.0),
+        _metric("base_rate", _SMALL_CODE, "all", 4, 4, 0.9375, 0.5625, 0.0625, 0.5),
+        *(row for row in base.metrics if row.season_code is None),
+    ]
+    return base.model_copy(update={"metrics": metrics})
 
 
 def _metric(
@@ -496,9 +558,18 @@ def test_the_save_path_stores_one_run_and_the_no_save_path_is_reproducible(
     with migrated_engine.factories() as session:
         runs = list(session.scalars(select(BacktestRun)))
         assert [run.status for run in runs] == ["succeeded"]
-        metrics = select(func.count()).select_from(BacktestMetric)
-        metric_rows = session.scalar(metrics.where(BacktestMetric.run_id == runs[0].id))
-    assert metric_rows
+        stored_values = [
+            value
+            for row in session.scalars(
+                select(BacktestMetric).where(BacktestMetric.run_id == runs[0].id)
+            )
+            for value in (row.log_loss, row.brier, row.rps, row.accuracy)
+        ]
+    assert stored_values
+    # finish_run stores the digits the run computed: rounding before the write
+    # would still leave rows here, so one value must keep more than the display
+    # precision of the printed table.
+    assert any(value != round(value, backtest.DISPLAY_DIGITS) for value in stored_values)
 
     documents = []
     for _ in range(2):
