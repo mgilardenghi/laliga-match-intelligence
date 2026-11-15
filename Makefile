@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose
 
-.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill lint test test-integration build clean
+.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest lint test test-integration build clean
 
 # Throwaway database for the integration tests. Same image as Compose, a host
 # port that is unlikely to collide, and placeholder credentials only.
@@ -56,6 +56,9 @@ ingest: ingest-deps ## Run the football-data and openfootball ingestion for the 
 
 ingest-backfill: ingest-deps ## Run the ingestion for every season from 2005-06 through the current one
 	$(COMPOSE) run --rm --no-deps worker python -m lmi_worker ingest --backfill $(ARGS)
+
+backtest: ingest-deps ## Run the walk-forward backtest and store its results
+	$(COMPOSE) run --rm --no-deps worker python -m lmi_worker backtest $(ARGS)
 
 lint: ## Run Python and web linters, formatters and type checks
 	uv run ruff check .

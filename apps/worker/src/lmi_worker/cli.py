@@ -28,6 +28,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from lmi_worker import http
+from lmi_worker.backtest import add_backtest_parser, run_backtest_command
 from lmi_worker.ingest.pipeline import Fetcher, JobResult, run_jobs
 from lmi_worker.ingest.plan import PlanError, plan_jobs
 from lmi_worker.status import collect_status, format_status
@@ -93,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
         "daily",
         help="Run the daily ingestion, fitting and prediction job (not implemented yet).",
     )
+    add_backtest_parser(subparsers)
     return parser
 
 
@@ -114,6 +116,8 @@ def main(
         return _ingest(args, today=today, fetcher=fetcher)
     if args.command == "status":
         return _status()
+    if args.command == "backtest":
+        return run_backtest_command(args)
     if args.command == "predict":
         from lmi_worker.predict import main as predict_main
 
