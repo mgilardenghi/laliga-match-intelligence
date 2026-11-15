@@ -4,14 +4,21 @@ These tests need no database. They pin the JSON schema of
 :class:`ModelMetricsResponse` as an inline snapshot, because the API, the store
 and the worker CLI all exchange that exact shape, and they check the validation
 rules the DTOs state themselves: the model-name literal, the fixture and match
-counts, the metric ranges and the empty calibration bin.
+counts, the coverage ratio, the metric ranges, the run identity and the empty
+calibration bin.
 
 The snapshot is a constant in this file on purpose. It is the contract, not a
-copy of the implementation: a changed field name or range breaks this test and
-the inline schema must be reviewed before it is regenerated.
+copy of the implementation: a changed field name, type, optionality, default or
+numeric bound breaks this test and the inline schema must be reviewed before it
+is regenerated. Every ``description`` is removed from both sides before the
+comparison, because Pydantic copies each DTO docstring into the schema and a
+wording edit must not fail a shape contract.
 """
 
-from typing import get_args
+import copy
+from datetime import UTC, datetime, timedelta
+from typing import cast, get_args
+from uuid import uuid4
 
 import pytest
 from lmi_core.results.schemas import (
@@ -29,12 +36,6 @@ MODEL_METRICS_RESPONSE_SCHEMA: dict[str, object] = {
     "$defs": {
         "BacktestRunOut": {
             "additionalProperties": False,
-            "description": (
-                "The header of one backtest run.\n\n"
-                "``id``, ``started_at`` and ``finished_at`` are null only in the worker's\n"
-                "``--format json --no-save`` output, where no run row exists. A stored run\n"
-                "always carries all three."
-            ),
             "properties": {
                 "code_version": {"title": "Code Version", "type": "string"},
                 "data_fingerprint": {"title": "Data Fingerprint", "type": "string"},
@@ -80,11 +81,6 @@ MODEL_METRICS_RESPONSE_SCHEMA: dict[str, object] = {
         },
         "CalibrationBin": {
             "additionalProperties": False,
-            "description": (
-                "One equal-width calibration bin of one model and outcome.\n\n"
-                "An empty bin (``n = 0``) has no mean prediction and no observed frequency;\n"
-                "the database stores that as two NULLs and this DTO states the same rule."
-            ),
             "properties": {
                 "bin_index": {
                     "maximum": 99,
@@ -135,12 +131,6 @@ MODEL_METRICS_RESPONSE_SCHEMA: dict[str, object] = {
         },
         "MetricRow": {
             "additionalProperties": False,
-            "description": (
-                "The metrics of one model on one season or on all scored seasons.\n\n"
-                "``season_code`` is ``seasons.code``; ``None`` is the overall row.\n"
-                "``coverage`` is ``n_matches / n_fixtures``; ``load_report`` computes it, so\n"
-                "a stored row does not carry it."
-            ),
             "properties": {
                 "accuracy": {
                     "maximum": 1,
@@ -211,12 +201,6 @@ MODEL_METRICS_RESPONSE_SCHEMA: dict[str, object] = {
         },
         "ModelInfo": {
             "additionalProperties": False,
-            "description": (
-                "One model of a run, as ``describe()`` reports it.\n\n"
-                "The hyperparameters are recorded next to the metrics so a reader can tell\n"
-                "which settings produced them. ``version`` is bumped whenever a\n"
-                "hyperparameter or the math changes."
-            ),
             "properties": {
                 "hyperparameters": {
                     "additionalProperties": {
@@ -253,12 +237,6 @@ MODEL_METRICS_RESPONSE_SCHEMA: dict[str, object] = {
         },
     },
     "additionalProperties": False,
-    "description": (
-        "One backtest run and its results, ordered per the API contract.\n\n"
-        "The lists are ordered by the producer: models in :data:`BACKTEST_MODEL_NAMES`\n"
-        "order, metrics by season and then ``all`` before ``common``, and\n"
-        "calibration by model, outcome and bin index."
-    ),
     "properties": {
         "calibration": {
             "items": {"$ref": "#/$defs/CalibrationBin"},
@@ -327,8 +305,78 @@ def calibration_bin(**overrides: object) -> CalibrationBin:
     return CalibrationBin.model_validate(values)
 
 
+def run_out(**overrides: object) -> BacktestRunOut:
+    """Return one valid run header of a ``--no-save`` run, with ``overrides`` applied."""
+    values: dict[str, object] = {
+        "seed": 42,
+        "from_year": 2007,
+        "step_days": 7,
+        "code_version": "0.1.0",
+        "data_fingerprint": "a" * 64,
+        "n_matches": 380,
+    }
+    values.update(overrides)
+    return BacktestRunOut.model_validate(values)
+
+
+def _without_descriptions(value: object) -> object:
+    """Return ``value`` with every ``description`` key removed, at any depth."""
+    if isinstance(value, dict):
+        return {
+            key: _without_descriptions(item)
+            for key, item in cast(dict[str, object], value).items()
+            if key != "description"
+        }
+    if isinstance(value, list):
+        return [_without_descriptions(item) for item in cast(list[object], value)]
+    return value
+
+
+def without_descriptions(schema: dict[str, object]) -> dict[str, object]:
+    """Return a JSON schema with every ``description`` key removed.
+
+    Pydantic copies a model docstring into the schema as a ``description``. The
+    docstrings of these DTOs are explanatory prose, so pinning them would fail
+    the shape contract on a wording edit alone. Only that key is dropped: field
+    names, types, ``required`` entries, defaults and numeric bounds are still
+    compared, so the snapshot still fails on a shape change.
+    """
+    return cast(dict[str, object], _without_descriptions(schema))
+
+
+def schema_properties(schema: dict[str, object], name: str) -> dict[str, object]:
+    """Return the ``properties`` of the ``$defs`` entry ``name`` in ``schema``."""
+    definitions = cast(dict[str, dict[str, object]], schema["$defs"])
+    return cast(dict[str, object], definitions[name]["properties"])
+
+
 def test_json_schema_snapshot_is_the_contract() -> None:
-    assert ModelMetricsResponse.model_json_schema() == MODEL_METRICS_RESPONSE_SCHEMA
+    assert without_descriptions(ModelMetricsResponse.model_json_schema()) == (
+        MODEL_METRICS_RESPONSE_SCHEMA
+    )
+
+
+def test_schema_comparison_still_detects_a_shape_change() -> None:
+    """Dropping descriptions must not turn the snapshot into a tautology."""
+    generated = without_descriptions(ModelMetricsResponse.model_json_schema())
+
+    renamed = copy.deepcopy(MODEL_METRICS_RESPONSE_SCHEMA)
+    properties = schema_properties(renamed, "MetricRow")
+    properties["n_fixtures_renamed"] = properties.pop("n_fixtures")
+    assert generated != renamed
+
+    redefaulted = copy.deepcopy(MODEL_METRICS_RESPONSE_SCHEMA)
+    schema_properties(redefaulted, "BacktestRunOut")["seed"] = {
+        "default": 42,
+        "title": "Seed",
+        "type": "integer",
+    }
+    assert generated != redefaulted
+
+    rebounded = copy.deepcopy(MODEL_METRICS_RESPONSE_SCHEMA)
+    n_matches = cast(dict[str, object], schema_properties(rebounded, "MetricRow")["n_matches"])
+    n_matches["exclusiveMinimum"] = -1
+    assert generated != rebounded
 
 
 def test_backtest_model_names_match_the_literal_in_report_order() -> None:
@@ -352,6 +400,16 @@ def test_metric_row_rejects_more_matches_than_fixtures() -> None:
         metric_row(n_matches=380, n_fixtures=300)
 
 
+def test_metric_row_rejects_coverage_that_contradicts_the_counts() -> None:
+    accepted = metric_row(n_matches=300, n_fixtures=380, coverage=300 / 380)
+    assert accepted.coverage == 300 / 380
+
+    with pytest.raises(ValidationError, match="coverage"):
+        metric_row(coverage=0.5)
+    with pytest.raises(ValidationError, match="coverage"):
+        metric_row(coverage=300 / 380 + 0.01)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -369,9 +427,38 @@ def test_metric_row_rejects_out_of_range_values(overrides: dict[str, object]) ->
 
 
 def test_metric_row_accepts_the_range_boundaries() -> None:
-    row = metric_row(brier=0.0, rps=0.0, accuracy=0.0, log_loss=0.0, coverage=0.0)
-    assert row.log_loss == 0.0
-    assert metric_row(brier=2.0, rps=1.0, accuracy=1.0, coverage=1.0).brier == 2.0
+    """Each metric sits on its own bounds, with coverage derived from the counts.
+
+    ``coverage`` is ``n_matches / n_fixtures`` and ``n_matches`` is positive, so
+    its lower end is one match out of the fixture count, not zero.
+    """
+    lowest = metric_row(
+        n_matches=1,
+        n_fixtures=380,
+        coverage=1 / 380,
+        brier=0.0,
+        rps=0.0,
+        accuracy=0.0,
+        log_loss=0.0,
+    )
+    assert lowest.log_loss == 0.0
+    assert lowest.brier == 0.0
+    assert lowest.rps == 0.0
+    assert lowest.accuracy == 0.0
+    assert lowest.coverage == 1 / 380
+
+    highest = metric_row(
+        n_matches=380,
+        n_fixtures=380,
+        coverage=1.0,
+        brier=2.0,
+        rps=1.0,
+        accuracy=1.0,
+    )
+    assert highest.brier == 2.0
+    assert highest.rps == 1.0
+    assert highest.accuracy == 1.0
+    assert highest.coverage == 1.0
 
 
 def test_calibration_bin_rejects_a_summary_on_an_empty_bin() -> None:
@@ -402,3 +489,59 @@ def test_response_accepts_a_well_formed_report() -> None:
     )
     assert response.run.id is None
     assert response.models[0].name == "home_win"
+
+
+def test_backtest_run_out_accepts_the_two_real_identity_states() -> None:
+    no_save = run_out()
+    assert (no_save.id, no_save.started_at, no_save.finished_at) == (None, None, None)
+
+    started_at = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+    stored = run_out(
+        id=uuid4(),
+        started_at=started_at,
+        finished_at=started_at + timedelta(minutes=4),
+    )
+    assert stored.id is not None
+    assert stored.started_at == started_at
+    assert stored.finished_at is not None
+    assert stored.finished_at > stored.started_at
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"id": uuid4()}, id="only-id"),
+        pytest.param(
+            {"started_at": datetime(2026, 11, 15, 12, 0, tzinfo=UTC)}, id="only-started-at"
+        ),
+        pytest.param(
+            {"finished_at": datetime(2026, 11, 15, 12, 4, tzinfo=UTC)}, id="only-finished-at"
+        ),
+        pytest.param(
+            {
+                "id": uuid4(),
+                "started_at": datetime(2026, 11, 15, 12, 0, tzinfo=UTC),
+            },
+            id="missing-finished-at",
+        ),
+        pytest.param(
+            {
+                "id": uuid4(),
+                "finished_at": datetime(2026, 11, 15, 12, 4, tzinfo=UTC),
+            },
+            id="missing-started-at",
+        ),
+        pytest.param(
+            {
+                "started_at": datetime(2026, 11, 15, 12, 0, tzinfo=UTC),
+                "finished_at": datetime(2026, 11, 15, 12, 4, tzinfo=UTC),
+            },
+            id="missing-id",
+        ),
+    ],
+)
+def test_backtest_run_out_rejects_a_partial_identity(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError, match="set together"):
+        run_out(**overrides)

@@ -13,6 +13,11 @@ are written once and never changed.
 Sessions are synchronous SQLAlchemy 2 sessions (psycopg 3), the shape
 :mod:`lmi_core.db.session` builds for the API and the worker. Every function
 commits its own transaction and leaves the session usable.
+
+A terminal transition is serialised with ``SELECT ... FOR UPDATE`` on the run
+row inside the transaction that writes it, so two sessions can never both
+finish the same run: the second caller waits for the first commit and then sees
+the committed terminal state.
 """
 
 import datetime
@@ -101,9 +106,17 @@ def start_run(
         config={"models": [model.model_dump(mode="json") for model in models]},
     )
     session.add(run)
-    session.flush()
-    run_id = run.id
-    _commit(session)
+    # The flush assigns the database-generated id, so it sits inside the
+    # rollback-protected block: a constraint violation raised here (for example
+    # ``step_days = 0``) must leave the session usable, like every other
+    # failure of this module.
+    try:
+        session.flush()
+        run_id = run.id
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     return run_id
 
 
@@ -122,14 +135,22 @@ def finish_run(
     ``data_fingerprint`` and ``n_matches`` are written in one transaction, so a
     reader never sees a succeeded run with a partial result set.
 
+    ``n_matches`` is the run-level match count and must be non-negative. The
+    column itself accepts any integer, while the report DTO requires
+    ``n_matches >= 0``, so a negative count stored here would make
+    :func:`load_report` raise instead of returning the report.
+
     ``MetricRow.coverage`` is not stored: it is derived from ``n_matches`` and
     ``n_fixtures`` when a report is loaded.
 
     Raises:
-        ValueError: the run does not exist, is no longer ``running``, or a
-            metric row names a season code that the ``seasons`` table does not
-            contain. Nothing is written in any of these cases.
+        ValueError: ``n_matches`` is negative, the run does not exist, is no
+            longer ``running``, or a metric row names a season code that the
+            ``seasons`` table does not contain. Nothing is written in any of
+            these cases.
     """
+    if n_matches < 0:
+        raise ValueError(f"n_matches must be non-negative, got {n_matches}")
     run = _running_run(session, run_id)
     seasons = _resolve_seasons(session, metrics)
     session.add_all([_metric_model(run, row, seasons) for row in metrics])
@@ -210,12 +231,27 @@ def _commit(session: Session) -> None:
 
 
 def _running_run(session: Session, run_id: uuid.UUID) -> BacktestRun:
-    """Return the run ``run_id`` if it is still running.
+    """Lock the run row and return it if it is still running.
+
+    The row is read with ``SELECT ... FOR UPDATE`` inside the caller's
+    transaction, and ``populate_existing`` refreshes the mapped attributes from
+    that row. A second session that finishes the same run therefore waits for
+    the first transaction to commit and then observes the committed terminal
+    state, instead of overwriting it from a stale identity-mapped ``running``
+    object. The lock lives until the caller commits or rolls back, which is the
+    same transaction that writes the transition.
 
     Raises:
-        ValueError: the run does not exist or has already finished.
+        ValueError: the run does not exist or has already finished. The row is
+            left untouched in both cases.
     """
-    run = session.get(BacktestRun, run_id)
+    statement = (
+        select(BacktestRun)
+        .where(BacktestRun.id == run_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    run = session.scalars(statement).one_or_none()
     if run is None:
         raise ValueError(f"backtest run {run_id} does not exist")
     if run.status != "running":

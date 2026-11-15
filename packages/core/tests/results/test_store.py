@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import pytest
 from lmi_core.config import Settings
 from lmi_core.db.alembic_support import upgrade_to_head
-from lmi_core.db.models import BacktestMetric, BacktestRun
+from lmi_core.db.models import BacktestCalibration, BacktestMetric, BacktestRun
 from lmi_core.db.seed import seed
 from lmi_core.db.session import make_engine, session_factory
 from lmi_core.db.testing import require_disposable_database
@@ -35,6 +35,7 @@ from lmi_core.results.schemas import (
 from lmi_core.results.store import fail_run, finish_run, load_report, start_run
 from sqlalchemy import func, select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 pytestmark = pytest.mark.integration
@@ -503,3 +504,140 @@ def test_finish_and_fail_reject_unknown_and_finished_runs(database: Database) ->
         assert failed.status == "failed"
         assert failed.error == "the fit diverged"
         assert session.scalar(select(func.count()).select_from(BacktestMetric)) == 1
+
+
+def start_running(factory: sessionmaker[Session]) -> uuid.UUID:
+    """Insert one ``running`` run through the store and return its id."""
+    with factory() as session:
+        return start_run(
+            session,
+            seed=SEED,
+            from_year=FROM_YEAR,
+            step_days=STEP_DAYS,
+            models=[HOME_WIN],
+            code_version=CODE_VERSION,
+        )
+
+
+def test_finish_run_rejects_a_negative_n_matches_and_stores_nothing(
+    database: Database,
+) -> None:
+    factory = session_factory(database.engine)
+    run_id = start_running(factory)
+    metric = make_metric("home_win", None, "all", n_matches=300, n_fixtures=380, log_loss=0.7)
+
+    with factory() as session, pytest.raises(ValueError, match="non-negative"):
+        finish_run(
+            session,
+            run_id,
+            metrics=[metric],
+            calibration=[make_bin("home_win", "H", 0, mean_predicted=0.05)],
+            data_fingerprint=DATA_FINGERPRINT,
+            n_matches=-1,
+        )
+
+    with factory() as session:
+        stored = session.get(BacktestRun, run_id)
+        assert stored is not None
+        assert stored.status == "running"
+        assert stored.finished_at is None
+        assert stored.data_fingerprint is None
+        assert stored.n_matches is None
+        assert stored.error is None
+        assert session.scalar(select(func.count()).select_from(BacktestMetric)) == 0
+        assert session.scalar(select(func.count()).select_from(BacktestCalibration)) == 0
+
+
+def test_a_second_terminal_transition_cannot_overwrite_the_first(
+    database: Database,
+) -> None:
+    factory = session_factory(database.engine)
+    run_id = start_running(factory)
+    metric = make_metric("home_win", None, "all", n_matches=300, n_fixtures=380, log_loss=0.7)
+
+    with factory() as first, factory() as second:
+        loaded = first.get(BacktestRun, run_id)
+        assert loaded is not None
+        assert loaded.status == "running"
+
+        fail_run(second, run_id, error="the worker died mid-run")
+
+        with pytest.raises(ValueError, match="not 'running'"):
+            finish_run(
+                first,
+                run_id,
+                metrics=[metric],
+                calibration=[],
+                data_fingerprint=DATA_FINGERPRINT,
+                n_matches=300,
+            )
+
+    with factory() as session:
+        stored = session.get(BacktestRun, run_id)
+        assert stored is not None
+        assert stored.status == "failed"
+        assert stored.error == "the worker died mid-run"
+        assert stored.finished_at is not None
+        assert stored.data_fingerprint is None
+        assert stored.n_matches is None
+        assert session.scalar(select(func.count()).select_from(BacktestMetric)) == 0
+        assert load_report(session, run_id) is None
+
+
+def test_a_duplicate_metric_row_rolls_the_whole_finish_back(database: Database) -> None:
+    factory = session_factory(database.engine)
+    run_id = start_running(factory)
+    overall = make_metric("home_win", None, "all", n_matches=300, n_fixtures=380, log_loss=0.7)
+    duplicate = make_metric("home_win", None, "all", n_matches=300, n_fixtures=380, log_loss=0.8)
+
+    with factory() as session, pytest.raises(IntegrityError, match="ux_backtest_metrics_overall"):
+        finish_run(
+            session,
+            run_id,
+            metrics=[overall, duplicate],
+            calibration=[make_bin("home_win", "H", 0, mean_predicted=0.05)],
+            data_fingerprint=DATA_FINGERPRINT,
+            n_matches=300,
+        )
+
+    with factory() as session:
+        stored = session.get(BacktestRun, run_id)
+        assert stored is not None
+        assert stored.status == "running"
+        assert stored.finished_at is None
+        assert stored.data_fingerprint is None
+        assert stored.n_matches is None
+        assert session.scalar(select(func.count()).select_from(BacktestMetric)) == 0
+        assert session.scalar(select(func.count()).select_from(BacktestCalibration)) == 0
+
+
+def test_a_check_violation_leaves_the_session_usable(database: Database) -> None:
+    factory = session_factory(database.engine)
+
+    with factory() as session:
+        with pytest.raises(IntegrityError, match="step_days_at_least_one"):
+            start_run(
+                session,
+                seed=SEED,
+                from_year=FROM_YEAR,
+                step_days=0,
+                models=[HOME_WIN],
+                code_version=CODE_VERSION,
+            )
+
+        # No caller-side rollback: the store rolled its own transaction back.
+        assert session.scalar(select(func.count()).select_from(BacktestRun)) == 0
+        run_id = start_run(
+            session,
+            seed=SEED,
+            from_year=FROM_YEAR,
+            step_days=STEP_DAYS,
+            models=[HOME_WIN],
+            code_version=CODE_VERSION,
+        )
+
+    with factory() as session:
+        stored = session.get(BacktestRun, run_id)
+        assert stored is not None
+        assert stored.step_days == STEP_DAYS
+        assert stored.status == "running"

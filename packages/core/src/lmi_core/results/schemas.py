@@ -8,7 +8,10 @@ change only together.
 
 The ranges mirror the CHECK constraints of the ``backtest_*`` tables, so a row
 the database accepts also validates here. ``coverage`` is the exception: it is
-derived from ``n_matches / n_fixtures`` and stored nowhere.
+derived from ``n_matches / n_fixtures`` and stored nowhere, so the DTO rejects
+any value that differs from that ratio by more than
+:data:`COVERAGE_TOLERANCE`. The rule keeps a producer from reporting a coverage
+that the store would silently replace with the recomputed ratio.
 
 The model names are declared twice on purpose: :data:`BACKTEST_MODEL_NAMES`
 fixes the report order and :data:`ModelName` is the literal every DTO uses.
@@ -18,10 +21,13 @@ consistency test across the three lists belongs to a later task.
 """
 
 from datetime import datetime
-from typing import Literal, Self
+from typing import Final, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+COVERAGE_TOLERANCE: Final = 1e-12
+"""How far ``MetricRow.coverage`` may drift from ``n_matches / n_fixtures``."""
 
 BACKTEST_MODEL_NAMES: tuple[str, ...] = (
     "home_win",
@@ -65,6 +71,32 @@ class BacktestRunOut(BaseModel):
     data_fingerprint: str
     n_matches: int = Field(ge=0)
 
+    @model_validator(mode="after")
+    def _identity_is_all_or_nothing(self) -> Self:
+        """Reject a header with a partially populated identity.
+
+        Only two states exist: no run row at all, which nulls all three fields,
+        and a stored run, which carries all three. A header with one of them set
+        and another null describes a run that no producer can create, so it is a
+        contract violation rather than an optional field.
+        """
+        identity = {
+            "id": self.id,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+        missing = sorted(name for name, value in identity.items() if value is None)
+        if missing and len(missing) < len(identity):
+            present = sorted(name for name, value in identity.items() if value is not None)
+            raise ValueError(
+                "id, started_at and finished_at are set together on a stored run and "
+                "null together without one; got set="
+                + ", ".join(present)
+                + " and null="
+                + ", ".join(missing)
+            )
+        return self
+
 
 class ModelInfo(BaseModel):
     """One model of a run, as ``describe()`` reports it.
@@ -104,10 +136,22 @@ class MetricRow(BaseModel):
     accuracy: float = Field(ge=0, le=1)
 
     @model_validator(mode="after")
-    def _fixtures_cover_matches(self) -> Self:
-        """Reject a row that forecasts more matches than its fixture scope."""
+    def _counts_and_coverage_agree(self) -> Self:
+        """Reject a row whose counts or coverage contradict each other.
+
+        ``n_fixtures`` must cover ``n_matches``, so the ratio below divides by a
+        positive count. ``coverage`` must then be that ratio: the contract
+        defines it as exactly ``n_matches / n_fixtures``, and the store derives
+        it from the two counts when a report is loaded, so an inconsistent
+        producer value would be replaced without notice on a round trip.
+        """
         if self.n_fixtures < self.n_matches:
             raise ValueError("n_fixtures must be at least n_matches")
+        expected = self.n_matches / self.n_fixtures
+        if abs(self.coverage - expected) > COVERAGE_TOLERANCE:
+            raise ValueError(
+                f"coverage must equal n_matches / n_fixtures ({expected}), got {self.coverage}"
+            )
         return self
 
 
