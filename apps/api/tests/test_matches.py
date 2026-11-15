@@ -187,9 +187,16 @@ def test_list_matches_between_two_dates_includes_both_boundaries(
     assert page["total"] == 2
 
 
-def test_list_matches_sorts_a_missing_kickoff_time_last_in_both_directions(
+def test_list_matches_sorts_by_date_then_time_and_keeps_a_missing_time_last(
     api_client: TestClient, db_session: Session
 ) -> None:
+    """Pin the whole sort key, in both directions.
+
+    The fixtures of the second day are created in the order ``20:30``, ``19:00``
+    then no time, so their identifiers run against their kickoff times: an
+    ``asc`` page that sorted the day by identifier, or that let a null time
+    lead the reverse page, could not produce the sequences asserted below.
+    """
     season = create_season(db_session)
     alpha = create_team(db_session, name="Test FC Alpha")
     beta = create_team(db_session, name="Test FC Beta")
@@ -212,6 +219,21 @@ def test_list_matches_sorts_a_missing_kickoff_time_last_in_both_directions(
         kickoff_date=datetime.date(2098, 8, 22),
         kickoff_time=datetime.time(20, 30),
     )
+    earlier_that_day = create_match(
+        db_session,
+        season=season,
+        home=alpha,
+        away=gamma,
+        kickoff_date=datetime.date(2098, 8, 22),
+        kickoff_time=datetime.time(19, 0),
+    )
+    untimed_later_day = create_match(
+        db_session,
+        season=season,
+        home=beta,
+        away=alpha,
+        kickoff_date=datetime.date(2098, 8, 22),
+    )
 
     ascending = api_client.get("/v1/matches", params={"season": season.code, "order": "asc"})
     descending = api_client.get("/v1/matches", params={"season": season.code, "order": "desc"})
@@ -220,11 +242,15 @@ def test_list_matches_sorts_a_missing_kickoff_time_last_in_both_directions(
     assert [item["id"] for item in ascending.json()["items"]] == [
         timed.id,
         untimed.id,
+        earlier_that_day.id,
         later_day.id,
+        untimed_later_day.id,
     ]
     assert descending.status_code == 200
     assert [item["id"] for item in descending.json()["items"]] == [
         later_day.id,
+        earlier_that_day.id,
+        untimed_later_day.id,
         timed.id,
         untimed.id,
     ]
@@ -428,7 +454,7 @@ def test_get_a_match_returns_its_statistics(api_client: TestClient, db_session: 
             away_yellow=3,
             home_red=0,
             away_red=None,
-            home_xg=decimal.Decimal("1.25"),
+            home_xg=None,
             away_xg=decimal.Decimal("0.80"),
         )
     )
@@ -450,7 +476,7 @@ def test_get_a_match_returns_its_statistics(api_client: TestClient, db_session: 
         "away_yellow": 3,
         "home_red": 0,
         "away_red": None,
-        "home_xg": 1.25,
+        "home_xg": None,
         "away_xg": 0.8,
     }
 

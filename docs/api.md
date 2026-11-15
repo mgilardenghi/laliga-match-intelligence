@@ -40,7 +40,7 @@ generated client models the real body instead of a default error envelope:
 | Route | `404` | `422` |
 | --- | --- | --- |
 | `GET /v1/seasons` | — | — |
-| `GET /v1/teams` | unknown season code | malformed query value |
+| `GET /v1/teams` | unknown season code | declared, not reachable (its only parameter is an unconstrained string) |
 | `GET /v1/teams/{team_id}` | unknown team | non-integer identifier |
 | `GET /v1/matches` | unknown season code or team identifier | a query value outside its rule |
 | `GET /v1/matches/{match_id}` | unknown match | non-integer identifier |
@@ -48,6 +48,11 @@ generated client models the real body instead of a default error envelope:
 
 An unexpected failure is a `500` whose body carries no detail: the cause is in
 the server log.
+
+A route uses the shared problem response set, so `GET /v1/teams` declares a
+`422` in the OpenAPI document even though no validation failure can occur there:
+its only parameter is an unconstrained string, and an unknown season code is a
+`404`.
 
 ### Pagination
 
@@ -120,9 +125,11 @@ range is compared on `kickoff_date` only, so a range covers whole days and a
 fixture without a published kickoff time is still inside it.
 
 The sort key is `kickoff_date`, then `kickoff_time`, then `id`. A fixture whose
-source published no time never jumps to the top of its day: a null `kickoff_time`
-sorts last in **both** directions, while the date and the identifier still
-reverse, so `desc` is the exact mirror of `asc`.
+source published no time never jumps to the top of its day and never leads the
+list in reverse: a null `kickoff_time` sorts last in **both** directions, while
+the date and the identifier still reverse. Within one day the two orders
+therefore differ: `desc` reverses the timed fixtures of a day and still ends
+with the untimed ones. A client cannot page `desc` by reversing `asc`.
 
 ```json
 {

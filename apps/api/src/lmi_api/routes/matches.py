@@ -55,17 +55,19 @@ def list_matches(
 
     The sort key is the kickoff date, then the kickoff time, then the
     identifier. A fixture whose source published no time therefore never jumps
-    to the top of its day: the null time sorts last in both directions, while
-    the date and the identifier still reverse, so the two orders are exact
-    mirrors of each other.
+    to the top of its day and never leads the list in reverse: the null time
+    sorts last in both directions, while the date and the identifier still
+    reverse. Within one day the two orders therefore differ, because ``desc``
+    reverses the timed fixtures and still ends with the untimed ones.
 
     The request path issues two statements, one for the count and one for the
     page, whatever the size of the page: both teams come from explicit joins on
     the same statement, because the models declare no relationship the code
     could lazy-load per row. The only exception is a page that matched nothing
-    while a season code or a team identifier was given: one existence lookup
-    then decides between an empty page and a 404, and it cannot run before,
-    because a miss is only possible when the answer is empty.
+    while a season code or a team identifier was given: one existence probe per
+    value given, so at most two, decides between an empty page and a 404. The
+    probes cannot run before the page, because a miss is only possible when the
+    answer is empty.
 
     Raises:
         HTTPException: 404 when ``season`` or ``team_id`` names no stored row.

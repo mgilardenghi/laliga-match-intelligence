@@ -1,9 +1,10 @@
 """Contract tests for the ``/v1/standings`` endpoint against a disposable database.
 
 The suite shares its database with the seeded seasons and the ingested matches,
-so every test that omits the ``season`` parameter is the only one that relies on
-the default selection, and it bounds itself to a synthetic season in the far
-future. Every other test names the code of the season it inserted.
+so every test that omits the ``season`` parameter relies on the default
+selection and bounds itself: one names a synthetic season in the far future, the
+other removes every fixture first, inside the transaction the fixture rolls
+back. Every other test names the code of the season it inserted.
 
 The ranking itself is exercised by the core suite; what these tests pin is the
 seam: which season is selected, which teams make up the table, which results are
@@ -15,7 +16,8 @@ import datetime
 import pytest
 from fastapi.testclient import TestClient
 from lmi_api.main import create_app
-from sqlalchemy import event
+from lmi_core.db.models import Match
+from sqlalchemy import delete, event
 from sqlalchemy.orm import Session
 
 from tests.factories import create_match, create_season, create_team
@@ -288,6 +290,31 @@ def test_standings_of_a_season_without_matches_are_empty(
         "as_of": None,
         "matches_counted": 0,
         "rows": [],
+    }
+
+
+def test_standings_without_a_season_and_without_any_match_are_not_found(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """Pin the 404 the default season falls back to when nothing was ingested.
+
+    Every fixture is removed first, inside the outer transaction the fixture
+    rolls back, so the assertion holds whatever the database held before the
+    test; ``match_stats`` follows on the ``ON DELETE CASCADE`` of its foreign
+    key.
+    """
+    db_session.execute(delete(Match))
+
+    response = api_client.get("/v1/standings")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith(PROBLEM_MEDIA_TYPE)
+    assert response.json() == {
+        "type": "about:blank",
+        "title": "Not Found",
+        "status": 404,
+        "detail": "No season with matches",
+        "errors": None,
     }
 
 
