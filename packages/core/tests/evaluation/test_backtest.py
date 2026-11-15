@@ -88,6 +88,16 @@ def test_a_row_matches_the_metrics_of_the_reference_walk_forward() -> None:
     assert row.accuracy == accuracy(probabilities, result)
 
 
+@pytest.mark.parametrize("step_days", [3, 7, 14])
+def test_every_match_is_scored_exactly_once_for_any_step(step_days: int) -> None:
+    data = make_synthetic_league()
+
+    report = run_backtest(data, _config(step_days=step_days))
+
+    for model in ORDERED_MODELS:
+        assert _row(report, model, None, "all").n_matches == len(data)
+
+
 def test_from_year_moves_the_scored_range() -> None:
     data = make_synthetic_league()
 

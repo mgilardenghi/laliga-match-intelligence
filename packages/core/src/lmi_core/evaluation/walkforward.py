@@ -37,16 +37,20 @@ class WindowPredictions:
         return int(self.match_id.size)
 
 
-def weekly_cutoffs(first: datetime.date, last: datetime.date) -> list[datetime.date]:
-    """Return every Monday from the Monday on or before ``first`` through ``last``.
+def weekly_cutoffs(
+    first: datetime.date, last: datetime.date, step_days: int = DEFAULT_STEP_DAYS
+) -> list[datetime.date]:
+    """Return cutoffs every ``step_days`` from the Monday on or before ``first`` through ``last``.
 
     The list ascends and is empty when ``first`` is after ``last``. A ``first``
     that is already a Monday is the first cutoff.
     """
+    if step_days < 1:
+        raise ValueError(f"step_days must be at least 1, got {step_days}")
     if first > last:
         return []
     cutoff = first - datetime.timedelta(days=first.weekday())
-    step = datetime.timedelta(days=DEFAULT_STEP_DAYS)
+    step = datetime.timedelta(days=step_days)
     cutoffs: list[datetime.date] = []
     while cutoff <= last:
         cutoffs.append(cutoff)

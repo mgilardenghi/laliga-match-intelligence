@@ -84,6 +84,7 @@ def run_backtest(data: MatchData, config: BacktestConfig) -> BacktestReport:
     cutoffs = weekly_cutoffs(
         _as_date(scored_kickoffs.min()),
         _as_date(scored_kickoffs.max()),
+        config.step_days,
     )
 
     predictions = {
