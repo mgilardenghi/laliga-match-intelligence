@@ -641,3 +641,57 @@ def test_a_check_violation_leaves_the_session_usable(database: Database) -> None
         assert stored is not None
         assert stored.step_days == STEP_DAYS
         assert stored.status == "running"
+
+
+def test_a_rejected_transition_releases_the_row_lock(database: Database) -> None:
+    """A caller that catches the rejection must not keep the run row locked.
+
+    ``finish_run`` and ``fail_run`` take ``SELECT ... FOR UPDATE`` on the run row
+    before they can reject it, so both rejection paths must roll their
+    transaction back. The observer sets a short ``statement_timeout``: a lock
+    the rejection leaked fails here instead of hanging the suite.
+    """
+    factory = session_factory(database.engine)
+    failed_id = start_running(factory)
+    unknown_season_id = start_running(factory)
+    unknown_season = make_metric(
+        "home_win", "1999-00", "all", n_matches=300, n_fixtures=380, log_loss=0.7
+    )
+    observe = text("UPDATE backtest_runs SET error = :error WHERE id = :run_id")
+
+    with factory() as rejecting, factory() as observer:
+        observer.execute(text("SET statement_timeout = '2s'"))
+
+        fail_run(rejecting, failed_id, error="the worker died mid-run")
+        with pytest.raises(ValueError, match="not 'running'"):
+            fail_run(rejecting, failed_id, error="a second failure")
+        observer.execute(
+            observe, {"error": "observed after the terminal rejection", "run_id": failed_id}
+        )
+        assert (
+            observer.scalar(
+                text("SELECT error FROM backtest_runs WHERE id = :run_id"), {"run_id": failed_id}
+            )
+            == "observed after the terminal rejection"
+        )
+
+        with pytest.raises(ValueError, match="1999-00"):
+            finish_run(
+                rejecting,
+                unknown_season_id,
+                metrics=[unknown_season],
+                calibration=[],
+                data_fingerprint=DATA_FINGERPRINT,
+                n_matches=300,
+            )
+        observer.execute(
+            observe,
+            {"error": "observed after the season rejection", "run_id": unknown_season_id},
+        )
+        assert (
+            observer.scalar(
+                text("SELECT error FROM backtest_runs WHERE id = :run_id"),
+                {"run_id": unknown_season_id},
+            )
+            == "observed after the season rejection"
+        )

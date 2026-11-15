@@ -17,14 +17,17 @@ commits its own transaction and leaves the session usable.
 A terminal transition is serialised with ``SELECT ... FOR UPDATE`` on the run
 row inside the transaction that writes it, so two sessions can never both
 finish the same run: the second caller waits for the first commit and then sees
-the committed terminal state.
+the committed terminal state. The lock is held only while the store's own
+transaction is open: every failure after it is taken rolls that transaction
+back, so a caller that catches the error does not leave the row locked.
 """
 
+import contextlib
 import datetime
 import importlib.metadata
 import os
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Final, cast
 
 from sqlalchemy import select
@@ -110,13 +113,9 @@ def start_run(
     # rollback-protected block: a constraint violation raised here (for example
     # ``step_days = 0``) must leave the session usable, like every other
     # failure of this module.
-    try:
+    with _transaction(session):
         session.flush()
         run_id = run.id
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
     return run_id
 
 
@@ -151,15 +150,15 @@ def finish_run(
     """
     if n_matches < 0:
         raise ValueError(f"n_matches must be non-negative, got {n_matches}")
-    run = _running_run(session, run_id)
-    seasons = _resolve_seasons(session, metrics)
-    session.add_all([_metric_model(run, row, seasons) for row in metrics])
-    session.add_all([_calibration_model(run, row) for row in calibration])
-    run.status = "succeeded"
-    run.finished_at = datetime.datetime.now(datetime.UTC)
-    run.data_fingerprint = data_fingerprint
-    run.n_matches = n_matches
-    _commit(session)
+    with _transaction(session):
+        run = _running_run(session, run_id)
+        seasons = _resolve_seasons(session, metrics)
+        session.add_all([_metric_model(run, row, seasons) for row in metrics])
+        session.add_all([_calibration_model(run, row) for row in calibration])
+        run.status = "succeeded"
+        run.finished_at = datetime.datetime.now(datetime.UTC)
+        run.data_fingerprint = data_fingerprint
+        run.n_matches = n_matches
 
 
 def fail_run(session: Session, run_id: uuid.UUID, *, error: str) -> None:
@@ -169,11 +168,11 @@ def fail_run(session: Session, run_id: uuid.UUID, *, error: str) -> None:
         ValueError: the run does not exist or is no longer ``running``. The row
             is left untouched in both cases.
     """
-    run = _running_run(session, run_id)
-    run.status = "failed"
-    run.finished_at = datetime.datetime.now(datetime.UTC)
-    run.error = error
-    _commit(session)
+    with _transaction(session):
+        run = _running_run(session, run_id)
+        run.status = "failed"
+        run.finished_at = datetime.datetime.now(datetime.UTC)
+        run.error = error
 
 
 def load_report(session: Session, run_id: uuid.UUID | None = None) -> ModelMetricsResponse | None:
@@ -221,9 +220,17 @@ def load_report(session: Session, run_id: uuid.UUID | None = None) -> ModelMetri
     )
 
 
-def _commit(session: Session) -> None:
-    """Commit ``session``, rolling back a failed transaction before re-raising."""
+@contextlib.contextmanager
+def _transaction(session: Session) -> Iterator[None]:
+    """Commit the block, or roll the whole transaction back before re-raising.
+
+    Every writer of this module runs inside this block, so a rejected write
+    never leaves work staged, a row lock held or the session unusable: the
+    rollback releases the ``SELECT ... FOR UPDATE`` lock of
+    :func:`_running_run` as well.
+    """
     try:
+        yield
         session.commit()
     except Exception:
         session.rollback()
