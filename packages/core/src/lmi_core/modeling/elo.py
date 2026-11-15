@@ -2,11 +2,16 @@
 
 Two layers sit in this module and neither reads the other's future:
 
-* the **ratings** come from a replay of the history in stored order. Before each
-  match the pre-match gap ``d = (R_home + H - R_away) / 400`` is recorded, then
-  the two ratings move by ``K * (S - E)`` with ``E`` the logistic expected score
-  of that gap and ``S`` the outcome (1 home win, 0.5 draw, 0 away win). A match
-  never sees its own result, so every ``d`` is a genuine forecast input.
+* the **ratings** come from a replay of the history in stored order, one kickoff
+  date at a time. The pre-match gap ``d = (R_home + H - R_away) / 400`` is
+  recorded before the date's matches move a rating, then the two ratings of a
+  match move by ``K * (S - E)`` with ``E`` the logistic expected score of that gap
+  and ``S`` the outcome (1 home win, 0.5 draw, 0 away win). The data carries a
+  kickoff date and no kickoff time, so the row order inside a date is not evidence
+  that one result was known before another match of the same date: every match of
+  a date is priced from the state the date starts in, and the date's results are
+  applied afterwards. A match therefore never sees its own result or a result of
+  the same date, so every ``d`` is a genuine forecast input.
 * the **ordered logit** maps a gap to the three outcomes with two cut points,
   ``P(A) = sigma(c1 - b d)`` and ``P(A or D) = sigma(c2 - b d)``. The draw is the
   difference of the two, so the three probabilities sum to 1 by construction.
@@ -109,9 +114,9 @@ class RatingStep:
     home_team_id: int
     away_team_id: int
     home_rating: float
-    """Home rating *before* this match moved it."""
+    """Home rating the match was priced from: the state its kickoff date starts in."""
     away_rating: float
-    """Away rating *before* this match moved it."""
+    """Away rating the match was priced from: the state its kickoff date starts in."""
     d: float
     """``(home_rating + HOME_ADVANTAGE - away_rating) / RATING_SCALE``."""
 
@@ -246,7 +251,7 @@ class EloModel(Model):
         }
 
     def _fit(self, history: History, cutoff: datetime.date) -> None:
-        """Replay ``history`` in stored order, then fit the logit on its gaps."""
+        """Replay ``history`` one kickoff date at a time, then fit the logit on its gaps."""
         self.ratings_ = {}
         self.initial_ratings_ = {}
         self.newcomer_rating_ = START_RATING
@@ -257,27 +262,50 @@ class EloModel(Model):
 
         steps: list[RatingStep] = []
         gaps: list[float] = []
-        for row in range(len(history)):
-            home_team = int(history.home_team_id[row])
-            away_team = int(history.away_team_id[row])
-            home_rating = self._rating_before(home_team)
-            away_rating = self._rating_before(away_team)
-            gap = (home_rating + HOME_ADVANTAGE - away_rating) / RATING_SCALE
-            steps.append(
-                RatingStep(
-                    match_id=int(history.match_id[row]),
-                    home_team_id=home_team,
-                    away_team_id=away_team,
-                    home_rating=home_rating,
-                    away_rating=away_rating,
-                    d=gap,
+        for rows in _by_kickoff_date(history):
+            # Everything a date's matches see comes from the state the date starts
+            # in: every newcomer of the date is assigned from that one snapshot, so
+            # neither a team's listing side nor another result of the same date can
+            # change the rating it starts from, and no gap of the date can contain
+            # a result of the same date.
+            opening = dict(self.ratings_)
+            for row in rows:
+                for team_id in (
+                    int(history.home_team_id[row]),
+                    int(history.away_team_id[row]),
+                ):
+                    if team_id in opening:
+                        continue
+                    # Resolved against the date's opening state, never against a
+                    # value another match of the same date assigned.
+                    assigned = newcomer_value(self.ratings_, self._candidates)
+                    opening[team_id] = assigned
+                    self.initial_ratings_[team_id] = assigned
+            date_gaps: list[float] = []
+            for row in rows:
+                home_team = int(history.home_team_id[row])
+                away_team = int(history.away_team_id[row])
+                gap = (opening[home_team] + HOME_ADVANTAGE - opening[away_team]) / RATING_SCALE
+                steps.append(
+                    RatingStep(
+                        match_id=int(history.match_id[row]),
+                        home_team_id=home_team,
+                        away_team_id=away_team,
+                        home_rating=opening[home_team],
+                        away_rating=opening[away_team],
+                        d=gap,
+                    )
                 )
-            )
-            gaps.append(gap)
-            score = float(_HOME_SCORE[int(history.result[row])])
-            shift = K_FACTOR * (score - float(expected_score(gap).item()))
-            self.ratings_[home_team] = home_rating + shift
-            self.ratings_[away_team] = away_rating - shift
+                date_gaps.append(gap)
+            gaps.extend(date_gaps)
+            self.ratings_ = opening
+            for row, gap in zip(rows, date_gaps, strict=True):
+                home_team = int(history.home_team_id[row])
+                away_team = int(history.away_team_id[row])
+                score = float(_HOME_SCORE[int(history.result[row])])
+                shift = K_FACTOR * (score - float(expected_score(gap).item()))
+                self.ratings_[home_team] = self.ratings_[home_team] + shift
+                self.ratings_[away_team] = self.ratings_[away_team] - shift
 
         self.replay_ = tuple(steps)
         self.d_values_ = np.array(gaps, dtype=np.float64)
@@ -296,15 +324,22 @@ class EloModel(Model):
             gaps[row] = (home_rating + HOME_ADVANTAGE - away_rating) / RATING_SCALE
         return outcome_probabilities(gaps, self.params_)
 
-    def _rating_before(self, team_id: int) -> float:
-        """Return a team's rating, assigning the newcomer value on its debut."""
-        rating = self.ratings_.get(team_id)
-        if rating is not None:
-            return rating
-        assigned = newcomer_value(self.ratings_, self._candidates)
-        self.ratings_[team_id] = assigned
-        self.initial_ratings_[team_id] = assigned
-        return assigned
+
+def _by_kickoff_date(history: History) -> list[list[int]]:
+    """Return the row indices of ``history`` grouped by kickoff date, in stored order.
+
+    The date is the finest granularity the data carries, so it is the finest
+    granularity at which a result can be said to be known.
+    """
+    groups: list[list[int]] = []
+    previous: np.datetime64 | None = None
+    for row in range(len(history)):
+        kickoff = history.kickoff_date[row]
+        if previous is None or kickoff != previous:
+            groups.append([])
+            previous = kickoff
+        groups[-1].append(row)
+    return groups
 
 
 def _newest_season_teams(history: History) -> tuple[int, ...]:

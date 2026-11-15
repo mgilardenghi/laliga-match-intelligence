@@ -16,6 +16,7 @@ from collections.abc import Sequence
 import numpy as np
 import pytest
 from lmi_core.evaluation.walkforward import walk_forward, weekly_cutoffs
+from lmi_core.modeling import elo as elo_module
 from lmi_core.modeling.elo import (
     EloModel,
     LogitParams,
@@ -54,6 +55,12 @@ HAND_AWAY_RATING = 1500.0 - 20.0 * (1.0 - HAND_EXPECTED_SCORE)
 SEASON_ONE_START = datetime.date(2020, 9, 5)
 SEASON_TWO_START = datetime.date(2021, 9, 4)
 AFTER_EVERYTHING = datetime.date(2021, 10, 1)
+SMALL_CUTOFF = datetime.date(2020, 2, 1)
+
+
+def _day(day: int) -> datetime.date:
+    """Return a January 2020 date, for the small leagues built row by row."""
+    return datetime.date(2020, 1, day)
 
 
 def _league(rows: Sequence[tuple[datetime.date, int, int, int, int, int]]) -> History:
@@ -155,6 +162,65 @@ def test_ordered_logit_rows_are_a_distribution_increasing_in_the_gap() -> None:
     assert bool((probabilities >= 0.0).all())
     np.testing.assert_allclose(probabilities.sum(axis=1), np.ones(grid.size), rtol=0.0, atol=1e-12)
     assert bool((np.diff(probabilities[:, 0]) >= 0.0).all())
+
+
+def test_the_likelihood_receives_the_gap_recorded_before_each_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history = _league([(_day(1), 1, 1, 2, 2, 0), (_day(2), 1, 2, 1, 0, 2)])
+    captured: list[NDArray[np.float64]] = []
+    original = elo_module.fit_params
+
+    def spy(d: NDArray[np.float64], result: NDArray[np.int8]) -> LogitParams:
+        captured.append(np.array(d, dtype=np.float64, copy=True))
+        return original(d, result)
+
+    monkeypatch.setattr(elo_module, "fit_params", spy)
+    model = EloModel(seed=SEED)
+
+    model.fit(history, SMALL_CUTOFF)
+
+    # Hand-computed, never read back from the model: the first gap is the start
+    # ratings, and the second comes from the ratings the first result moved.
+    hand_computed = np.array(
+        [HAND_GAP, (HAND_AWAY_RATING + 60.0 - HAND_HOME_RATING) / 400.0], dtype=np.float64
+    )
+    assert len(captured) == 1
+    np.testing.assert_allclose(captured[0], hand_computed, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(model.d_values_, hand_computed, rtol=0.0, atol=1e-12)
+
+
+def test_two_debutants_in_one_match_get_the_same_initial_rating() -> None:
+    rows = [
+        (_day(1), 1, 1, 2, 2, 0),
+        (_day(2), 1, 2, 3, 2, 0),
+        (_day(3), 1, 1, 3, 2, 0),
+        (_day(4), 1, 4, 5, 2, 0),
+    ]
+    prefix = EloModel(seed=SEED)
+    prefix.fit(_league(rows[:3]), _day(4))
+    expected = sum(sorted(prefix.ratings_.values())[:3]) / 3
+    model = EloModel(seed=SEED)
+
+    model.fit(_league(rows), SMALL_CUTOFF)
+
+    assert model.initial_ratings_[4] == pytest.approx(expected, rel=0.0, abs=1e-9)
+    assert model.initial_ratings_[5] == pytest.approx(expected, rel=0.0, abs=1e-9)
+
+
+def test_a_same_date_result_does_not_change_a_later_same_date_forecast_input() -> None:
+    prefix = [(_day(1), 1, 1, 2, 2, 0), (_day(1), 1, 3, 4, 2, 0)]
+    home_win = [*prefix, (_day(2), 1, 1, 2, 2, 0), (_day(2), 1, 5, 6, 2, 0)]
+    away_win = [*prefix, (_day(2), 1, 1, 2, 0, 2), (_day(2), 1, 5, 6, 2, 0)]
+    first = EloModel(seed=SEED)
+    first.fit(_league(home_win), SMALL_CUTOFF)
+    second = EloModel(seed=SEED)
+    second.fit(_league(away_win), SMALL_CUTOFF)
+
+    assert first.ratings_[1] != second.ratings_[1]
+    assert first.initial_ratings_[5] == second.initial_ratings_[5]
+    assert first.replay_[3].d == second.replay_[3].d
+    assert first.d_values_[3] == second.d_values_[3]
 
 
 def test_the_likelihood_sees_the_pre_match_gap_of_every_replay_step() -> None:
