@@ -56,6 +56,9 @@ POSTGRES_ENVIRONMENT_VARIABLES = (
 
 DOMAIN_TABLES = frozenset(
     {
+        "backtest_calibration",
+        "backtest_metrics",
+        "backtest_runs",
         "ingestion_rejections",
         "ingestion_runs",
         "match_odds",
