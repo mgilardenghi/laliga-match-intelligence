@@ -21,6 +21,7 @@ from typing import Final
 import numpy as np
 from numpy.typing import NDArray
 from sqlalchemy import case, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from lmi_core.db.models import Match, MatchOdd
@@ -71,7 +72,7 @@ def load_match_data(session: Session) -> MatchData:
             MatchOdd.market == "1x2",
             MatchOdd.bookmaker.in_(_BOOKMAKERS_BY_PRIORITY),
         )
-        .distinct(MatchOdd.match_id)
+        .ext(distinct_on(MatchOdd.match_id))
         .order_by(MatchOdd.match_id, priority)
         .subquery()
     )
