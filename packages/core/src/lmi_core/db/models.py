@@ -15,6 +15,7 @@ import uuid
 
 from sqlalchemy import (
     CHAR,
+    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
@@ -82,14 +83,14 @@ class Match(Base):
     __tablename__ = "matches"
     __table_args__ = (
         UniqueConstraint("season_id", "home_team_id", "away_team_id"),
-        CheckConstraint("status IN ('scheduled', 'played')", name="status_valid"),
+        CheckConstraint("status IN ('scheduled', 'played', 'withdrawn')", name="status_valid"),
         CheckConstraint(
             "matchday IS NULL OR (matchday >= 1 AND matchday <= 46)",
             name="matchday_range",
         ),
         CheckConstraint("home_team_id <> away_team_id", name="distinct_teams"),
         CheckConstraint(
-            "status <> 'scheduled' OR (home_goals IS NULL AND away_goals IS NULL "
+            "status = 'played' OR (home_goals IS NULL AND away_goals IS NULL "
             "AND ht_home_goals IS NULL AND ht_away_goals IS NULL AND result IS NULL)",
             name="scheduled_no_goals",
         ),
@@ -128,6 +129,10 @@ class Match(Base):
             "OR (ht_home_goals <= home_goals AND ht_away_goals <= away_goals)",
             name="ht_goals_not_above_ft",
         ),
+        CheckConstraint(
+            "(status = 'withdrawn') = (withdrawn_at IS NOT NULL)",
+            name="withdrawn_at_matches_status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
@@ -143,6 +148,9 @@ class Match(Base):
     ht_home_goals: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ht_away_goals: Mapped[int | None] = mapped_column(Integer, nullable=True)
     result: Mapped[str | None] = mapped_column(CHAR(1), nullable=True)
+    withdrawn_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -258,6 +266,10 @@ class IngestionRun(Base):
             "rows_rejected >= 0",
             name="rows_rejected_non_negative",
         ),
+        CheckConstraint(
+            "rows_withdrawn >= 0",
+            name="rows_withdrawn_non_negative",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -277,6 +289,7 @@ class IngestionRun(Base):
     rows_upserted: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     rows_removed: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     rows_rejected: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rows_withdrawn: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     content_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -309,7 +322,7 @@ Index(
 )
 
 BACKTEST_MODEL_NAMES = ("home_win", "base_rate", "market", "elo", "dixon_coles")
-"""The models a backtest scores, in report order."""
+"""The models a backtest scores and a live prediction stores, in report order."""
 
 _BACKTEST_MODEL_NAMES_SQL = ", ".join(f"'{name}'" for name in BACKTEST_MODEL_NAMES)
 """The model names as one SQL list literal, so both CHECK constraints agree."""
@@ -451,3 +464,251 @@ class BacktestCalibration(Base):
     observed_frequency: Mapped[float | None] = mapped_column(
         postgresql.DOUBLE_PRECISION, nullable=True
     )
+
+
+class PredictionRun(Base):
+    """One execution of the live prediction pass for one as-of date.
+
+    The worker inserts the row as ``running``, writes the ``predictions`` rows
+    and then moves it to ``succeeded`` or ``failed``. A database trigger rejects
+    every delete and every update that is not that single transition, so the
+    counters and the fingerprints of a finished run cannot be rewritten.
+    """
+
+    __tablename__ = "prediction_runs"
+    __table_args__ = (
+        CheckConstraint("status IN ('running', 'succeeded', 'failed')", name="status_valid"),
+        CheckConstraint("trigger IN ('cli', 'schedule')", name="trigger_valid"),
+        CheckConstraint("horizon_days BETWEEN 1 AND 60", name="horizon_days_in_range"),
+        CheckConstraint(
+            "(status = 'running') = (finished_at IS NULL)",
+            name="finished_matches_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    as_of_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False)
+    horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    code_version: Mapped[str] = mapped_column(Text, nullable=False)
+    data_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    n_history: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_fixtures: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_inserted: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_existing: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_no_forecast: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+Index(
+    "ix_prediction_runs_as_of_date",
+    PredictionRun.as_of_date.desc(),
+)
+
+
+class Prediction(Base):
+    """One stored probability triple for a match, model and as-of date.
+
+    A stored prediction is immutable: the ``predictions_guard_insert`` trigger
+    stamps ``created_at`` and rejects a match that is no longer scheduled, an
+    ``as_of_date`` that is not the Madrid creation date and a row timestamped at
+    or after the kickoff date, while the ``predictions_immutable`` trigger
+    rejects every UPDATE, DELETE and TRUNCATE.
+    """
+
+    __tablename__ = "predictions"
+    __table_args__ = (
+        UniqueConstraint("match_id", "model", "as_of_date"),
+        CheckConstraint(f"model IN ({_BACKTEST_MODEL_NAMES_SQL})", name="model_valid"),
+        CheckConstraint("p_home BETWEEN 0 AND 1", name="p_home_in_range"),
+        CheckConstraint("p_draw BETWEEN 0 AND 1", name="p_draw_in_range"),
+        CheckConstraint("p_away BETWEEN 0 AND 1", name="p_away_in_range"),
+        CheckConstraint(
+            "abs(p_home + p_draw + p_away - 1) < 1e-6",
+            name="probs_sum_to_one",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("prediction_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("matches.id", ondelete="RESTRICT"), nullable=False
+    )
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str] = mapped_column(Text, nullable=False)
+    model_config: Mapped[dict[str, object]] = mapped_column(postgresql.JSONB, nullable=False)
+    as_of_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="The predictions_guard_insert trigger overwrites created_at with now().",
+    )
+    p_home: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    p_draw: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    p_away: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    odds_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+Index(
+    "ix_predictions_match_id_model_as_of_date",
+    Prediction.match_id,
+    Prediction.model,
+    text("as_of_date DESC"),
+)
+Index(
+    "ix_predictions_run_id",
+    Prediction.run_id,
+)
+
+SIMULATION_MODEL_NAMES = ("dixon_coles",)
+"""The models a simulation run supports."""
+
+_SIMULATION_MODEL_NAMES_SQL = ", ".join(f"'{name}'" for name in SIMULATION_MODEL_NAMES)
+"""The model names as one SQL list literal, so both CHECK constraints agree."""
+
+
+class SimulationRun(Base):
+    """One Monte Carlo simulation of the remaining season.
+
+    Unlike a prediction, the row is not immutable: the worker moves ``status``
+    from ``queued`` to ``running`` to ``succeeded`` or ``failed`` and fills the
+    timestamps, the counters and the error in place. A partial unique index
+    keeps one active run per season, as-of date, size, seed and model, and a
+    partial index serves the lookup of the last succeeded run.
+    """
+
+    __tablename__ = "simulation_runs"
+    __table_args__ = (
+        CheckConstraint("n_runs BETWEEN 100 AND 100000", name="n_runs_in_range"),
+        CheckConstraint("seed >= 0", name="seed_non_negative"),
+        CheckConstraint(f"model IN ({_SIMULATION_MODEL_NAMES_SQL})", name="model_valid"),
+        CheckConstraint(
+            "1 <= ucl_positions AND ucl_positions <= europe_positions",
+            name="positions_ordered",
+        ),
+        CheckConstraint(
+            "relegation_positions >= 1",
+            name="relegation_positions_at_least_one",
+        ),
+        CheckConstraint("kind IN ('live', 'backfill')", name="kind_valid"),
+        CheckConstraint("trigger IN ('api', 'cli', 'schedule')", name="trigger_valid"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="status_valid",
+        ),
+        CheckConstraint("(status = 'queued') = (started_at IS NULL)", name="queued_has_no_start"),
+        CheckConstraint(
+            "(status IN ('queued', 'running')) = (finished_at IS NULL)",
+            name="finished_matches_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id"), nullable=False)
+    as_of_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    n_runs: Mapped[int] = mapped_column(Integer, nullable=False)
+    seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    model_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_config: Mapped[dict[str, object] | None] = mapped_column(postgresql.JSONB, nullable=True)
+    ucl_positions: Mapped[int] = mapped_column(Integer, nullable=False)
+    europe_positions: Mapped[int] = mapped_column(Integer, nullable=False)
+    relegation_positions: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    code_version: Mapped[str] = mapped_column(Text, nullable=False)
+    data_fingerprint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    n_fixed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_simulated: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_withdrawn_excluded: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_complete_matchday: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+Index(
+    "ux_simulation_runs_active",
+    SimulationRun.season_id,
+    SimulationRun.as_of_date,
+    SimulationRun.n_runs,
+    SimulationRun.seed,
+    SimulationRun.model,
+    unique=True,
+    postgresql_where=text("status IN ('queued', 'running')"),
+)
+Index(
+    "ix_simulation_runs_season_id_as_of_date",
+    SimulationRun.season_id,
+    text("as_of_date DESC"),
+    postgresql_where=text("status = 'succeeded'"),
+)
+
+
+class SimulationTeamResult(Base):
+    """One team's simulated season inside one simulation run.
+
+    The worker writes the row once, when the run succeeds, and never updates it:
+    a rerun stores a new run id. ``points_pmf`` holds the probability of each
+    reachable final points total, and ``position_probs`` the probability of each
+    final league position.
+    """
+
+    __tablename__ = "simulation_team_results"
+    __table_args__ = (
+        UniqueConstraint("run_id", "team_id"),
+        CheckConstraint("p_title BETWEEN 0 AND 1", name="p_title_in_range"),
+        CheckConstraint("p_ucl BETWEEN 0 AND 1", name="p_ucl_in_range"),
+        CheckConstraint("p_europe BETWEEN 0 AND 1", name="p_europe_in_range"),
+        CheckConstraint("p_relegation BETWEEN 0 AND 1", name="p_relegation_in_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, Identity(always=False), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("simulation_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    current_played: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_points: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_goal_difference: Mapped[int] = mapped_column(Integer, nullable=False)
+    mean_points: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    points_p05: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_p25: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_p50: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_p75: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_p95: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_min: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_pmf: Mapped[list[float]] = mapped_column(
+        postgresql.ARRAY(postgresql.DOUBLE_PRECISION), nullable=False
+    )
+    mean_position: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    position_probs: Mapped[list[float]] = mapped_column(
+        postgresql.ARRAY(postgresql.DOUBLE_PRECISION), nullable=False
+    )
+    p_title: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    p_ucl: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    p_europe: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    p_relegation: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
