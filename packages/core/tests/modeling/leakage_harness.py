@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from typing import Final
 
 import numpy as np
+from lmi_core.evaluation.walkforward import walk_forward, weekly_cutoffs
 from lmi_core.modeling.registry import make_model
 from lmi_core.modeling.types import Fixtures, History, MatchData
 from numpy.typing import NDArray
@@ -249,6 +250,42 @@ def assert_fit_predict_invariant(model_name: str) -> None:
         err_msg=(
             f"{model_name}: probabilities changed when the results dated on or after "
             f"the cutoff {cutoff.isoformat()} were replaced"
+        ),
+    )
+
+
+def assert_walk_forward_invariant(model_name: str) -> None:
+    """Assert every walk-forward window leaves the future results alone.
+
+    Cutoffs run from the first kickoff date through the middle distinct kickoff
+    date. A second dataset replaces the goals and result of every match dated on
+    or after that boundary, including matches inside the earlier windows. The
+    scored matches and the probabilities must be bit-identical.
+    """
+    data = make_synthetic_league()
+    boundary = middle_cutoff(data)
+    first = to_date(data.kickoff_date[0])
+    last = to_date(data.kickoff_date[-1])
+    cutoffs = [cutoff for cutoff in weekly_cutoffs(first, last) if cutoff <= boundary]
+    perturbed_data = perturb_results_from(data, boundary)
+    changed = data.kickoff_date >= np.datetime64(boundary, "D")
+    assert not np.array_equal(perturbed_data.result[changed], data.result[changed]), (
+        "the perturbation changed no result, so the invariance check would be vacuous"
+    )
+    reference = walk_forward(data, model_name, seed=DEFAULT_SEED, cutoffs=cutoffs)
+    perturbed = walk_forward(perturbed_data, model_name, seed=DEFAULT_SEED, cutoffs=cutoffs)
+    assert len(reference) > 0, f"{model_name}: the walk-forward run scored no match"
+    np.testing.assert_array_equal(
+        perturbed.match_id,
+        reference.match_id,
+        err_msg=f"{model_name}: match ids changed at the boundary {boundary.isoformat()}",
+    )
+    np.testing.assert_array_equal(
+        perturbed.probabilities,
+        reference.probabilities,
+        err_msg=(
+            f"{model_name}: probabilities changed when the results dated on or after "
+            f"the boundary {boundary.isoformat()} were replaced"
         ),
     )
 

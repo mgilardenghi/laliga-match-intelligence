@@ -17,6 +17,7 @@ from lmi_core.modeling.types import History
 
 from modeling.leakage_harness import (
     assert_fit_predict_invariant,
+    assert_walk_forward_invariant,
     fixtures_between,
     history_before,
     make_fixtures,
@@ -146,3 +147,8 @@ def test_base_rate_predicts_one_constant_row_per_fixture() -> None:
 @pytest.mark.parametrize("name", ["home_win", "base_rate"])
 def test_fit_predict_invariance(name: str) -> None:
     assert_fit_predict_invariant(name)
+
+
+@pytest.mark.parametrize("name", ["home_win", "base_rate"])
+def test_walk_forward_invariance(name: str) -> None:
+    assert_walk_forward_invariant(name)
