@@ -61,10 +61,13 @@ def create_match(
     home: Team,
     away: Team,
     kickoff_date: datetime.date = datetime.date(2098, 8, 15),
+    kickoff_time: datetime.time | None = None,
     matchday: int = 1,
     status: str = "scheduled",
     home_goals: int | None = None,
     away_goals: int | None = None,
+    ht_home_goals: int | None = None,
+    ht_away_goals: int | None = None,
 ) -> Match:
     """Insert one fixture and return the ORM row with its generated id.
 
@@ -73,6 +76,11 @@ def create_match(
     tie ``result`` to the goals and require a played row to carry both. A
     scheduled match is written with no goals and no result, as the schema
     requires: NULL there means "not known yet", not "no goals".
+
+    ``kickoff_time`` defaults to ``None``, the state of a fixture whose source
+    published no time. ``ht_home_goals`` and ``ht_away_goals`` are the
+    half-time score of a played match and default to unknown; the schema
+    requires them to be given together and to be at most the full-time score.
 
     Raises:
         ValueError: the match is played and one of the goal counts is missing,
@@ -83,6 +91,8 @@ def create_match(
     else:
         home_goals = None
         away_goals = None
+        ht_home_goals = None
+        ht_away_goals = None
         result = None
 
     row = Match(
@@ -90,10 +100,13 @@ def create_match(
         home_team_id=home.id,
         away_team_id=away.id,
         kickoff_date=kickoff_date,
+        kickoff_time=kickoff_time,
         matchday=matchday,
         status=status,
         home_goals=home_goals,
         away_goals=away_goals,
+        ht_home_goals=ht_home_goals,
+        ht_away_goals=ht_away_goals,
         result=result,
     )
     session.add(row)
