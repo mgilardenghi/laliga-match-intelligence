@@ -67,6 +67,7 @@ The worker is a one-shot job: by default it runs `python -m lmi_worker status`, 
 | `make ps` | Show the state of every service |
 | `make ingest` | Run the football-data and openfootball ingestion for the current season (network) |
 | `make ingest-backfill` | Run the ingestion for every season from 2005-06 through the current one |
+| `make backtest` | Run the walk-forward backtest over the scored seasons and store its results |
 | `make lint` | Run Python and web linters, formatters and type checks |
 | `make test` | Run the Python unit test suite (no database needed) |
 | `make test-integration` | Run the integration tests against a throwaway PostgreSQL container, setting `LMI_ALLOW_DESTRUCTIVE_TESTS=1` for it |

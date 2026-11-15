@@ -26,6 +26,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from lmi_worker import http
+from lmi_worker.backtest import add_backtest_parser, run_backtest_command
 from lmi_worker.ingest.pipeline import Fetcher, JobResult, run_jobs
 from lmi_worker.ingest.plan import PlanError, plan_jobs
 from lmi_worker.status import collect_status, format_status
@@ -79,6 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
         "status",
         help="Print the stored seasons, table counts, latest runs and digest.",
     )
+
+    add_backtest_parser(subparsers)
     return parser
 
 
@@ -100,6 +103,8 @@ def main(
         return _ingest(args, today=today, fetcher=fetcher)
     if args.command == "status":
         return _status()
+    if args.command == "backtest":
+        return run_backtest_command(args)
     raise ValueError(f"unhandled command: {args.command}")
 
 
