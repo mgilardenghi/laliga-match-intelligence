@@ -66,11 +66,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
     Nothing happens on startup, and the cache is consulted rather than filled:
     importing this module must not need Postgres. When an engine exists it is
-    disposed so its pooled connections are closed, and the cache is cleared so a
-    second application in the same process builds a fresh engine instead of
-    reusing one whose pool is already closed.
+    disposed so its pooled connections are closed, and the engine cache is
+    cleared so a second application in the same process builds a fresh engine
+    instead of reusing one whose pool is already closed.
+
+    The session factory is cached too, so it is cleared with the engine. A
+    factory left in the cache stays bound to the disposed engine: the next
+    request through the default dependency would reopen the pool of an engine
+    nobody disposes, because the engine cache is already empty and the next
+    shutdown therefore sees nothing to dispose.
     """
     yield
     if get_engine.cache_info().currsize:
         get_engine().dispose()
+        get_session_factory.cache_clear()
         get_engine.cache_clear()
