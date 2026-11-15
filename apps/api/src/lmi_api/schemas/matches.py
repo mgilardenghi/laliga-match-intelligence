@@ -21,12 +21,14 @@ from pydantic import BaseModel
 from lmi_api.schemas.common import Page
 from lmi_api.schemas.teams import Team
 
-MatchStatus = Literal["scheduled", "played"]
-"""The two states a stored fixture can be in.
+MatchStatus = Literal["scheduled", "played", "withdrawn"]
+"""The three states a stored fixture can be in.
 
 ``scheduled`` means the match has not been played: the score, the half-time
 score and the result are all unknown. ``played`` means they are known, and the
-result is consistent with the score.
+result is consistent with the score. ``withdrawn`` means the source no longer
+lists the fixture but it is kept because a stored prediction references it, so
+it carries no goals and a ``withdrawn_at`` stamp instead of playing time.
 """
 
 MatchOutcome = Literal["H", "D", "A"]

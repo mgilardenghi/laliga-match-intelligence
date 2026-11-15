@@ -2,9 +2,11 @@
 
 The tests cover the exit-code paths that must work before any connection exists:
 a successful ``--help``, a malformed command line, a rejected plan, and a missing
-database configuration for both commands. Every command that needs configuration
-runs with the ``POSTGRES_*`` variables removed, so the configuration error is the
-one a fresh shell sees.
+database configuration for both commands. The M4 stub commands are covered too:
+one test per command asserts the exit code and the stderr line, and one asserts
+``--help`` lists all three. Every command that needs configuration runs with the
+``POSTGRES_*`` variables removed, so the configuration error is the one a fresh
+shell sees.
 
 One test points the configuration at a closed port: ``ingest`` checks the database
 once before the first job, so an unreachable server is one line on stderr and exit
@@ -153,6 +155,38 @@ def test_help_exits_with_zero() -> None:
         main(["--help"])
 
     assert excinfo.value.code == 0
+
+
+def test_help_lists_the_three_m4_stub_commands(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--help"])
+
+    assert excinfo.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "predict" in help_text
+    assert "simulate" in help_text
+    assert "daily" in help_text
+
+
+def test_predict_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["predict"])
+
+    assert code == 2
+    assert capsys.readouterr().err.strip() == "predict: not implemented"
+
+
+def test_simulate_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["simulate"])
+
+    assert code == 2
+    assert capsys.readouterr().err.strip() == "simulate: not implemented"
+
+
+def test_daily_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["daily"])
+
+    assert code == 2
+    assert capsys.readouterr().err.strip() == "daily: not implemented"
 
 
 def test_two_exclusive_season_flags_exit_with_two() -> None:
