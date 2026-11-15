@@ -78,6 +78,24 @@ class Model(ABC):
             ValueError: the subclass returned probabilities that are not a
                 ``(n, 3)`` array of all-NaN or non-negative rows summing to 1.
         """
+        self._guard_fixtures(fixtures)
+        probabilities = np.asarray(self._predict(fixtures), dtype=np.float64)
+        _validate_probabilities(probabilities, expected_rows=len(fixtures), model_name=self.name)
+        return probabilities
+
+    @final
+    def _guard_fixtures(self, fixtures: Fixtures) -> None:
+        """Apply the input guards every prediction path shares.
+
+        The checks run in this order: the model is fitted, the argument is not a
+        ``History``, and every fixture is dated on or after the cutoff the fit
+        used.
+
+        Raises:
+            RuntimeError: :meth:`fit` has not been called yet.
+            LeakageError: a ``History`` was passed instead of fixtures, or a
+                fixture is dated before the cutoff the model was fitted at.
+        """
         if self._cutoff is None:
             raise RuntimeError(f"{self.name}: predict() called before fit()")
         if isinstance(fixtures, History):
@@ -94,9 +112,6 @@ class Model(ABC):
                 f"matches dated before the cutoff {self._cutoff.isoformat()} "
                 f"(latest {latest}); a fixture must be on or after the cutoff"
             )
-        probabilities = np.asarray(self._predict(fixtures), dtype=np.float64)
-        _validate_probabilities(probabilities, expected_rows=len(fixtures), model_name=self.name)
-        return probabilities
 
     @abstractmethod
     def _fit(self, history: History, cutoff: datetime.date) -> None:

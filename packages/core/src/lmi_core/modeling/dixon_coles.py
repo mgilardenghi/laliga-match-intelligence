@@ -21,7 +21,9 @@ than independent Poisson predicts, and 1-0 and 0-1 less frequent, which is the
 sign football data reports. ``tau_correction`` returns the formula unclipped;
 :func:`score_matrix` sets a negative raw cell to zero so that a large rate with a
 positive ``rho`` cannot produce a negative probability, and keeps every positive
-cell unchanged.
+cell unchanged. The method :meth:`DixonColesModel.score_matrix` returns the same
+matrix for the fixtures of a fitted model, so a caller that needs the matrix and
+a caller that needs the H/D/A rows see one score distribution, not two.
 
 Fit: the window is ``cutoff - 1095 days <= kickoff_date < cutoff``, so the fit
 never sees a match dated on or after its cutoff and ignores matches older than
@@ -204,6 +206,15 @@ def score_matrix(lambda_home: ArrayLike, lambda_away: ArrayLike, rho: float) -> 
     return matrix / totals
 
 
+_score_matrix_from_rates = score_matrix
+"""Private alias of :func:`score_matrix`, for the model method of the same name.
+
+Inside :meth:`DixonColesModel.score_matrix` the bare name refers to the method,
+not to the module function, so the method reaches the function through this
+alias. The public function keeps its name and signature.
+"""
+
+
 def negative_log_likelihood(
     theta: NDArray[np.float64], history: History, cutoff: datetime.date
 ) -> tuple[float, NDArray[np.float64]]:
@@ -362,8 +373,19 @@ class DixonColesModel(Model):
         )
         self._newcomer_alpha, self._newcomer_beta = _newcomer_strengths(design, alpha, beta)
 
-    def _predict(self, fixtures: Fixtures) -> NDArray[np.float64]:
-        """Return the H/D/A probabilities of each fixture from the score matrix."""
+    def score_matrix(self, fixtures: Fixtures) -> NDArray[np.float64]:
+        """Return the renormalized (n, 11, 11) score matrix of each fixture.
+
+        Entry ``[i, h, a]`` is the probability of the score ``h``-``a`` in fixture
+        ``i``, renormalized like the module function :func:`score_matrix`, which
+        shares its name. The input guards are the ones :meth:`predict` applies.
+
+        Raises:
+            RuntimeError: :meth:`fit` has not been called yet.
+            LeakageError: a ``History`` was passed instead of fixtures, or a
+                fixture is dated before the cutoff the model was fitted at.
+        """
+        self._guard_fixtures(fixtures)
         parameters = self.parameters
         if parameters is None:
             raise RuntimeError(f"{self.name}: predict() called before fit()")
@@ -375,7 +397,11 @@ class DixonColesModel(Model):
         )
         rate_home = np.exp(parameters.mu + parameters.gamma + home_alpha - away_beta)
         rate_away = np.exp(parameters.mu + away_alpha - home_beta)
-        matrix = score_matrix(rate_home, rate_away, parameters.rho)
+        return _score_matrix_from_rates(rate_home, rate_away, parameters.rho)
+
+    def _predict(self, fixtures: Fixtures) -> NDArray[np.float64]:
+        """Return the H/D/A probabilities of each fixture from the score matrix."""
+        matrix = self.score_matrix(fixtures)
         probabilities = np.empty((len(fixtures), 3), dtype=np.float64)
         probabilities[:, _HOME] = np.tril(matrix, -1).sum(axis=(1, 2))
         probabilities[:, _DRAW] = np.diagonal(matrix, axis1=1, axis2=2).sum(axis=1)
