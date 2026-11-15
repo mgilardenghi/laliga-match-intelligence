@@ -127,9 +127,11 @@ fixture without a published kickoff time is still inside it.
 The sort key is `kickoff_date`, then `kickoff_time`, then `id`. A fixture whose
 source published no time never jumps to the top of its day and never leads the
 list in reverse: a null `kickoff_time` sorts last in **both** directions, while
-the date and the identifier still reverse. Within one day the two orders
-therefore differ: `desc` reverses the timed fixtures of a day and still ends
-with the untimed ones. A client cannot page `desc` by reversing `asc`.
+the date and the identifier still reverse. Within one day `desc` reverses the
+relative order of the timed fixtures and still ends with the untimed ones, so
+the two orders are identical on a day that holds a single timed fixture and
+diverge as soon as one day holds two. A client cannot page `desc` by reversing
+`asc`.
 
 ```json
 {

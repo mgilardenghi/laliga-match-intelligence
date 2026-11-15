@@ -57,8 +57,9 @@ def list_matches(
     identifier. A fixture whose source published no time therefore never jumps
     to the top of its day and never leads the list in reverse: the null time
     sorts last in both directions, while the date and the identifier still
-    reverse. Within one day the two orders therefore differ, because ``desc``
-    reverses the timed fixtures and still ends with the untimed ones.
+    reverse. Within one day ``desc`` reverses the relative order of the timed
+    fixtures and still ends with the untimed ones, so the two orders agree on a
+    day that holds one timed fixture and diverge once a day holds two.
 
     The request path issues two statements, one for the count and one for the
     page, whatever the size of the page: both teams come from explicit joins on
@@ -66,8 +67,9 @@ def list_matches(
     could lazy-load per row. The only exception is a page that matched nothing
     while a season code or a team identifier was given: one existence probe per
     value given, so at most two, decides between an empty page and a 404. The
-    probes cannot run before the page, because a miss is only possible when the
-    answer is empty.
+    probes run after the count and before the page statement, because a miss is
+    only possible when the count is zero: an unknown value raises there, a known
+    one falls through to the page query.
 
     Raises:
         HTTPException: 404 when ``season`` or ``team_id`` names no stored row.
