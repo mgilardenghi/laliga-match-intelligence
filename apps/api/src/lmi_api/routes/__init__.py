@@ -11,7 +11,7 @@ adding an endpoint group touches this tuple and the new module, nothing else.
 
 from fastapi import APIRouter
 
-from lmi_api.routes import seasons, teams
+from lmi_api.routes import matches, seasons, teams
 
-V1_ROUTERS: tuple[APIRouter, ...] = (seasons.router, teams.router)
+V1_ROUTERS: tuple[APIRouter, ...] = (seasons.router, teams.router, matches.router)
 """Every router served under the versioned prefix, in mounting order."""
