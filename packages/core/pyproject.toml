@@ -3,7 +3,16 @@ name = "lmi-core"
 version = "0.1.0"
 description = "Shared configuration and domain code for the LMI API and worker."
 requires-python = ">=3.14,<3.15"
-dependencies = ["pydantic-settings", "sqlalchemy", "alembic", "psycopg[binary]"]
+# Unpinned on purpose: uv.lock pins the resolved versions.
+dependencies = [
+    "pydantic-settings",
+    "pydantic",
+    "sqlalchemy",
+    "alembic",
+    "psycopg[binary]",
+    "numpy",
+    "scipy",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.8,<0.14"]

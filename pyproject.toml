@@ -6,7 +6,7 @@ members = ["apps/api", "apps/worker", "packages/core"]
 
 [dependency-groups]
 # Unpinned on purpose: uv.lock pins the resolved versions.
-dev = ["httpx", "mypy", "pytest", "ruff"]
+dev = ["httpx", "mypy", "pytest", "ruff", "scipy-stubs"]
 
 [tool.ruff]
 line-length = 100
