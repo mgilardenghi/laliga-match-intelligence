@@ -7,6 +7,9 @@ members = ["apps/api", "apps/worker", "packages/core"]
 [dependency-groups]
 # Unpinned on purpose: uv.lock pins the resolved versions.
 dev = ["httpx", "mypy", "pytest", "ruff", "scipy-stubs"]
+# The browser tests: Playwright drives the browser and pytest-playwright supplies
+# the fixtures. Unpinned on purpose as well, because uv.lock pins the resolution.
+e2e = ["playwright", "pytest-playwright"]
 
 [tool.ruff]
 line-length = 100
@@ -27,6 +30,14 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["apps/api/tests", "apps/worker/tests", "packages/core/tests"]
+# The browser tests need a running stack and the `e2e` dependency group, so the
+# unit and integration runs never collect them. The e2e targets override this
+# with `-o addopts=""`.
+addopts = "--ignore=e2e"
 # Integration tests need a live PostgreSQL. They are opt-in: `make test` and the
 # unit step in CI select `-m "not integration"`.
-markers = ["integration: needs a live PostgreSQL (run with `make test-integration`)"]
+markers = [
+    "integration: needs a live PostgreSQL (run with `make test-integration`)",
+    "empty: browser test on the throwaway stack with no data (the CI tier)",
+    "loaded: browser test on the throwaway stack with ingested data (local tier)",
+]

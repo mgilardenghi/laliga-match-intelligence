@@ -1,0 +1,25 @@
+# Throwaway stack for the browser tests. It is an override, so it is only ever
+# layered over the base file, never used on its own:
+#
+#   docker compose -p "$E2E_PROJECT" -f docker-compose.yml -f e2e/compose.e2e.yml
+#
+# `!override` replaces the published port list of the base file instead of
+# appending to it, so this stack never binds the ports of the developer's `lmi`
+# stack. `!override` needs Compose 2.24.4 or later.
+
+services:
+  api:
+    ports: !override
+      - "127.0.0.1:${E2E_API_PORT:-18000}:8000"
+
+  web:
+    ports: !override
+      - "127.0.0.1:${E2E_WEB_PORT:-13000}:3000"
+    environment:
+      # Restated so the merge into the base file keeps this value explicit.
+      API_URL: http://api:8000
+      # The chart development pages are part of the tested surface.
+      LMI_DEV_PAGES: "1"
+
+# Volumes stay namespaced by the Compose project, so the browser-test stack gets
+# its own `pgdata` volume and nothing is declared here.

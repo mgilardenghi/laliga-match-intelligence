@@ -93,6 +93,68 @@ jobs:
       - name: Build
         run: pnpm --filter web build
 
+  api-client:
+    name: API client drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.13.7"
+          enable-cache: true
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: "12.18.0"
+          run_install: false
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install the workspace from the lock file
+        run: uv sync --all-packages --locked
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check the generated client matches the contract
+        run: make api-client-check
+
+  e2e-empty:
+    name: Dashboard browser smoke (empty stack)
+    runs-on: ubuntu-latest
+    needs: [web, api-client]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create the env file from the committed template
+        run: cp .env.example .env
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.13.7"
+          enable-cache: true
+      - name: Install the workspace and the browser test group
+        run: uv sync --all-packages --locked --group e2e
+      # CI runs only the empty tier, against a throwaway Compose project on its
+      # own ports: the loaded tier, its ingested data and every live data source
+      # stay local, so this job never downloads anything.
+      - name: Install the browser
+        run: uv run --group e2e playwright install --with-deps chromium
+      - name: Run the browser tests
+        run: make e2e
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose -p lmi-e2e -f docker-compose.yml -f e2e/compose.e2e.yml logs --no-color
+      - name: Stop the throwaway stack
+        if: always()
+        run: make e2e-down
+
   docker:
     name: Compose stack
     runs-on: ubuntu-latest

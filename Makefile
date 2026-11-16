@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose
 
-.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler lint test test-integration build api-client api-client-check clean
+.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler e2e e2e-data e2e-loaded e2e-down lint test test-integration build api-client api-client-check clean
 
 # Throwaway database for the integration tests. Same image as Compose, a host
 # port that is unlikely to collide, and placeholder credentials only.
@@ -11,8 +11,17 @@ TEST_DB := lmi-test-db
 TEST_DB_IMAGE := postgres:18.7-alpine
 TEST_DB_PORT := 55432
 
+# Browser-test stack: its own Compose project and its own published ports, so it
+# never touches the developer's `lmi` stack.
+E2E_PROJECT ?= lmi-e2e
+E2E_API_PORT ?= 18000
+E2E_WEB_PORT ?= 13000
+E2E_COMPOSE := docker compose -p $(E2E_PROJECT) -f docker-compose.yml -f e2e/compose.e2e.yml
+E2E_API_URL := http://127.0.0.1:$(E2E_API_PORT)
+E2E_BASE_URL := http://127.0.0.1:$(E2E_WEB_PORT)
+
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\n"} /^[a-z-]+:.*## / {printf "  %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\n"} /^[a-z0-9-]+:.*## / {printf "  %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 setup: ## Create .env if missing and install Python and Node dependencies
 	@if [ ! -f .env ]; then cp .env.example .env; fi
@@ -69,6 +78,38 @@ simulate: ingest-deps ## Run a Monte Carlo season simulation and store its resul
 
 scheduler: ## Start the Celery beat scheduler (profile "scheduler"; its daily cycle downloads data)
 	$(COMPOSE) --profile scheduler up -d --build scheduler
+
+e2e: ## Build the throwaway browser-test stack and run the tests that need no data
+	$(E2E_COMPOSE) up -d --build --wait db redis
+	$(E2E_COMPOSE) up -d --build migrate
+	$(E2E_COMPOSE) wait migrate
+	$(E2E_COMPOSE) up -d --build --wait --no-deps api web
+	E2E_BASE_URL=$(E2E_BASE_URL) uv run --group e2e pytest -o addopts="" e2e -m empty
+
+e2e-data: ## Load the throwaway browser-test stack with real data (network, idempotent)
+	@if curl -fsS $(E2E_API_URL)/v1/model-metrics >/dev/null 2>&1; then \
+		echo "the e2e stack already holds data"; \
+	else \
+		$(MAKE) ingest-backfill backtest predict simulate COMPOSE="$(E2E_COMPOSE)"; \
+	fi
+
+e2e-loaded: ## Run the tests that need data against a standalone dashboard server
+	pnpm --filter web build
+	@rm -rf apps/web/.next/standalone/apps/web/public apps/web/.next/standalone/apps/web/.next/static
+	@mkdir -p apps/web/.next/standalone/apps/web/.next
+	@cp -R apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+	@cp -R apps/web/public apps/web/.next/standalone/apps/web/public
+	@PORT=$(E2E_WEB_PORT) HOSTNAME=127.0.0.1 API_URL=$(E2E_API_URL) node apps/web/.next/standalone/apps/web/server.js & \
+	server=$$!; \
+	trap 'kill $$server 2>/dev/null || true' EXIT INT TERM; \
+	for attempt in $$(seq 1 60); do \
+		if curl -fsS $(E2E_BASE_URL) >/dev/null 2>&1; then break; fi; \
+		sleep 1; \
+	done; \
+	E2E_BASE_URL=$(E2E_BASE_URL) uv run --group e2e pytest -o addopts="" e2e -m loaded
+
+e2e-down: ## Stop the throwaway browser-test stack and delete its volumes
+	$(E2E_COMPOSE) down -v --remove-orphans
 
 lint: ## Run Python and web linters, formatters and type checks
 	uv run ruff check .
