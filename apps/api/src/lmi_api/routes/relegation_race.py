@@ -9,8 +9,12 @@ is implemented here. The survival line and the rival group come from
 :func:`lmi_core.standings.compute_standings`, the relegation count from
 :func:`lmi_core.simulation.engine.Qualification`, the season series from
 :func:`lmi_api.views.load_simulation_history_points`, and the fixture summaries
-from :func:`lmi_api.views.load_match_summaries`. This module only decides which
-rows the read selects and maps them to the payload.
+from :func:`lmi_api.views.load_match_summaries`. The seasons, their matches, the
+clubs' names and the season's table come from :func:`lmi_api.views.load_seasons`,
+:func:`lmi_api.views.load_season_matches`, :func:`lmi_api.views.load_team_names`
+and :func:`lmi_api.views.season_table`, so this route cannot rank a season
+differently from the team history or the standings endpoint. This module only
+decides which rows the read selects and maps them to the payload.
 
 The R5 per-fixture and next-match projections are not part of this milestone.
 ``p_win``, ``p_draw``, ``p_loss`` and ``next_match`` are nullable in the
@@ -35,13 +39,10 @@ from lmi_core.analytics.relegation import (
     nearest_rivals,
     survival_threshold,
 )
-from lmi_core.db.models import Match as MatchModel
-from lmi_core.db.models import Season as SeasonModel
 from lmi_core.db.models import SimulationRun as SimulationRunModel
 from lmi_core.db.models import SimulationTeamResult as SimulationTeamResultModel
 from lmi_core.db.models import Team as TeamModel
 from lmi_core.simulation import Qualification
-from lmi_core.standings import MatchResult, StandingRow, compute_standings
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -68,45 +69,6 @@ Four is the width the race view renders. The number lives here, next to the read
 that applies it, because the core selector takes it as an argument and must not
 decide a product width.
 """
-
-
-class _SeasonRow(NamedTuple):
-    """One stored season, as the all-seasons statement returns it."""
-
-    id: int
-    code: str
-    start_year: int
-
-
-class _MatchRow(NamedTuple):
-    """One match of one stored season, read once for the threshold and the table.
-
-    The row keeps the status instead of a boolean, because two rules read it: the
-    threshold counts a ``played`` match as a result, while the remaining fixtures
-    are the ``scheduled`` ones. The goals stay optional, since only a played row
-    carries them.
-    """
-
-    id: int
-    season_id: int
-    home_team_id: int
-    away_team_id: int
-    home_goals: int | None
-    away_goals: int | None
-    kickoff_date: datetime.date
-    status: str
-
-    @property
-    def played(self) -> bool:
-        """Return whether the row is a result the table may count.
-
-        The goal checks state the rule the ``played_complete`` check constraint
-        already enforces, so a status that drifted cannot make the read count an
-        incomplete result.
-        """
-        return (
-            self.status == "played" and self.home_goals is not None and self.away_goals is not None
-        )
 
 
 class _RunRow(NamedTuple):
@@ -236,17 +198,17 @@ def get_team_relegation_race(
     team = Team.model_validate(stored_team)
 
     season_id, season_code = views.resolve_season(session, code=season)
-    seasons = _load_seasons(session)
-    matches = _load_matches(session, season_ids=[row.id for row in seasons])
+    seasons = views.load_seasons(session)
+    matches = views.load_season_matches(session, season_ids=[row.id for row in seasons])
     season_matches = [row for row in matches if row.season_id == season_id]
     if team_id not in _team_ids(season_matches):
         raise HTTPException(status_code=404, detail="Team not found in season")
 
-    names = _load_team_names(
+    names = views.load_team_names(
         session,
         team_ids=sorted({side for row in matches for side in (row.home_team_id, row.away_team_id)}),
     )
-    rows_by_season: dict[int, list[_MatchRow]] = defaultdict(list)
+    rows_by_season: dict[int, list[views.MatchRow]] = defaultdict(list)
     for row in matches:
         rows_by_season[row.season_id].append(row)
 
@@ -257,7 +219,9 @@ def get_team_relegation_race(
     if threshold is None:
         raise HTTPException(status_code=404, detail="no completed season")
 
-    positions = {row.team_id: row.position for row in _standings(season_matches, names=names)}
+    positions = {
+        row.team_id: row.position for row in views.season_table(season_matches, names=names)
+    }
     run_id, as_of_date, run_rows = _load_latest_run(session, season_id=season_id)
     rivals, rival_ids = _rivals(run_rows, team_id=team_id)
     points = (
@@ -286,88 +250,8 @@ def get_team_relegation_race(
     )
 
 
-def _load_seasons(session: Session) -> list[_SeasonRow]:
-    """Return every stored season in one statement, oldest first.
-
-    The threshold is a sample of the whole stored history, so nothing is filtered
-    here: whether a season counts is the core rule's decision over the size, the
-    start year and the result count of each row, and a filter written here would
-    be a second copy of it. The order is stable so the tables are built in one
-    fixed sequence.
-    """
-    statement = select(SeasonModel.id, SeasonModel.code, SeasonModel.start_year).order_by(
-        SeasonModel.start_year, SeasonModel.code
-    )
-    return [
-        _SeasonRow(id=int(season_id), code=str(code), start_year=int(start_year))
-        for season_id, code, start_year in session.execute(statement).all()
-    ]
-
-
-def _load_matches(session: Session, *, season_ids: Sequence[int]) -> list[_MatchRow]:
-    """Return every match of the selected seasons in one statement.
-
-    One statement serves every season, never one per season. Every status is read
-    because two rules need different subsets of the same rows: the threshold
-    counts the played ones of every season, and the remaining fixtures are the
-    scheduled ones of the resolved season. The goals stay optional, since only a
-    played row carries them. The order is ``(season, kickoff date, identifier)``,
-    so the club's remaining fixtures already arrive in the order the payload
-    serves them.
-    """
-    statement = (
-        select(
-            MatchModel.id,
-            MatchModel.season_id,
-            MatchModel.home_team_id,
-            MatchModel.away_team_id,
-            MatchModel.home_goals,
-            MatchModel.away_goals,
-            MatchModel.kickoff_date,
-            MatchModel.status,
-        )
-        .where(MatchModel.season_id.in_(season_ids))
-        .order_by(MatchModel.season_id, MatchModel.kickoff_date, MatchModel.id)
-    )
-    return [
-        _MatchRow(
-            id=int(match_id),
-            season_id=int(season_id),
-            home_team_id=int(home_team_id),
-            away_team_id=int(away_team_id),
-            home_goals=None if home_goals is None else int(home_goals),
-            away_goals=None if away_goals is None else int(away_goals),
-            kickoff_date=kickoff_date,
-            status=str(status),
-        )
-        for (
-            match_id,
-            season_id,
-            home_team_id,
-            away_team_id,
-            home_goals,
-            away_goals,
-            kickoff_date,
-            status,
-        ) in session.execute(statement).all()
-    ]
-
-
-def _load_team_names(session: Session, *, team_ids: Sequence[int]) -> dict[int, str]:
-    """Return the names of every club of those seasons in one statement.
-
-    The ranking's final tie-break compares names, so no table can be built
-    without them. An empty sequence returns an empty mapping without issuing a
-    statement, which is the state of a database without a stored match.
-    """
-    if not team_ids:
-        return {}
-    statement = select(TeamModel.id, TeamModel.name).where(TeamModel.id.in_(team_ids))
-    return {int(stored_id): str(name) for stored_id, name in session.execute(statement).all()}
-
-
 def _season_table(
-    season: _SeasonRow, *, rows: Sequence[_MatchRow], names: Mapping[int, str]
+    season: views.SeasonRow, *, rows: Sequence[views.MatchRow], names: Mapping[int, str]
 ) -> SeasonTable:
     """Return one season as the threshold sees it: its size, its results and its totals.
 
@@ -378,7 +262,7 @@ def _season_table(
     reads instead of a calendar, and ``points`` holds the table's total for each
     place in table order.
     """
-    standings = _standings(rows, names=names)
+    standings = views.season_table(rows, names=names)
     return SeasonTable(
         season=season.code,
         start_year=season.start_year,
@@ -388,31 +272,7 @@ def _season_table(
     )
 
 
-def _standings(rows: Sequence[_MatchRow], *, names: Mapping[int, str]) -> list[StandingRow]:
-    """Return the table of one season, ranked from the rows already read.
-
-    The team set is every club that appears as a side of any of those matches and
-    the counted results are the played ones, which is the pair
-    :func:`lmi_api.views.load_season_standings` returns, so a table read here
-    cannot contradict the standings endpoint.
-    """
-    teams = {row.home_team_id: names[row.home_team_id] for row in rows}
-    teams.update({row.away_team_id: names[row.away_team_id] for row in rows})
-    results = [
-        MatchResult(
-            home_team_id=row.home_team_id,
-            away_team_id=row.away_team_id,
-            home_goals=cast(int, row.home_goals),
-            away_goals=cast(int, row.away_goals),
-            kickoff_date=row.kickoff_date,
-        )
-        for row in rows
-        if row.played
-    ]
-    return compute_standings(teams, results)
-
-
-def _team_ids(rows: Sequence[_MatchRow]) -> set[int]:
+def _team_ids(rows: Sequence[views.MatchRow]) -> set[int]:
     """Return every club that appears as a side of those matches."""
     return {side for row in rows for side in (row.home_team_id, row.away_team_id)}
 
@@ -540,7 +400,7 @@ def _rival(row: _RunRow) -> RelegationRival:
 
 def _remaining_fixtures(
     session: Session,
-    matches: Sequence[_MatchRow],
+    matches: Sequence[views.MatchRow],
     *,
     team_id: int,
     positions: Mapping[int, int],

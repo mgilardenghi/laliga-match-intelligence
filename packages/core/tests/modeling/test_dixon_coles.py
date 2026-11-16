@@ -8,18 +8,25 @@ so a shared bug cannot make both sides agree.
 """
 
 import datetime
+import logging
 import time
+import warnings
+from collections.abc import Callable
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from lmi_core.evaluation.walkforward import weekly_cutoffs
+from lmi_core.modeling import dixon_coles as dixon_coles_module
 from lmi_core.modeling.dixon_coles import (
     DixonColesModel,
+    DixonColesParameters,
     negative_log_likelihood,
     score_matrix,
     tau_correction,
     time_weight,
 )
+from lmi_core.modeling.elo import ModelFitError
 from lmi_core.modeling.types import Fixtures, History, LeakageError
 from numpy.typing import NDArray
 from scipy.optimize import check_grad
@@ -32,6 +39,7 @@ from modeling.leakage_harness import (
     make_fixtures,
     make_history,
     make_synthetic_league,
+    middle_cutoff,
     to_date,
 )
 
@@ -570,3 +578,125 @@ def test_fifty_weekly_fits_finish_quickly() -> None:
 
     print(f"50 weekly fits took {elapsed:.2f} s")
     assert elapsed < 60.0
+
+
+def _patch_minimize_with(
+    monkeypatch: pytest.MonkeyPatch,
+    build: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    *,
+    success: bool = True,
+    status: int = 2,
+    message: str = "ABNORMAL_TERMINATION_IN_LNSRCH",
+) -> None:
+    """Replace the module's ``minimize`` with a stand that answers ``build(x0)``."""
+
+    def fake_minimize(fun: object, x0: NDArray[np.float64], **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(x=build(x0), success=success, status=status, message=message)
+
+    monkeypatch.setattr(dixon_coles_module, "minimize", fake_minimize)
+
+
+def _window_theta(history: History, *, mu: float) -> NDArray[np.float64]:
+    """Return a vector in the documented layout for the teams of ``history``."""
+    team_count = int(np.unique(np.concatenate((history.home_team_id, history.away_team_id))).size)
+    theta = np.zeros(3 + 2 * team_count, dtype=np.float64)
+    theta[0] = mu
+    theta[1] = 0.2
+    theta[2 : 2 + team_count] = 0.1
+    theta[2 + team_count : 2 + 2 * team_count] = -0.1
+    theta[-1] = -0.1
+    return theta
+
+
+def test_a_non_finite_solution_is_a_fit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_minimize_with(monkeypatch, lambda x0: np.full(np.shape(x0), np.nan))
+
+    with pytest.raises(ModelFitError) as failure:
+        DixonColesModel(seed=SEED).fit(make_history([0, 1, 2]), CUTOFF)
+
+    message = str(failure.value)
+    assert message.startswith("dixon_coles: ")
+    assert "ABNORMAL_TERMINATION_IN_LNSRCH" in message
+
+
+def test_a_solution_of_the_wrong_length_is_a_fit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_minimize_with(monkeypatch, lambda x0: np.zeros(4, dtype=np.float64))
+
+    with pytest.raises(ModelFitError) as failure:
+        DixonColesModel(seed=SEED).fit(make_history([0, 1, 2]), CUTOFF)
+
+    assert str(failure.value).startswith("dixon_coles: ")
+
+
+def test_a_non_success_status_with_finite_parameters_is_used_with_one_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _patch_minimize_with(monkeypatch, lambda x0: np.full(np.shape(x0), 0.05), success=False)
+    model = DixonColesModel(seed=SEED)
+
+    with caplog.at_level(logging.WARNING, logger="lmi_core.modeling.dixon_coles"):
+        model.fit(make_history([0, 1, 2]), CUTOFF)
+
+    parameters = model.parameters
+    assert parameters is not None
+    assert (parameters.mu, parameters.gamma, parameters.rho) == (0.05, 0.05, 0.05)
+    assert bool((parameters.alpha == 0.05).all())
+    assert bool((parameters.beta == 0.05).all())
+    logged = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(logged) == 1
+    assert logged[0].getMessage().startswith("dixon_coles: ")
+    assert "ABNORMAL_TERMINATION_IN_LNSRCH" in logged[0].getMessage()
+
+
+def test_a_normal_fit_logs_no_warning(caplog: pytest.LogCaptureFixture) -> None:
+    data = make_synthetic_league(n_teams=4, n_seasons=2)
+    cutoff = middle_cutoff(data)
+
+    with caplog.at_level(logging.WARNING):
+        DixonColesModel(seed=SEED).fit(history_before(data, cutoff), cutoff)
+
+    assert [record for record in caplog.records if record.levelno >= logging.WARNING] == []
+
+
+def test_an_empty_window_is_not_a_fit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def never_called(*args: object, **kwargs: object) -> SimpleNamespace:
+        raise AssertionError("a window with no match must not call the optimizer")
+
+    monkeypatch.setattr(dixon_coles_module, "minimize", never_called)
+    model = DixonColesModel(seed=SEED)
+
+    model.fit(make_history([]), CUTOFF)
+
+    parameters = model.parameters
+    assert parameters is not None
+    assert (parameters.mu, parameters.gamma, parameters.rho) == (0.0, 0.0, 0.0)
+
+
+def test_an_extreme_linear_predictor_keeps_the_objective_and_the_gradient_finite() -> None:
+    history = make_history([0, 1, 2])
+    theta = _window_theta(history, mu=1000.0)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with np.errstate(over="raise", invalid="raise"):
+            objective, gradient = negative_log_likelihood(theta, history, CUTOFF)
+
+    assert bool(np.isfinite(objective))
+    assert objective > 1e100
+    assert bool(np.isfinite(gradient).all())
+
+
+def test_score_matrix_with_an_overflowing_rate_keeps_its_value_error() -> None:
+    model = DixonColesModel(seed=SEED)
+    model.fit(make_history([0]), CUTOFF)
+    model.parameters = DixonColesParameters(
+        mu=1000.0,
+        gamma=0.0,
+        rho=-0.1,
+        team_ids=np.empty(0, dtype=np.int64),
+        alpha=np.empty(0, dtype=np.float64),
+        beta=np.empty(0, dtype=np.float64),
+    )
+
+    with pytest.raises(ValueError, match="no positive mass"):
+        model.score_matrix(make_fixtures(2))

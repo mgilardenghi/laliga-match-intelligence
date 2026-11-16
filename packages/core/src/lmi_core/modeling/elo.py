@@ -27,6 +27,7 @@ the pre-match ones without reading the implementation.
 """
 
 import datetime
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -38,6 +39,9 @@ from scipy.special import expit
 
 from lmi_core.modeling.base import Model
 from lmi_core.modeling.types import OUTCOMES, Fixtures, History
+
+logger = logging.getLogger(__name__)
+"""Logs the one optimizer status that is a warning rather than a fit error."""
 
 START_RATING = 1500.0
 """Rating a team starts from when no rated team exists to learn one from."""
@@ -71,6 +75,15 @@ _LOG_GAP_FLOOR = -1e-12
 _MAX_EXP_ARGUMENT = 700.0
 _WORST_NLL = 1e300
 """Penalty for a parameter vector whose likelihood underflows to zero."""
+
+
+class ModelFitError(RuntimeError):
+    """The fit failure of every fitted model: the optimizer returned unusable parameters.
+
+    It lives here because it is raised by every fitted model and this module is the
+    lighter of the two, so the goal model imports it from here and not the other way
+    around.
+    """
 
 
 @dataclass(frozen=True)
@@ -180,17 +193,32 @@ def fit_params(d: NDArray[np.float64], result: NDArray[np.int8]) -> LogitParams:
     """Fit the ordered logit on the pre-match gaps and their outcomes.
 
     Every call starts from the fixed constants in :func:`_default_params`, so a
-    fit never depends on a previous one. An empty input is not optimized at all.
+    fit never depends on a previous one. An empty input is not optimized at all:
+    it returns the fixed start, which is a fit of nothing and not a failure.
+
+    Usable parameters are the hard requirement. The optimizer's vector must carry
+    exactly the three free parameters, every entry must be finite, and the logit
+    built from them must keep ``b`` and ``c2`` finite, because a finite ``log_b``
+    above about 709 still overflows ``exp``. A vector that fails any of these is
+    not a fit: :class:`ModelFitError` is raised instead of a replaced answer.
+
+    A non-success status is only a warning. L-BFGS-B reports ``success=False``
+    (``ABNORMAL_TERMINATION_IN_LNSRCH``, for example) with perfectly usable finite
+    parameters, and the measured count on real data is zero, so such a fit logs
+    one warning and its parameters are used; the numeric check above stays the one
+    that fails a fit.
 
     Args:
         d: Pre-match gaps, shape ``(n,)``, in history order.
         result: ``OUTCOMES`` index of each match, shape ``(n,)``.
 
     Returns:
-        The fitted parameters, or the fixed start when the solutions are not all
-        finite. A non-success status is not raised: an unconverged but finite
-        point is still a usable forecast, and the walk-forward report shows its
-        cost.
+        The fitted parameters, or the fixed start for an empty input.
+
+    Raises:
+        ModelFitError: the optimizer returned a vector of the wrong length, an
+            entry that is not finite, or a ``log_b`` or ``log_gap`` so large that
+            ``b`` or ``c2`` overflows ``exp``.
     """
     gaps = np.asarray(d, dtype=np.float64).reshape(-1)
     outcomes = np.asarray(result, dtype=np.int8).reshape(-1)
@@ -200,14 +228,45 @@ def fit_params(d: NDArray[np.float64], result: NDArray[np.int8]) -> LogitParams:
     solved = minimize(
         _negative_log_likelihood, start.as_vector(), args=(gaps, outcomes), method="L-BFGS-B"
     )
+    trail = _optimizer_trail(solved.status, solved.message)
     solution = np.asarray(solved.x, dtype=np.float64).reshape(-1)
-    if solution.shape != (3,) or not bool(np.all(np.isfinite(solution))):
-        return start
-    return LogitParams(
+    if solution.shape != (3,):
+        raise ModelFitError(
+            f"elo: the optimizer returned {solution.size} parameters where 3 are expected "
+            f"(shape check); {trail}"
+        )
+    not_finite = int(solution.size - np.count_nonzero(np.isfinite(solution)))
+    if not_finite:
+        raise ModelFitError(
+            f"elo: the optimizer returned {not_finite} of {solution.size} parameters that "
+            f"are not finite; {trail}"
+        )
+    params = LogitParams(
         log_b=float(solution[0]),
         c1=float(solution[1]),
         log_gap=float(solution[2]),
     )
+    unusable = [
+        name for name, value in (("b", params.b), ("c2", params.c2)) if not math.isfinite(value)
+    ]
+    if unusable:
+        raise ModelFitError(
+            f"elo: the fitted logit is unusable because exp overflows at the optimum "
+            f"({', '.join(unusable)} not finite, logit check); {trail}"
+        )
+    if not bool(solved.success):
+        logger.warning(
+            "elo: the optimizer reported success=False (status %s: %s) but its parameters "
+            "are finite and usable; using them",
+            solved.status,
+            solved.message,
+        )
+    return params
+
+
+def _optimizer_trail(status: object, message: object) -> str:
+    """Return the optimizer's status and message, for a fit-failure message."""
+    return f"optimizer status {status}, message {str(message)!r}"
 
 
 class EloModel(Model):

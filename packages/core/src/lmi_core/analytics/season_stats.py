@@ -56,6 +56,7 @@ from typing import Literal
 import numpy as np
 
 from lmi_core.modeling.market import remove_margin
+from lmi_core.standings import outcome, points_for
 
 Venue = Literal["home", "away"]
 """Where the team played a match: ``"home"`` or ``"away"``."""
@@ -63,8 +64,8 @@ Venue = Literal["home", "away"]
 TierName = Literal["top", "middle", "bottom"]
 """The opponent tiers a season table is split into."""
 
-_WIN_POINTS = 3
-_DRAW_POINTS = 1
+_WIN_POINTS = points_for("W")
+_DRAW_POINTS = points_for("D")
 _ROLLING_WINDOW = 5
 _TIERS: tuple[TierName, ...] = ("top", "middle", "bottom")
 """The three tiers, in table order, so a caller always receives all of them."""
@@ -225,12 +226,8 @@ class SeasonStats:
 
 
 def match_points(goals_for: int, goals_against: int) -> int:
-    """Return the league points a team earns from one score: 3 win, 1 draw, 0 loss."""
-    if goals_for > goals_against:
-        return _WIN_POINTS
-    if goals_for == goals_against:
-        return _DRAW_POINTS
-    return 0
+    """Return the league points one score earns, by the rule in :mod:`lmi_core.standings`."""
+    return points_for(outcome(goals_for, goals_against))
 
 
 def average_line(lines: Iterable[SideLine]) -> StatLine:
@@ -269,11 +266,11 @@ def match_record(matches: Iterable[PlayedMatch]) -> MatchRecord:
         played += 1
         goals_for += match.goals_for
         goals_against += match.goals_against
-        earned = match_points(match.goals_for, match.goals_against)
-        points += earned
-        if earned == _WIN_POINTS:
+        result = outcome(match.goals_for, match.goals_against)
+        points += points_for(result)
+        if result == "W":
             won += 1
-        elif earned == _DRAW_POINTS:
+        elif result == "D":
             drawn += 1
         else:
             lost += 1

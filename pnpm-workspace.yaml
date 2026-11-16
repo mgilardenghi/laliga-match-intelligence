@@ -1,3 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# eslint-config-next 16.4.6 asks for eslint-import-resolver-typescript ^3, whose 3.x
+# releases have no npm provenance; pnpm flags them as a trust downgrade. 4.x keeps the
+# same resolver interface for eslint-plugin-import and is published with provenance.
+overrides:
+  eslint-import-resolver-typescript: "^4.4.5"

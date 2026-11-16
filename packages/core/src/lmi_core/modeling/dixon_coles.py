@@ -33,6 +33,17 @@ negative log-likelihood over the window plus ``0.01 * sum(alpha**2 + beta**2)``,
 minimized with L-BFGS-B, an analytic gradient, ``rho`` bounded to
 ``[-0.25, 0.25]`` and nothing else bounded.
 
+The fit is hard about its answer: a returned vector of the wrong length, or with
+an entry that is not finite, raises
+:class:`~lmi_core.modeling.elo.ModelFitError` instead of falling back to a
+replacement answer. A ``success=False`` status with usable finite parameters is
+only a warning, because L-BFGS-B reports it (``ABNORMAL_TERMINATION_IN_LNSRCH``)
+with perfectly usable parameters and the measured count on real data is zero. The
+linear predictors of an accepted fit are clipped before they are exponentiated
+(:data:`_MAX_EXP_ARGUMENT`), so even an extreme vector gives a huge but finite
+objective rather than ``inf`` and ``nan``; the clip never binds within the fitted
+range.
+
 Parameter vector layout: ``theta = [mu, gamma, alpha_0..alpha_{K-1},
 beta_0..beta_{K-1}, rho]``, where ``K`` is the number of distinct team ids that
 appear as home or away in the window and index ``k`` is the position of the team
@@ -51,6 +62,7 @@ only; no global random state is read or written.
 """
 
 import datetime
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
@@ -61,7 +73,11 @@ from scipy.optimize import Bounds, minimize
 from scipy.stats import poisson
 
 from lmi_core.modeling.base import Model
+from lmi_core.modeling.elo import ModelFitError
 from lmi_core.modeling.types import Fixtures, History
+
+logger = logging.getLogger(__name__)
+"""Logs the one optimizer status that is a warning rather than a fit error."""
 
 TIME_DECAY_XI: Final = 0.0019
 """Decay of the time weight per day of age: ``w = exp(-xi * days)``."""
@@ -80,6 +96,17 @@ MAX_GOALS: Final = 10
 
 _TAU_FLOOR: Final = 1e-10
 """Smallest ``tau`` that the log-likelihood uses, so the log stays finite."""
+
+_MAX_EXP_ARGUMENT: Final = 300.0
+"""Clip of a linear predictor before it is exponentiated.
+
+``exp(709)`` is the last finite ``float64``, but a clip there still lets
+``rate_home * rate_away`` (about ``1e304 * 1e304``) overflow, and that product
+appears in ``tau`` and in ``d_log_rho``. ``exp(300)`` is about ``1.9e130``, which
+keeps the product and its ratio to :data:`_TAU_FLOOR` finite. Fitted predictors
+stay far below the clip: the largest ``|eta|`` measured on the walk-forward
+backtest is about 4.4.
+"""
 
 _MIN_INITIAL_RATE: Final = 1e-3
 """Floor on the goals-per-team-per-match rate the initial ``mu`` is built from."""
@@ -222,7 +249,9 @@ def negative_log_likelihood(
 
     The window, the team index mapping and the weights are rebuilt from
     ``history`` and ``cutoff`` on every call, so the value and the gradient are
-    those of the objective :class:`DixonColesModel` minimizes.
+    those of the objective :class:`DixonColesModel` minimizes. Both rates are
+    exponentiated through :func:`_clipped_exp`, so a finite but extreme ``theta``
+    gives a huge, finite objective and gradient instead of ``inf`` and ``nan``.
 
     Args:
         theta: The parameter vector in the layout of the module docstring.
@@ -252,8 +281,8 @@ def negative_log_likelihood(
     weights = design.weights
     eta_home = mu + gamma + alpha[design.home_index] - beta[design.away_index]
     eta_away = mu + alpha[design.away_index] - beta[design.home_index]
-    rate_home = np.exp(eta_home)
-    rate_away = np.exp(eta_away)
+    rate_home = _clipped_exp(eta_home)
+    rate_away = _clipped_exp(eta_away)
 
     tau = tau_correction(home_goals, away_goals, rate_home, rate_away, rho)
     usable = tau >= _TAU_FLOOR
@@ -327,7 +356,23 @@ class DixonColesModel(Model):
         }
 
     def _fit(self, history: History, cutoff: datetime.date) -> None:
-        """Estimate the parameters on the window, or fall back to zeros when empty."""
+        """Estimate the parameters on the window, or fall back to zeros when empty.
+
+        An empty window is not a fit failure: it returns the zero parameters and
+        zero newcomer strengths.
+
+        Usable parameters are the hard requirement: the returned vector must have
+        the documented length and every entry must be finite, or
+        :class:`ModelFitError` is raised instead of a replaced answer. A
+        ``success=False`` status with usable finite parameters is only a warning,
+        because L-BFGS-B reports it (``ABNORMAL_TERMINATION_IN_LNSRCH``, for
+        example) with perfectly usable parameters and the measured count on real
+        data is zero.
+
+        Raises:
+            ModelFitError: the optimizer returned a vector of the wrong length or
+                with an entry that is not finite.
+        """
         design = _window_design(history, cutoff)
         team_count = int(design.team_ids.size)
         if design.match_count == 0:
@@ -358,9 +403,27 @@ class DixonColesModel(Model):
             method="L-BFGS-B",
             bounds=_parameter_bounds(team_count),
         )
-        theta = np.asarray(result.x, dtype=np.float64)
-        if theta.shape != theta0.shape or not bool(np.isfinite(theta).all()):
-            theta = theta0
+        theta = np.asarray(result.x, dtype=np.float64).reshape(-1)
+        trail = f"optimizer status {result.status}, message {str(result.message)!r}"
+        if theta.shape != theta0.shape:
+            raise ModelFitError(
+                f"{self.name}: the optimizer returned {theta.size} parameters where "
+                f"{theta0.size} are expected (shape check); {trail}"
+            )
+        not_finite = int(theta.size - np.count_nonzero(np.isfinite(theta)))
+        if not_finite:
+            raise ModelFitError(
+                f"{self.name}: the optimizer returned {not_finite} of {theta.size} parameters "
+                f"that are not finite; {trail}"
+            )
+        if not bool(result.success):
+            logger.warning(
+                "%s: the optimizer reported success=False (status %s: %s) but its parameters "
+                "are finite and usable; using them",
+                self.name,
+                result.status,
+                result.message,
+            )
         alpha = theta[2 : 2 + team_count].copy()
         beta = theta[2 + team_count : 2 + 2 * team_count].copy()
         self.parameters = DixonColesParameters(
@@ -384,6 +447,8 @@ class DixonColesModel(Model):
             RuntimeError: :meth:`fit` has not been called yet.
             LeakageError: a ``History`` was passed instead of fixtures, or a
                 fixture is dated before the cutoff the model was fitted at.
+            ValueError: a fixture's goal rates are so large that the ``0..10``
+                grid holds no positive mass; see :func:`score_matrix`.
         """
         self._guard_fixtures(fixtures)
         parameters = self.parameters
@@ -395,8 +460,8 @@ class DixonColesModel(Model):
         away_alpha, away_beta = _team_strengths(
             parameters, fixtures.away_team_id, self._newcomer_alpha, self._newcomer_beta
         )
-        rate_home = np.exp(parameters.mu + parameters.gamma + home_alpha - away_beta)
-        rate_away = np.exp(parameters.mu + away_alpha - home_beta)
+        rate_home = _clipped_exp(parameters.mu + parameters.gamma + home_alpha - away_beta)
+        rate_away = _clipped_exp(parameters.mu + away_alpha - home_beta)
         return _score_matrix_from_rates(rate_home, rate_away, parameters.rho)
 
     def _predict(self, fixtures: Fixtures) -> NDArray[np.float64]:
@@ -508,6 +573,18 @@ def _team_strengths(
     alpha = np.where(known, parameters.alpha[index], newcomer_alpha)
     beta = np.where(known, parameters.beta[index], newcomer_beta)
     return alpha, beta
+
+
+def _clipped_exp(eta: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return ``exp(eta)`` with the argument clipped at :data:`_MAX_EXP_ARGUMENT`.
+
+    An extreme but finite parameter vector would otherwise overflow to ``inf``,
+    and an ``inf`` rate turns the objective and the gradient into ``inf`` and
+    ``nan``. The clip never binds inside the range a fit reaches, so no fitted
+    number moves. Beyond the clip the analytic gradient is no longer the
+    derivative of the clipped objective; it only keeps the values finite there.
+    """
+    return np.exp(np.minimum(eta, _MAX_EXP_ARGUMENT))
 
 
 def _as_rates(values: ArrayLike) -> NDArray[np.float64]:

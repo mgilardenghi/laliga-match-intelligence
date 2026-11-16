@@ -19,6 +19,13 @@ The refusal before the first write is deliberate: a backtest over a range with
 too few played matches scores a number nobody can read, so the command stops
 with exit code 1 before ``start_run`` instead of storing a useless run.
 
+Once the run is open it is never left ``running``. The guard around it records
+every failure on the run, and an interruption counts: ``KeyboardInterrupt`` and
+``SystemExit`` are not ``Exception``, so they have their own branch, which
+records them and then re-raises the original exception unchanged. An
+interruption prints no line and returns no exit code, the traceback being the
+report.
+
 Only the selected format reaches stdout. Every progress line goes through
 :data:`logger` at INFO, which ``python -m lmi_worker`` sends to stderr, so
 ``--format json`` stays a machine-readable document.
@@ -305,6 +312,17 @@ def _backtest(args: argparse.Namespace, session: Session, started: float) -> int
         _mark_failed(session, run_id, error=str(error))
         print(f"backtest: {error}", file=sys.stderr)
         return 1
+    except BaseException as error:
+        # An interruption is not an Exception, so it would skip the guard above
+        # and leave the committed run running for ever. Record it, then let the
+        # original exception out unchanged: the traceback keeps its frames and is
+        # the report, so nothing is returned or printed for it.
+        name = type(error).__name__
+        message = str(error)
+        # The message of a KeyboardInterrupt is usually empty, while the class
+        # name alone already says what happened.
+        _mark_failed(session, run_id, error=f"{name}: {message}" if message else name)
+        raise
 
     if run_id is not None:
         try:
