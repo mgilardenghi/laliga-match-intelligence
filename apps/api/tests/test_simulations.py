@@ -25,7 +25,7 @@ from lmi_api.main import create_app
 from lmi_api.queue import get_queue
 from lmi_core.clock import madrid_today
 from lmi_core.db.models import SimulationRun, SimulationTeamResult
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from tests.factories import create_match, create_season
@@ -259,6 +259,47 @@ def test_create_simulation_marks_the_run_failed_and_answers_503(
     # The broker's own text stays in the log: the stored column is readable
     # through the API and must not become a second way to disclose it.
     assert "broker" not in stored.error
+
+
+def test_create_simulation_describes_a_run_a_worker_claimed_before_the_failure(
+    api_client: TestClient,
+    db_session: Session,
+    fake_queue: FakeQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    season, _ = create_simulation_season(db_session)
+
+    # A message that did reach the broker can be claimed before ``send_task``
+    # raises. The claim is the truth about the row, so the failure must not
+    # overwrite it with a terminal state the worker is not observing.
+    def claim_then_refuse(run_id: uuid.UUID) -> None:
+        fake_queue.attempts.append(run_id)
+        db_session.execute(
+            update(SimulationRun)
+            .where(SimulationRun.id == run_id)
+            .values(status="running", started_at=func.now())
+        )
+        db_session.commit()
+        raise RuntimeError("the broker is unreachable")
+
+    monkeypatch.setattr(fake_queue, "enqueue", claim_then_refuse)
+
+    response = api_client.post("/v1/simulations", json={"season": season.code, "n_runs": 1100})
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "running"
+    assert body["started_at"] is not None
+    assert body["finished_at"] is None
+    assert body["error"] is None
+    assert response.headers["location"] == f"/v1/simulations/{body['id']}"
+    assert fake_queue.attempts == [uuid.UUID(body["id"])]
+
+    db_session.expire_all()
+    stored = db_session.get(SimulationRun, uuid.UUID(body["id"]))
+    assert stored is not None
+    assert stored.status == "running"
+    assert stored.error is None
 
 
 def test_create_simulation_defaults_to_the_season_with_a_match(

@@ -116,6 +116,41 @@ def test_requeue_stale_returns_a_backdated_running_run(
 
 
 @pytest.mark.integration
+def test_requeue_stale_keeps_sending_after_one_enqueue_fails(
+    migrated_engine: MigratedDatabase,
+) -> None:
+    season_code = _synthetic_season(migrated_engine.factories)
+    run_ids: list[uuid.UUID] = []
+    with migrated_engine.factories() as session:
+        for seed in range(3):
+            run, _ = create_run(
+                session,
+                season_code=season_code,
+                as_of_date=AS_OF,
+                n_runs=1000,
+                seed=seed,
+                trigger="schedule",
+                qualification=Qualification(),
+                kind="live",
+            )
+            run_ids.append(run.id)
+    for run_id in run_ids:
+        _backdate_queued(migrated_engine.engine, run_id)
+
+    enqueued: list[uuid.UUID] = []
+
+    def enqueue(run_id: uuid.UUID) -> None:
+        if run_id == run_ids[1]:
+            raise RuntimeError("the broker refused one message")
+        enqueued.append(run_id)
+
+    returned = jobs.requeue_stale(migrated_engine.factories, enqueue)
+
+    assert returned == [run_ids[0], run_ids[2]]
+    assert enqueued == returned
+
+
+@pytest.mark.integration
 def test_requeue_stale_leaves_a_freshly_queued_run_alone(
     migrated_engine: MigratedDatabase,
 ) -> None:
@@ -183,6 +218,18 @@ def _backdate_running(engine: Engine, run_id: uuid.UUID) -> None:
     )
 
 
+def _backdate_queued(engine: Engine, run_id: uuid.UUID, *, minutes: int = 2) -> None:
+    """Move one queued row's request instant into the past."""
+    _execute(
+        engine,
+        "UPDATE simulation_runs"
+        " SET requested_at = now() - (:minutes * interval '1 minute')"
+        " WHERE id = :run_id",
+        run_id,
+        minutes=minutes,
+    )
+
+
 def _mark_succeeded(engine: Engine, run_id: uuid.UUID) -> None:
     """Move one row to the terminal ``succeeded`` state the schema requires."""
     _execute(
@@ -195,6 +242,6 @@ def _mark_succeeded(engine: Engine, run_id: uuid.UUID) -> None:
     )
 
 
-def _execute(engine: Engine, statement: str, run_id: uuid.UUID) -> None:
+def _execute(engine: Engine, statement: str, run_id: uuid.UUID, **parameters: int) -> None:
     with engine.begin() as connection:
-        connection.execute(text(statement), {"run_id": run_id})
+        connection.execute(text(statement), {"run_id": run_id, **parameters})

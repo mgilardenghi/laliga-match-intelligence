@@ -112,12 +112,19 @@ jobs:
       - name: Start the stack
         run: make up
       # The worker is long-running, so nothing can wait for it to exit: prove it
-      # stays up instead. A worker that crashed on start, or that a later change
-      # turned back into a one-shot job, fails here instead of passing green, and
+      # stays up instead. A short settle lets a crash loop show itself, then the
+      # check proves the service is running and that the container has never
+      # restarted. A worker that crashed on start, or that a later change turned
+      # back into a one-shot job, fails here instead of passing green. This still
+      # cannot prove that a worker stays up forever: one that dies after the
+      # settle window needs a healthcheck, which this stack does not have, and
       # the timeout bounds the check if `docker compose ps` ever stalls.
       - name: Check the worker is running
         timeout-minutes: 5
-        run: docker compose ps --status running --services | grep -qx worker
+        run: |
+          sleep 15
+          docker compose ps --status running --services | grep -qx worker
+          test "$(docker inspect -f '{{.RestartCount}}' "$(docker compose ps -q worker)")" -eq 0
       - name: Check the API health endpoint
         run: curl -fsS localhost:8000/health
       - name: Check the dashboard reports the API as online

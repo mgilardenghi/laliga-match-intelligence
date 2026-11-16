@@ -579,7 +579,7 @@ def test_create_run_reuses_active_rows_and_inserts_after_success(
     assert same_id == run_id
     assert same_enqueue is False
 
-    _backdate_request(database, run_id, minutes=31)
+    _backdate_request(database, run_id, minutes=2)
     stale_id, stale_enqueue = _request_run(database, as_of)
     assert stale_id == run_id
     assert stale_enqueue is True
