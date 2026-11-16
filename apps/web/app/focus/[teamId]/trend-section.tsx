@@ -145,10 +145,37 @@ const METRICS: readonly TrendMetric[] = [
 function highlightOf(
   drop: HistoryDrop,
   seasons: readonly string[],
-): SparklineHighlight | undefined {
+): SparklineHighlight | null {
   const from = seasons.indexOf(drop.from_season);
   const to = seasons.indexOf(drop.to_season);
-  return from >= 0 && to > from ? { from, to } : undefined;
+  return from >= 0 && to > from ? { from, to } : null;
+}
+
+const SEASON_CODE = /^(\d{4})-\d{2}$/;
+
+/** The season code that starts in `year`, for example 2019 -> "2019-20". */
+function seasonCode(year: number): string {
+  return `${year}-${String((year + 1) % 100).padStart(2, "0")}`;
+}
+
+/**
+ * Every season code from the club's first listed season to its last one.
+ *
+ * The API lists only the seasons the club played; the seasons in between that
+ * it did not play stay on the axis as gaps, so the line never joins across
+ * them. A code that does not parse falls back to the listed seasons only.
+ */
+function seasonAxis(listed: readonly string[]): string[] {
+  const first = SEASON_CODE.exec(listed[0] ?? "");
+  const last = SEASON_CODE.exec(listed[listed.length - 1] ?? "");
+  if (first === null || last === null) {
+    return [...listed];
+  }
+  const axis: string[] = [];
+  for (let year = Number(first[1]); year <= Number(last[1]); year += 1) {
+    axis.push(seasonCode(year));
+  }
+  return axis;
 }
 
 /**
@@ -162,7 +189,7 @@ function highlightOf(
 function coverage(recorded: number, total: number): string {
   return recorded === total
     ? ""
-    : ` The metric is recorded for ${formatCount(recorded)} of ${formatCount(total)} seasons, and the line joins only those.`;
+    : ` The metric is recorded for ${formatCount(recorded)} of ${formatCount(total)} seasons; a season without it is a gap in the line.`;
 }
 
 /** One figure of the grid: a sparkline of one metric, with its caption. */
@@ -172,18 +199,16 @@ function TrendFigure(props: {
 }): ReactElement {
   const { metric, history } = props;
 
-  const seasons: string[] = [];
-  const values: number[] = [];
-  for (const season of history.seasons) {
-    const value = metric.value(season);
-    if (value !== null && Number.isFinite(value)) {
-      seasons.push(season.season);
-      values.push(value);
-    }
-  }
+  const byCode = new Map(history.seasons.map((season) => [season.season, season]));
+  const seasons = seasonAxis(history.seasons.map((season) => season.season));
+  const values: (number | null)[] = seasons.map((code) => {
+    const season = byCode.get(code);
+    const value = season === undefined ? null : metric.value(season);
+    return value !== null && Number.isFinite(value) ? value : null;
+  });
 
   const total = history.seasons.length;
-  const recorded = values.length;
+  const recorded = values.filter((value) => value !== null).length;
 
   // A metric no season records has no line to draw; a chart of nothing would
   // read as a metric at zero.
@@ -215,7 +240,7 @@ function TrendFigure(props: {
       description={`${metric.label} of ${history.team.name} in each of the ${formatCount(total)} seasons it played, oldest season first.`}
       seasons={seasons}
       values={values}
-      highlight={drop === undefined ? undefined : highlightOf(drop, seasons)}
+      highlight={drop === undefined ? null : highlightOf(drop, seasons)}
       note={note}
     />
   );
@@ -228,7 +253,7 @@ function TrendBody(props: { readonly history: TeamHistory }): ReactElement {
   return (
     <>
       <p className={styles.note}>
-        {`One sparkline per metric over the ${formatCount(history.seasons.length)} seasons ${history.team.name} played, oldest first. Each line joins the seasons the API recorded a value for; the highlighted segment is the steepest drop the API published for that metric. A lower league position is a better finish, so the position line is read the other way round.`}
+        {`One sparkline per metric over the ${formatCount(history.seasons.length)} seasons ${history.team.name} played, oldest first. A season the club did not play, or without a recorded value, is a gap in the line; the highlighted segment is the steepest drop the API published for that metric. A lower league position is a better finish, so the position line is read the other way round.`}
       </p>
       <div className={styles.trendGrid}>
         {METRICS.map((metric) => (

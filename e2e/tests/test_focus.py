@@ -48,6 +48,8 @@ PROJECTED_CAPTION = "Projected final points"
 # The caption of a trend figure that highlights the API's steepest decline, with
 # the signed delta that tells a reader how far the metric fell.
 LARGEST_DROP = re.compile(r"fell most from \d{4}-\d{2} to \d{4}-\d{2}")
+POSITION_LABEL = "League position"
+POINTS_LABEL = "Points per match"
 
 NOT_FOUND_HEADING = "Page not found"
 NO_SEASON_HEADING = "No focus view for this season"
@@ -161,6 +163,41 @@ def test_the_trend_draws_one_sparkline_per_metric(page: Page, dashboard_url: str
     assert LARGEST_DROP.search(trend.inner_text()) is not None, (
         "no trend figure names the steepest drop it highlights"
     )
+
+    # The league position has no published drop, so nothing on it may be
+    # highlighted: a segment there would be computed in the browser.
+    position = _figure(trend, POSITION_LABEL)
+    expect(position).to_have_count(1)
+    expect(position.locator("svg text", has_text="→")).to_have_count(0)
+
+
+@pytest.mark.loaded
+def test_a_season_the_club_did_not_play_is_a_gap_in_the_trend(
+    page: Page, dashboard_url: str
+) -> None:
+    """Guard the gaps: a missed season breaks the line instead of joining across it."""
+    _open(page, dashboard_url, "/teams")
+    hrefs = page.locator("main a[href^='/teams/']").evaluate_all(
+        "links => links.map(link => link.getAttribute('href'))"
+    )
+    team_ids = sorted({match.group(1) for href in hrefs if (match := TEAM_HREF.match(href or ""))})
+    assert team_ids, "the teams index lists no club to follow"
+
+    for team_id in team_ids:
+        _open(page, dashboard_url, f"/focus/{team_id}")
+        figure = _figure(page.locator(TREND_SECTION), POINTS_LABEL)
+        if figure.count() == 0:
+            continue
+        cells = figure.locator("details table tbody td").all_inner_texts()
+        if "—" not in cells:
+            continue
+        # The figure's data table names the gap and the drawing splits there.
+        assert figure.locator("svg polyline").count() >= 2, (
+            f"club {team_id} has a missing season but its line is drawn in one piece"
+        )
+        return
+
+    pytest.fail("no listed club has a season gap to check, so the gap rendering went untested")
 
 
 @pytest.mark.loaded
