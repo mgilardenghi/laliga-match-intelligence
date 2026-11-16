@@ -179,11 +179,15 @@ served as a record of zeros with a `null` `points_per_game` and an empty
 **The match rows.** `matches` is chronological: kickoff date ascending, then
 match identifier. Each row nests the fixture summary, the venue, the points,
 `xpts`, the venue-scoped goals, the shots of both sides, and `rolling5`, the
-averages over the at most five matches immediately **before** that one. The
-rolling window never includes the match it describes, so the first match of a
-season has an all-`null` `rolling5`. `points_pg`, `goals_for_pg` and
-`goals_against_pg` are `null` only when the window is empty; `xpts_pg` is also
-`null` when no window match carried a price.
+averages over the at most five matches the club played on a date **strictly
+earlier** than that row's date. The window never includes the match it
+describes and never another fixture of the same day: a stored date cannot order
+two fixtures of one day, so the form of a match is the form before its date,
+the same strict reading the match preview applies. A row with no earlier match
+(the club's first fixture, or both fixtures of its first day) therefore has an
+all-`null` `rolling5`. `points_pg`, `goals_for_pg` and `goals_against_pg` are
+`null` only when the window is empty; `xpts_pg` is also `null` when no window
+match carried a price.
 
 One row of `matches` is shown; a season of 38 matchdays returns 38.
 

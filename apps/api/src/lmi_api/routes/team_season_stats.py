@@ -7,11 +7,13 @@ points are derived on read.
 
 No rule of its own is implemented here. The ranking comes from
 :func:`lmi_core.standings.compute_standings`, the averages, counters and rolling
-form from :func:`lmi_core.analytics.season_stats.summarise`, the venue and tier
-records from the same module's ``match_record``, and the margin-removed
-probabilities from :func:`lmi_core.modeling.market.remove_margin`, which is the
-only margin removal in the repository. This module only decides which rows the
-read selects and how it composes the payload.
+form from :func:`lmi_core.analytics.season_stats.summarise`, the venue records
+from the same module's ``match_record``, the opponent tiers from its
+``tier_members`` and ``tier_records``, and the expected points from its
+``market_expected_points``, which removes the margin with
+:func:`lmi_core.modeling.market.remove_margin`, the only margin removal in the
+repository. This module only decides which rows the read selects and how it
+composes the payload.
 
 The endpoint is served on the ``/teams`` prefix and under the ``teams`` tag of
 the team resource, so the documentation groups it with the entity it describes
@@ -24,15 +26,18 @@ import decimal
 from collections.abc import Mapping, Sequence
 from typing import Final, NamedTuple
 
-import numpy as np
 from fastapi import APIRouter, HTTPException
 from lmi_core.analytics.season_stats import (
     MatchRecord,
     PlayedMatch,
     SideLine,
     StatValues,
+    TierName,
+    market_expected_points,
     match_record,
     summarise,
+    tier_members,
+    tier_records,
 )
 from lmi_core.analytics.season_stats import StatLine as CoreStatLine
 from lmi_core.analytics.season_stats import Venue as CoreVenue
@@ -41,7 +46,6 @@ from lmi_core.db.models import MatchOdd as MatchOddModel
 from lmi_core.db.models import MatchStat as MatchStatModel
 from lmi_core.db.models import Team as TeamModel
 from lmi_core.live.data import ODDS_PRIORITY
-from lmi_core.modeling.market import remove_margin
 from lmi_core.standings import StandingRow, compute_standings
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
@@ -57,10 +61,6 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 
 _ONE_X_TWO: Final[str] = "1x2"
 """The market of a 1x2 price, the only market this resource prices a match with."""
-
-_WIN_POINTS: Final[int] = 3
-_DRAW_POINTS: Final[int] = 1
-"""The points an outcome earns, used only to turn margin-removed prices into xPts."""
 
 
 class _PlayedRow(NamedTuple):
@@ -90,32 +90,41 @@ def get_team_season_stats(
     or the away side in any match of the season; a club of another season names
     nothing this season can describe.
 
-    ``played`` and ``points`` are the counters of that team set's table row,
-    read from :func:`lmi_core.standings.compute_standings` rather than recounted
-    here, so the standings endpoint stays the owner of the table and a team can
-    never read one total here and another there. ``per_match`` is the team's own
-    and its opponents' per-match average over exactly those played matches, and
-    ``league_avg`` is the same average over both sides of every played match of
-    the season, which is the comparison baseline the payload promises.
+    ``played`` and ``points`` are the counters
+    :func:`lmi_core.analytics.season_stats.summarise` counts over the club's
+    played matches, which are the club's table row by construction: the table
+    counts the same played results of the same season, so a team can never read
+    one total here and another there. The ranking is not recounted here either;
+    it is read from :func:`lmi_core.standings.compute_standings` for the
+    season's team set and for the position each club holds in it. ``per_match``
+    is the team's own and its opponents' per-match average over exactly those
+    played matches, and ``league_avg`` is the same average over both sides of
+    every played match of the season, which is the comparison baseline the
+    payload promises.
 
     ``xpts_market`` sums the expected points of the matches that carry one, and
     ``xpts_coverage`` counts them. The expected points of a match are
-    ``3 * p_home + p_draw`` when the team was the home side and
-    ``3 * p_away + p_draw`` when it was the visitor, where the three
-    probabilities are :func:`lmi_core.modeling.market.remove_margin` over the
-    one eligible price row. A fixture without an eligible pre-closing price has
-    null expected points and is left out of the sum and of the counter, rather
-    than contributing a zero.
+    :func:`lmi_core.analytics.season_stats.market_expected_points` of the one
+    eligible price row, seen from the club's venue: ``3 * p_home + p_draw`` at
+    home and ``3 * p_away + p_draw`` away, over the probabilities
+    :func:`lmi_core.modeling.market.remove_margin` derives, the only margin
+    removal in the repository. A fixture without an eligible pre-closing price
+    has null expected points and is left out of the sum and of the counter,
+    rather than contributing a zero.
 
     The price is always *pre-closing*. The eligible rows are the ``1x2`` prices
     with ``is_closing`` false from a bookmaker of
     :data:`lmi_core.live.data.ODDS_PRIORITY`, and the selected row per match is
     the most trusted of them, by the priority rank the live loader and the match
     preview also apply. A closing price is never read, whatever its bookmaker:
-    it is only known at kickoff. All prices of the team's matches are read in
-    one statement, and because that statement cannot cap one row per match
-    without dropping matches, the first eligible row per fixture is kept in
-    Python after the rows are ordered.
+    it is only known at kickoff. One statement reads every eligible row of the
+    club's played matches, ordered by fixture and then by that rank, and the
+    first row of each fixture is kept in Python. The priority list holds three
+    bookmakers, so a fixture can add at most three candidate rows: the read is
+    one statement and never one per fixture. PostgreSQL ``DISTINCT ON`` could
+    cap the rows per fixture in SQL, as the live loader does, but this read
+    keeps the candidates and picks the first of each fixture after the order has
+    ranked them.
 
     ``stat_coverage`` counts the matches that carry a statistics row and
     ``xg_coverage`` the matches that carry an expected-goals value on either
@@ -131,18 +140,26 @@ def get_team_season_stats(
     views cannot disagree on what a win is worth.
 
     ``tiers`` groups the team's matches by the opponent's position in the season
-    table. With ``n`` teams the top tier is positions ``1..ceil(n/3)``, the
-    middle the next ``ceil(n/3)`` and the bottom the rest; each record carries
-    the counters of every match against a club of that tier, whatever the venue,
-    and the tier's ``team_ids`` ascending. ``team_ids`` is the membership of the
-    tier, not only the opponents this team has already met.
+    table, with the boundary and the membership of
+    :func:`lmi_core.analytics.season_stats.tier_members` and the counters of
+    ``tier_records``: with ``n`` teams the top tier is positions
+    ``1..ceil(n/3)``, the middle the next ``ceil(n/3)`` and the bottom the rest.
+    Each record carries the counters of every match against a club of that tier,
+    whatever the venue, and the tier's ``team_ids`` ascending. ``team_ids`` is
+    the membership of the tier, not only the opponents this team has already
+    met; a tier no club occupies is served as a record of zeros.
 
     ``matches`` is the chronological season, ordered by kickoff date and then
     match identifier exactly as ``summarise`` orders it. Each row nests the
     fixture summary and adds the venue, the points, the expected points, the
     venue-scoped goals, the shots of both sides and the rolling form over the at
-    most five matches immediately before it. The first row's rolling form is
-    therefore all null: a window over no match has no average.
+    most five matches the club played on a date strictly earlier than its own.
+    That window never includes the match it describes and never another fixture
+    of the same day, because a stored date cannot order two fixtures of one day:
+    the form of a match is the form before its date, the same strict reading the
+    match preview applies. A row with no earlier match therefore has an all-null
+    rolling form, and so does a second fixture of the club's first day: a window
+    over no match has no average.
 
     Every optional field means "not known", never zero. An average over an
     empty set is null, a statistic no counted match carries is null, and a
@@ -155,8 +172,11 @@ def get_team_season_stats(
     :func:`lmi_api.views.load_season_standings` (the team set and the counted
     results), the season's played matches, their statistics rows, the
     pre-closing prices and the match summaries of the rows the payload lists. A
-    season without a played match of the team skips the statistics, price and
-    summary reads and issues fewer, never more.
+    club that played no match of the season skips the price read and the
+    match-summary read, because both are bounded by the club's own played
+    matches. The statistics read is bounded by the season rather than the club,
+    because ``league_avg`` averages over both sides of every played match of the
+    season, so it is issued whenever the season has a played match at all.
 
     The return annotation is the response model, so no ``response_model`` is
     passed.
@@ -218,7 +238,7 @@ def get_team_season_stats(
                 "home": _split_fields(match_record(_by_venue(team_matches, "home"))),
                 "away": _split_fields(match_record(_by_venue(team_matches, "away"))),
             },
-            "tiers": _tiers(team_matches, teams=teams, standing_rows=standing_rows),
+            "tiers": _tiers(team_matches, standing_rows=standing_rows),
             "matches": [
                 {
                     "match": summaries[row.match_id],
@@ -305,11 +325,11 @@ def _pre_closing_prices(
     the match preview would also select. A closing price is excluded in SQL,
     whatever its bookmaker: it is only known at kickoff.
 
-    One statement serves every match. The statement cannot use ``LIMIT 1`` per
-    match without dropping the other matches, so the first eligible row of each
-    match is kept in Python, and a later row of the same match is ignored
-    because the order already put the most trusted first. A fixture with no
-    eligible price is absent from the mapping.
+    One statement serves every match. The rows are ordered so that the most
+    trusted row of a fixture comes first, and the first row of each fixture is
+    then kept in Python: the priority list bounds the candidates to one per
+    bookmaker, and PostgreSQL ``DISTINCT ON`` is not needed to keep the read to
+    one statement. A fixture with no eligible price is absent from the mapping.
 
     Args:
         session: a session bound to the application database.
@@ -357,8 +377,10 @@ def _played_match(
 
     The stored home/away score and the two statistics rows are flipped when the
     team was the visitor, so every field of the result is venue-scoped. The
-    expected points are null when ``price`` is null and are never derived from a
-    closing row, because no closing row reaches this function.
+    expected points are the core rule of
+    :func:`lmi_core.analytics.season_stats.market_expected_points` over the
+    venue's price, and they are null when ``price`` is null. No closing row
+    reaches this function.
     """
     at_home = row.home_team_id == team_id
     venue: CoreVenue = "home" if at_home else "away"
@@ -369,25 +391,10 @@ def _played_match(
         opponent_id=row.away_team_id if at_home else row.home_team_id,
         goals_for=row.home_goals if at_home else row.away_goals,
         goals_against=row.away_goals if at_home else row.home_goals,
-        xpts=_expected_points(venue, price),
+        xpts=None if price is None else market_expected_points(price, venue=venue),
         stats_for=_stat_values(stat, side="home" if at_home else "away"),
         stats_against=_stat_values(stat, side="away" if at_home else "home"),
     )
-
-
-def _expected_points(venue: CoreVenue, price: tuple[float, float, float] | None) -> float | None:
-    """Return the expected points a margin-removed price implies, or ``None`` without a price.
-
-    A win is worth three points and a draw one, so the expectation is
-    ``3 * p_win + p_draw`` from the team's venue. The margin removal is the
-    core rule and is not restated here.
-    """
-    if price is None:
-        return None
-    implied = remove_margin(np.array([list(price)], dtype=np.float64))[0]
-    if venue == "home":
-        return _WIN_POINTS * float(implied[0]) + _DRAW_POINTS * float(implied[1])
-    return _WIN_POINTS * float(implied[2]) + _DRAW_POINTS * float(implied[1])
 
 
 def _stat_values(stat: MatchStatModel | None, *, side: CoreVenue) -> StatValues | None:
@@ -446,40 +453,24 @@ def _by_venue(matches: Sequence[PlayedMatch], venue: CoreVenue) -> list[PlayedMa
 def _tiers(
     matches: Sequence[PlayedMatch],
     *,
-    teams: Mapping[int, str],
     standing_rows: Sequence[StandingRow],
-) -> dict[str, object]:
+) -> dict[TierName, dict[str, object]]:
     """Return the three tier payloads of one team's season.
 
-    The tier boundaries follow the payload contract: with ``n`` teams the top
-    tier holds positions ``1..ceil(n/3)``, the middle the next ``ceil(n/3)`` and
-    the bottom the rest. The position of every club comes from
-    :func:`lmi_core.standings.compute_standings`, and a match counts in the tier
-    of its opponent, whatever the venue. The membership list is ascending so
-    two reads of one season serve the same order.
+    The boundary, the membership and the counters are the core rules of
+    :func:`lmi_core.analytics.season_stats.tier_members` and
+    ``tier_records``, and the position of every club comes from
+    :func:`lmi_core.standings.compute_standings`. This function only maps one to
+    the other: a tier's ``team_ids`` is the membership its record filtered on,
+    so the two cannot drift.
     """
-    position = {row.team_id: row.position for row in standing_rows}
-    third = -(-len(teams) // 3)
-    memberships = {
-        "top": sorted(team_id for team_id in teams if position[team_id] <= third),
-        "middle": sorted(team_id for team_id in teams if third < position[team_id] <= 2 * third),
-        "bottom": sorted(team_id for team_id in teams if position[team_id] > 2 * third),
-    }
+    positions = {row.team_id: row.position for row in standing_rows}
+    members = tier_members(positions)
+    records = tier_records(matches, members=members)
     return {
-        tier: _tier_fields(matches, member_ids=member_ids)
-        for tier, member_ids in memberships.items()
+        tier: {**_split_fields(record), "team_ids": list(members[tier])}
+        for tier, record in records.items()
     }
-
-
-def _tier_fields(matches: Sequence[PlayedMatch], *, member_ids: Sequence[int]) -> dict[str, object]:
-    """Return one tier record as the mapping the payload validation reads.
-
-    ``member_ids`` is both the membership the counters filter on and the
-    ascending identifier list the payload carries, so the two cannot drift.
-    """
-    members = set(member_ids)
-    record = match_record(match for match in matches if match.opponent_id in members)
-    return {**_split_fields(record), "team_ids": list(member_ids)}
 
 
 def _split_fields(record: MatchRecord) -> dict[str, int | float | None]:

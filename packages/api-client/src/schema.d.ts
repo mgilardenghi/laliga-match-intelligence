@@ -921,32 +921,41 @@ export interface paths {
          *     or the away side in any match of the season; a club of another season names
          *     nothing this season can describe.
          *
-         *     ``played`` and ``points`` are the counters of that team set's table row,
-         *     read from :func:`lmi_core.standings.compute_standings` rather than recounted
-         *     here, so the standings endpoint stays the owner of the table and a team can
-         *     never read one total here and another there. ``per_match`` is the team's own
-         *     and its opponents' per-match average over exactly those played matches, and
-         *     ``league_avg`` is the same average over both sides of every played match of
-         *     the season, which is the comparison baseline the payload promises.
+         *     ``played`` and ``points`` are the counters
+         *     :func:`lmi_core.analytics.season_stats.summarise` counts over the club's
+         *     played matches, which are the club's table row by construction: the table
+         *     counts the same played results of the same season, so a team can never read
+         *     one total here and another there. The ranking is not recounted here either;
+         *     it is read from :func:`lmi_core.standings.compute_standings` for the
+         *     season's team set and for the position each club holds in it. ``per_match``
+         *     is the team's own and its opponents' per-match average over exactly those
+         *     played matches, and ``league_avg`` is the same average over both sides of
+         *     every played match of the season, which is the comparison baseline the
+         *     payload promises.
          *
          *     ``xpts_market`` sums the expected points of the matches that carry one, and
          *     ``xpts_coverage`` counts them. The expected points of a match are
-         *     ``3 * p_home + p_draw`` when the team was the home side and
-         *     ``3 * p_away + p_draw`` when it was the visitor, where the three
-         *     probabilities are :func:`lmi_core.modeling.market.remove_margin` over the
-         *     one eligible price row. A fixture without an eligible pre-closing price has
-         *     null expected points and is left out of the sum and of the counter, rather
-         *     than contributing a zero.
+         *     :func:`lmi_core.analytics.season_stats.market_expected_points` of the one
+         *     eligible price row, seen from the club's venue: ``3 * p_home + p_draw`` at
+         *     home and ``3 * p_away + p_draw`` away, over the probabilities
+         *     :func:`lmi_core.modeling.market.remove_margin` derives, the only margin
+         *     removal in the repository. A fixture without an eligible pre-closing price
+         *     has null expected points and is left out of the sum and of the counter,
+         *     rather than contributing a zero.
          *
          *     The price is always *pre-closing*. The eligible rows are the ``1x2`` prices
          *     with ``is_closing`` false from a bookmaker of
          *     :data:`lmi_core.live.data.ODDS_PRIORITY`, and the selected row per match is
          *     the most trusted of them, by the priority rank the live loader and the match
          *     preview also apply. A closing price is never read, whatever its bookmaker:
-         *     it is only known at kickoff. All prices of the team's matches are read in
-         *     one statement, and because that statement cannot cap one row per match
-         *     without dropping matches, the first eligible row per fixture is kept in
-         *     Python after the rows are ordered.
+         *     it is only known at kickoff. One statement reads every eligible row of the
+         *     club's played matches, ordered by fixture and then by that rank, and the
+         *     first row of each fixture is kept in Python. The priority list holds three
+         *     bookmakers, so a fixture can add at most three candidate rows: the read is
+         *     one statement and never one per fixture. PostgreSQL ``DISTINCT ON`` could
+         *     cap the rows per fixture in SQL, as the live loader does, but this read
+         *     keeps the candidates and picks the first of each fixture after the order has
+         *     ranked them.
          *
          *     ``stat_coverage`` counts the matches that carry a statistics row and
          *     ``xg_coverage`` the matches that carry an expected-goals value on either
@@ -962,18 +971,26 @@ export interface paths {
          *     views cannot disagree on what a win is worth.
          *
          *     ``tiers`` groups the team's matches by the opponent's position in the season
-         *     table. With ``n`` teams the top tier is positions ``1..ceil(n/3)``, the
-         *     middle the next ``ceil(n/3)`` and the bottom the rest; each record carries
-         *     the counters of every match against a club of that tier, whatever the venue,
-         *     and the tier's ``team_ids`` ascending. ``team_ids`` is the membership of the
-         *     tier, not only the opponents this team has already met.
+         *     table, with the boundary and the membership of
+         *     :func:`lmi_core.analytics.season_stats.tier_members` and the counters of
+         *     ``tier_records``: with ``n`` teams the top tier is positions
+         *     ``1..ceil(n/3)``, the middle the next ``ceil(n/3)`` and the bottom the rest.
+         *     Each record carries the counters of every match against a club of that tier,
+         *     whatever the venue, and the tier's ``team_ids`` ascending. ``team_ids`` is
+         *     the membership of the tier, not only the opponents this team has already
+         *     met; a tier no club occupies is served as a record of zeros.
          *
          *     ``matches`` is the chronological season, ordered by kickoff date and then
          *     match identifier exactly as ``summarise`` orders it. Each row nests the
          *     fixture summary and adds the venue, the points, the expected points, the
          *     venue-scoped goals, the shots of both sides and the rolling form over the at
-         *     most five matches immediately before it. The first row's rolling form is
-         *     therefore all null: a window over no match has no average.
+         *     most five matches the club played on a date strictly earlier than its own.
+         *     That window never includes the match it describes and never another fixture
+         *     of the same day, because a stored date cannot order two fixtures of one day:
+         *     the form of a match is the form before its date, the same strict reading the
+         *     match preview applies. A row with no earlier match therefore has an all-null
+         *     rolling form, and so does a second fixture of the club's first day: a window
+         *     over no match has no average.
          *
          *     Every optional field means "not known", never zero. An average over an
          *     empty set is null, a statistic no counted match carries is null, and a
@@ -986,8 +1003,11 @@ export interface paths {
          *     :func:`lmi_api.views.load_season_standings` (the team set and the counted
          *     results), the season's played matches, their statistics rows, the
          *     pre-closing prices and the match summaries of the rows the payload lists. A
-         *     season without a played match of the team skips the statistics, price and
-         *     summary reads and issues fewer, never more.
+         *     club that played no match of the season skips the price read and the
+         *     match-summary read, because both are bounded by the club's own played
+         *     matches. The statistics read is bounded by the season rather than the club,
+         *     because ``league_avg`` averages over both sides of every played match of the
+         *     season, so it is issued whenever the season has a played match at all.
          *
          *     The return annotation is the response model, so no ``response_model`` is
          *     passed.

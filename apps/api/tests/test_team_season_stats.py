@@ -16,6 +16,14 @@ and the rolling windows do not depend on the day the suite runs.
 A statistics row is optional and a price is optional, so the world stores both
 on some matches only: the payload must keep a missing value null, never zero,
 and must leave an unpriced fixture out of the expected-points counter.
+
+The six-club world cannot reach three of the rules, so three smaller seasons
+pin them: a fixture whose more trusted price is inserted *after* a lower-priority
+one, a season whose requested club only has a scheduled fixture, and a four-club
+season whose bottom tier is empty because ``ceil(4 / 3) = 2`` fills the other two.
+A fourth test reaches the default season's own 404, which needs a database
+holding no match at all; the immutability trigger refuses to empty the match
+table, so the test states that precondition instead of forcing it.
 """
 
 import datetime
@@ -24,7 +32,8 @@ from typing import Any, NamedTuple
 import pytest
 from fastapi.testclient import TestClient
 from lmi_api.main import create_app
-from lmi_core.db.models import Match, Season, Team
+from lmi_core.db.models import Match, MatchOdd, Season, Team
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from tests.factories import create_match, create_season, create_team
@@ -121,6 +130,16 @@ XPTS_FOURTH = 3025 / 2343
 
 The market-average opening price is ``2.5 / 3.1 / 2.8``: the inverse sum is
 ``2343 / 2170``, so ``3 * p_away + p_draw = 3025 / 2343``.
+"""
+
+XPTS_PRIORITY_WINS = 29 / 29
+"""Expected points of the focus club in match 2 once a Pinnacle row is added.
+
+Match 2 then carries both the bet365 ``3.0 / 3.2 / 2.4`` row of the world and a
+Pinnacle ``2.0 / 3.5 / 4.0`` row stored after it, so a reader that took the
+first stored row would still answer :data:`XPTS_SECOND`. The Pinnacle inverse
+prices sum to ``29 / 28``, so the visitor's
+``3 * p_away + p_draw = 3 * (1/4) / (29/28) + (2/7) / (29/28) = 29 / 29``.
 """
 
 
@@ -306,6 +325,282 @@ def test_the_price_rule_ignores_a_closing_row_and_uses_the_best_pre_closing_row(
     assert payload["xpts_market"] == pytest.approx(XPTS_FIRST + XPTS_SECOND + XPTS_FOURTH)
 
 
+def test_the_price_priority_decides_and_not_the_stored_order(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """The most trusted bookmaker wins even when its row is stored last.
+
+    Every fixture of the main world carries one eligible row at most, so a read
+    that kept the first stored row of a fixture instead of following
+    ``ODDS_PRIORITY`` would serve the same payload there. Match 2 is therefore
+    given a second, more trusted row after the lower-priority one already on it,
+    which makes the two rules disagree: priority answers ``29 / 29`` and the
+    stored order answers ``25 / 17``.
+    """
+    world = _build_world(db_session)
+    lower = db_session.scalars(
+        select(MatchOdd).where(
+            MatchOdd.match_id == world.played[1].id, MatchOdd.bookmaker == "bet365"
+        )
+    ).one()
+    trusted = store_odds(
+        db_session,
+        match=world.played[1],
+        bookmaker="pinnacle",
+        home=2.0,
+        draw=3.5,
+        away=4.0,
+    )
+    # The bet365 row of the world is now the older of the two, so the identifier
+    # order is the wrong rule's order and the two answers can never coincide.
+    assert trusted.id > lower.id
+
+    payload = _stats(api_client, world.focus.id, world.season.code)
+
+    xpts = {row["match"]["id"]: row["xpts"] for row in payload["matches"]}
+    assert xpts[world.played[1].id] == pytest.approx(XPTS_PRIORITY_WINS)
+    assert xpts[world.played[1].id] != pytest.approx(XPTS_SECOND)
+    # The second eligible row of one fixture is not a second priced fixture: the
+    # counter counts fixtures, and the sum gains the one trusted value only.
+    assert payload["xpts_coverage"] == 3
+    assert payload["xpts_market"] == pytest.approx(XPTS_FIRST + XPTS_PRIORITY_WINS + XPTS_FOURTH)
+    assert len(payload["matches"]) == 6
+    assert xpts[world.played[0].id] == pytest.approx(XPTS_FIRST)
+    assert xpts[world.played[3].id] == pytest.approx(XPTS_FOURTH)
+
+
+def test_a_club_with_only_a_scheduled_fixture_is_served_as_an_empty_season(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A club of the season that has not played yet is a 200, not a 404.
+
+    Membership of a season is every club that appears in any match of it,
+    whatever the status, so a club whose only fixture is still to come is a
+    member with no played match. The season also holds one played fixture
+    between two other clubs, so the league baseline and the statistics read are
+    not empty while the club's own season is: the payload must answer zeros and
+    nulls for the club without borrowing the other fixture's rows.
+    """
+    season = create_season(db_session, code=SEASON_CODE, start_year=SEASON_START_YEAR)
+    focus = create_team(db_session, name="Synthetic Idle FC")
+    waiting = create_team(db_session, name="Synthetic Waiting FC")
+    host = create_team(db_session, name="Synthetic Host FC")
+    guest = create_team(db_session, name="Synthetic Guest FC")
+    create_match(
+        db_session,
+        season=season,
+        home=focus,
+        away=waiting,
+        kickoff_date=datetime.date(2098, 8, 1),
+    )
+    played = create_match(
+        db_session,
+        season=season,
+        home=host,
+        away=guest,
+        kickoff_date=datetime.date(2098, 8, 2),
+        status="played",
+        home_goals=1,
+        away_goals=1,
+    )
+    create_match_stats(
+        db_session,
+        match=played,
+        home_shots=10,
+        away_shots=6,
+        home_shots_on_target=4,
+        away_shots_on_target=2,
+        home_fouls=10,
+        away_fouls=12,
+        home_corners=5,
+        away_corners=3,
+        home_yellow=1,
+        away_yellow=2,
+        home_red=0,
+        away_red=0,
+    )
+    store_odds(db_session, match=played, bookmaker="pinnacle", home=2.0, draw=3.5, away=4.0)
+
+    payload = _stats(api_client, focus.id, season.code)
+
+    assert payload["season"] == SEASON_CODE
+    assert payload["team"] == {"id": focus.id, "name": "Synthetic Idle FC"}
+    assert payload["played"] == 0
+    assert payload["points"] == 0
+    assert payload["xpts_market"] is None
+    assert payload["xpts_coverage"] == 0
+    assert payload["matches"] == []
+    # An average over no match is null in every field, the goals included: a
+    # zero here would invent a 0-0 season.
+    _assert_line(
+        payload["per_match"]["for"],
+        goals=None,
+        shots=None,
+        shots_on_target=None,
+        fouls=None,
+        corners=None,
+        yellow=None,
+        red=None,
+        xg=None,
+    )
+    _assert_line(
+        payload["per_match"]["against"],
+        goals=None,
+        shots=None,
+        shots_on_target=None,
+        fouls=None,
+        corners=None,
+        yellow=None,
+        red=None,
+        xg=None,
+    )
+    # Both coverage counters count the club's own played matches. The season
+    # holds one statistics row, on the fixture between the two other clubs, and
+    # a count taken over the season instead of over the club would answer 1 for
+    # both of them.
+    assert payload["stat_coverage"] == 0
+    assert payload["xg_coverage"] == 0
+    for side in ("home", "away"):
+        _assert_record(
+            payload["splits"][side],
+            played=0,
+            won=0,
+            drawn=0,
+            lost=0,
+            goals=(0, 0),
+            points=0,
+            ppg=None,
+        )
+    # The baseline averages both sides of the one played fixture: one goal each,
+    # (10 + 6) / 2 shots, (4 + 2) / 2 on target, (10 + 12) / 2 fouls,
+    # (5 + 3) / 2 corners, (1 + 2) / 2 yellow and (0 + 0) / 2 red. No side
+    # carries an expected-goals value, so that field is null and not zero.
+    _assert_line(
+        payload["league_avg"],
+        goals=(1 + 1) / 2,
+        shots=(10 + 6) / 2,
+        shots_on_target=(4 + 2) / 2,
+        fouls=(10 + 12) / 2,
+        corners=(5 + 3) / 2,
+        yellow=(1 + 2) / 2,
+        red=(0 + 0) / 2,
+        xg=None,
+    )
+    # Four clubs put two in the top tier and two in the middle: the hosts and
+    # the guests each hold the point of the draw, the focus club and its
+    # scheduled opponent hold none.
+    assert set(payload["tiers"]) == {"top", "middle", "bottom"}
+    _assert_tier(
+        payload["tiers"]["top"],
+        team_ids=[host.id, guest.id],
+        played=0,
+        won=0,
+        drawn=0,
+        lost=0,
+        goals=(0, 0),
+        points=0,
+        ppg=None,
+    )
+    _assert_tier(
+        payload["tiers"]["middle"],
+        team_ids=[focus.id, waiting.id],
+        played=0,
+        won=0,
+        drawn=0,
+        lost=0,
+        goals=(0, 0),
+        points=0,
+        ppg=None,
+    )
+    _assert_tier(
+        payload["tiers"]["bottom"],
+        team_ids=[],
+        played=0,
+        won=0,
+        drawn=0,
+        lost=0,
+        goals=(0, 0),
+        points=0,
+        ppg=None,
+    )
+
+
+def test_an_empty_tier_is_served_rather_than_dropped(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A four-club table leaves the bottom tier empty and still serves it.
+
+    The boundary is ``ceil(n / 3)``, so four clubs fill the top and the middle
+    and leave the bottom with no member. A payload that omitted the empty tier
+    would make a client paint two tiers of three, and its matches would no
+    longer be partitioned by the records that are served.
+    """
+    season = create_season(db_session, code=SEASON_CODE, start_year=SEASON_START_YEAR)
+    focus = create_team(db_session, name="Synthetic Tiered FC")
+    alpha = create_team(db_session, name="Synthetic Alpha FC")
+    beta = create_team(db_session, name="Synthetic Beta FC")
+    gamma = create_team(db_session, name="Synthetic Gamma FC")
+    _played(db_session, season, home=focus, away=alpha, home_goals=3, away_goals=0, day=1)
+    _played(db_session, season, home=beta, away=focus, home_goals=1, away_goals=1, day=2)
+    # The fourth club needs a fixture to be a member of the season; a scheduled
+    # one is enough, and it carries no result into the table.
+    create_match(
+        db_session,
+        season=season,
+        home=gamma,
+        away=alpha,
+        kickoff_date=datetime.date(2098, 8, 3),
+        matchday=3,
+    )
+
+    payload = _stats(api_client, focus.id, season.code)
+
+    # The focus club won 3-0 and drew 1-1, so the table is the focus club on 4
+    # points, Beta on 1, and Gamma and Alpha on none: positions 1-2 are the
+    # focus club and Beta, positions 3-4 Gamma and Alpha, and no club is left for
+    # the bottom tier.
+    assert payload["played"] == 2
+    assert payload["points"] == 4
+    assert set(payload["tiers"]) == {"top", "middle", "bottom"}
+    # Focus club at home against Alpha (a middle-tier club): one win, 3-0.
+    _assert_tier(
+        payload["tiers"]["middle"],
+        team_ids=[alpha.id, gamma.id],
+        played=1,
+        won=1,
+        drawn=0,
+        lost=0,
+        goals=(3, 0),
+        points=3,
+        ppg=3.0,
+    )
+    # Focus club away at Beta (a top-tier club): one draw, 1-1.
+    _assert_tier(
+        payload["tiers"]["top"],
+        team_ids=[focus.id, beta.id],
+        played=1,
+        won=0,
+        drawn=1,
+        lost=0,
+        goals=(1, 1),
+        points=1,
+        ppg=1.0,
+    )
+    _assert_tier(
+        payload["tiers"]["bottom"],
+        team_ids=[],
+        played=0,
+        won=0,
+        drawn=0,
+        lost=0,
+        goals=(0, 0),
+        points=0,
+        ppg=None,
+    )
+    tiers = payload["tiers"]
+    assert sum(tiers[name]["played"] for name in ("top", "middle", "bottom")) == payload["played"]
+
+
 def test_splits_and_points_agree_with_the_standings_and_focus_endpoints(
     api_client: TestClient, db_session: Session
 ) -> None:
@@ -410,6 +705,49 @@ def test_the_default_season_is_the_latest_one_with_a_match(
     assert response.json()["season"] == SEASON_CODE
 
 
+def test_the_default_season_of_a_database_without_a_match_is_not_found(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A default request with no match to open on is a fixed 404, not a 500.
+
+    Without ``season`` the route resolves the latest season that has a match, and
+    a database holding no match at all leaves that resolution nothing to answer.
+
+    The state is a precondition rather than something this test builds: emptying
+    the match table would be the direct way to reach it, but
+    ``TRUNCATE TABLE matches CASCADE`` is refused by the ``lmi_reject_mutation``
+    trigger, because the cascade truncates the append-only ``predictions`` table
+    with it. A disposable database is migrated but never ingested, so it holds
+    no match and the branch is reachable as it stands; a database the ingestion
+    has filled cannot reach it at all, and the test says so instead of asserting
+    a state it did not create.
+    """
+    season = create_season(db_session, code=SEASON_CODE, start_year=SEASON_START_YEAR)
+    focus = create_team(db_session, name="Synthetic Seasonless FC")
+    if db_session.scalar(select(func.count()).select_from(Match)):
+        pytest.skip(
+            "the database holds matches, and lmi_reject_mutation refuses "
+            "'TRUNCATE TABLE matches CASCADE' because the cascade truncates predictions"
+        )
+
+    default = api_client.get(PATH.format(team_id=focus.id))
+    explicit = api_client.get(PATH.format(team_id=focus.id), params={"season": season.code})
+
+    assert default.status_code == 404
+    assert default.headers["content-type"].startswith(PROBLEM_MEDIA_TYPE)
+    problem = default.json()
+    assert problem["title"] == "Not Found"
+    assert problem["status"] == 404
+    assert problem["detail"] == "No season with matches"
+    assert problem["errors"] is None
+    # The named season still exists and simply has no match the club appears in,
+    # so the sentence above can only come from the default resolution: the two
+    # 404 branches are told apart.
+    assert explicit.status_code == 404
+    assert explicit.headers["content-type"].startswith(PROBLEM_MEDIA_TYPE)
+    assert explicit.json()["detail"] == "Team not found in season"
+
+
 def test_openapi_documents_the_team_season_stats_contract() -> None:
     document = create_app().openapi()
     operation = document["paths"]["/v1/teams/{team_id}/season-stats"]["get"]
@@ -467,7 +805,7 @@ def _assert_record(
     lost: int,
     goals: tuple[int, int],
     points: int,
-    ppg: float,
+    ppg: float | None,
 ) -> None:
     """Assert the field set and every counter of one venue split."""
     assert set(record) == SPLIT_FIELDS
@@ -492,16 +830,23 @@ def _assert_counters(
     lost: int,
     goals: tuple[int, int],
     points: int,
-    ppg: float,
+    ppg: float | None,
 ) -> None:
-    """Assert the hand-computed counters shared by a split and a tier record."""
+    """Assert the hand-computed counters shared by a split and a tier record.
+
+    ``ppg`` is ``None`` for a group that played no match, which is the null the
+    schema promises instead of a made-up average.
+    """
     assert record["played"] == played
     assert record["won"] == won
     assert record["drawn"] == drawn
     assert record["lost"] == lost
     assert (record["goals_for"], record["goals_against"]) == goals
     assert record["points"] == points
-    assert record["points_per_game"] == pytest.approx(ppg)
+    if ppg is None:
+        assert record["points_per_game"] is None
+    else:
+        assert record["points_per_game"] == pytest.approx(ppg)
 
 
 def _assert_tier(
@@ -514,7 +859,7 @@ def _assert_tier(
     lost: int,
     goals: tuple[int, int],
     points: int,
-    ppg: float,
+    ppg: float | None,
 ) -> None:
     """Assert one tier record, its membership and its counters."""
     assert set(record) == TIER_FIELDS

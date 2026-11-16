@@ -289,6 +289,35 @@ def test_the_matchday_filter_narrows_the_page_and_combines_with_and(
     assert combined == {"ids": [third_row.id], "total": 1}
 
 
+def test_the_accepted_matchday_bounds_are_served(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """The filter accepts both ends of the documented range, not only its middle.
+
+    The narrowing test above proves that ``2`` filters and that ``0`` and ``47``
+    are rejected, which a bound tightened to ``ge=2`` or ``le=45`` would also
+    satisfy. A LaLiga season has 38 matchdays but the documented range is
+    ``1..46``, so the two ends are checked here with one row each: a tightened
+    bound would raise 422 instead of answering 200, and the widened rule that
+    ignored the filter would serve both rows with a total of two.
+    """
+    today = madrid_today(db_session)
+    season = create_season(db_session, code=SEASON_CODE, start_year=SEASON_START_YEAR)
+    run = create_prediction_run(db_session)
+    lowest = _fixture(db_session, season, kickoff_date=today + _days(2), tag="bound-1", matchday=1)
+    highest = _fixture(
+        db_session, season, kickoff_date=today + _days(3), tag="bound-46", matchday=46
+    )
+    lowest_row = create_prediction(db_session, match=lowest, model="home_win", run=run)
+    highest_row = create_prediction(db_session, match=highest, model="home_win", run=run)
+
+    first_matchday = _page(api_client, {"season": season.code, "matchday": 1})
+    last_matchday = _page(api_client, {"season": season.code, "matchday": 46})
+
+    assert first_matchday == {"ids": [lowest_row.id], "total": 1}
+    assert last_matchday == {"ids": [highest_row.id], "total": 1}
+
+
 def test_the_kickoff_date_range_is_inclusive_and_combines_with_and(
     api_client: TestClient, db_session: Session
 ) -> None:
