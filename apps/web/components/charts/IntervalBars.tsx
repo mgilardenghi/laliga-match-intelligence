@@ -170,7 +170,7 @@ export function IntervalBars(props: IntervalBarsProps): ReactElement {
               y={12}
               textAnchor={scale.scale(threshold) > PLOT_RIGHT - 90 ? "end" : "start"}
               className={styles.axisText}
-              style={{ fill: "var(--zone-relegation, #d55e00)", opacity: 1 }}
+              style={{ fill: "currentColor", opacity: 1 }}
             >
               {thresholdLabel}
             </text>

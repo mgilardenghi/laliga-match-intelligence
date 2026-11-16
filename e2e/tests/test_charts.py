@@ -90,3 +90,37 @@ def test_chart_gallery_renders_every_chart(page: Page, dashboard_url: str) -> No
     probability_texts = probability_section.locator('svg[role="img"] text').all_text_contents()
     percentages = [text for text in probability_texts if "%" in text]
     assert len(percentages) >= 3, f"probability bar renders {len(percentages)} percentages"
+
+
+# The zone colour is for lines and segments. Small text filled with it measured
+# 3.87:1 against the light background, below the 4.5:1 the design asks for, so
+# no chart text may use it as its fill, in either colour scheme.
+ZONE_COLOUR_TEXT_FILLS_SCRIPT = """
+() => {
+  const probe = document.createElement("span");
+  probe.style.color = "var(--zone-relegation, #d55e00)";
+  document.body.appendChild(probe);
+  const zone = getComputedStyle(probe).color;
+  probe.remove();
+  return Array.from(document.querySelectorAll("figure svg text"))
+    .filter((text) => getComputedStyle(text).fill === zone)
+    .map((text) => (text.textContent || "").trim());
+}
+"""
+
+
+@pytest.mark.empty
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_no_chart_text_uses_the_zone_colour_as_its_fill(
+    page: Page, dashboard_url: str, scheme: str
+) -> None:
+    page.emulate_media(color_scheme=scheme)  # type: ignore[arg-type]
+    url = f"{dashboard_url}{GALLERY_PATH}"
+    response: Response | None = page.goto(url)
+
+    assert response is not None, f"{url} returned no navigation response"
+    assert response.ok, f"{url} answered HTTP {response.status}"
+    expect(page.locator("figure")).to_have_count(CHART_COUNT)
+
+    offenders = page.evaluate(ZONE_COLOUR_TEXT_FILLS_SCRIPT)
+    assert offenders == [], f"chart text filled with the zone colour in {scheme} mode: {offenders}"

@@ -24,7 +24,9 @@ const PLOT_LEFT = 12;
 const PLOT_RIGHT = 468;
 const BAR_Y = 26;
 const BAR_HEIGHT = 34;
-const LABEL_ROWS = 2;
+// One row per segment: with three labels and three rows a free row always
+// exists, so two labels can never be drawn on top of each other.
+const LABEL_ROWS = 3;
 const LABEL_ROW_Y = 80;
 const LABEL_ROW_GAP = 14;
 const CHAR_WIDTH = 5.4;
@@ -64,9 +66,10 @@ export function ProbabilityBar(props: ProbabilityBarProps): ReactElement {
     { key: "A", probability: away.probability, colour: SEGMENT_COLOURS[2] },
   ];
   const total = segments.reduce((sum, segment) => sum + Math.max(0, segment.probability), 0);
-  // A bar whose widths disagree with its own labels would be a lie. The widths
-  // therefore follow the raw proportions, and a total that is not 100 % is
-  // stated in the chart instead of being normalised away silently.
+  // A bar whose widths disagree with its own labels would be a lie. Each
+  // segment is drawn as its share of the total, and its label shows that same
+  // share. A total that is not 100 % is stated in the chart; the table keeps
+  // the raw inputs.
   const denominator = total > 0 ? total : 1;
   const scaled = Math.abs(total - 1) > 1e-6;
 
@@ -76,7 +79,7 @@ export function ProbabilityBar(props: ProbabilityBarProps): ReactElement {
     const width = (Math.max(0, segment.probability) / denominator) * plotWidth;
     const start = cursor;
     cursor += width;
-    const label = `${segment.key} ${formatPercent(segment.probability)}`;
+    const label = `${segment.key} ${formatPercent(Math.max(0, segment.probability) / denominator)}`;
     const labelWidth = label.length * CHAR_WIDTH;
     const half = labelWidth / 2;
     const centre = Math.min(PLOT_RIGHT - half, Math.max(PLOT_LEFT + half, start + width / 2));
@@ -163,7 +166,7 @@ export function ProbabilityBar(props: ProbabilityBarProps): ReactElement {
         })}
         {scaled ? (
           <text x={PLOT_LEFT} y={HEIGHT - 6} textAnchor="start" className={styles.axisText}>
-            {`The segments are scaled to the total probability of ${formatPercent(total)}.`}
+            {`The inputs add up to ${formatPercent(total)}; each segment shows its share of that total.`}
           </text>
         ) : null}
       </svg>

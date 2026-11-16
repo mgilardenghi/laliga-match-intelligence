@@ -144,7 +144,7 @@ export function Sparkline(props: SparklineProps): ReactElement {
               y={14}
               textAnchor="middle"
               className={styles.axisText}
-              style={{ fill: "var(--zone-relegation, #d55e00)", opacity: 1 }}
+              style={{ fill: "currentColor", opacity: 1 }}
             >
               {`${seasons[selected.from]} → ${seasons[selected.to]}`}
             </text>
