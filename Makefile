@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose
 
-.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler lint test test-integration build clean
+.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler lint test test-integration build api-client api-client-check clean
 
 # Throwaway database for the integration tests. Same image as Compose, a host
 # port that is unlikely to collide, and placeholder credentials only.
@@ -100,6 +100,14 @@ test-integration: ## Run the integration tests against a throwaway PostgreSQL co
 build: ## Build the web application and every Docker image
 	pnpm --filter web build
 	$(COMPOSE) build
+
+api-client: ## Regenerate the typed API client from the OpenAPI contract
+	uv run python -m lmi_api.openapi_export packages/api-client/openapi.json
+	pnpm --filter @lmi/api-client generate
+
+api-client-check: ## Fail when the committed API client no longer matches the API
+	$(MAKE) api-client
+	git diff --exit-code -- packages/api-client
 
 clean: ## Stop the stack and delete its volumes (project lmi only)
 	$(COMPOSE) down -v
