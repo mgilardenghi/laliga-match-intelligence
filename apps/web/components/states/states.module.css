@@ -1,0 +1,139 @@
+/*
+ * The shared states and the screens built on them: empty, problem, skeleton and
+ * the three boundary pages (not found, route error, global error).
+ *
+ * Every colour is a token from globals.css, so a state follows the theme like
+ * the rest of the dashboard. The states are deliberately plain: a border, a
+ * surface and readable spacing, with no motion and no accent of their own.
+ */
+
+.state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 42rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.title {
+  font-size: 1.0625rem;
+}
+
+.prose {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.prose p + p {
+  margin-top: 0.5rem;
+}
+
+.command {
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.code {
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--background);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875em;
+}
+
+.action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skeletonLabel {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.skeletonBars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skeletonBar {
+  height: 0.85rem;
+  border-radius: 0.25rem;
+  background: var(--border);
+  opacity: 0.55;
+}
+
+/* The last bar stops short, so the block reads as text rather than as a table
+   of three equal cells. */
+.skeletonBar:last-child {
+  width: 60%;
+}
+
+.boundary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  color: var(--text);
+}
+
+.boundaryTitle {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+}
+
+.boundaryText {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.boundaryActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+.button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--control-border);
+  border-radius: 0.4rem;
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}

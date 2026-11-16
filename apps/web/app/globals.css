@@ -1,19 +1,92 @@
+/*
+ * The global token set and the element styles built on it.
+ *
+ * Every page, chart and control reads its colour from a token here, so a theme
+ * is one block of values and no component carries a colour of its own. The
+ * cascade is ordered so the stored choice always wins: the layout writes
+ * `data-theme` from the cookie, and an absent attribute means "follow the
+ * system".
+ */
+
 :root {
   --background: #ffffff;
+  --surface: #f6f7f9;
+  --border: #d4d4d8;
+  --control-border: #6b7280;
   --foreground: #171717;
+  --text: #171717;
   --muted: #5f6368;
+  --accent: #0072b2;
+  --focus-ring: #1d4ed8;
   --online: #15803d;
   --offline: #b91c1c;
+  --outcome-w: #15803d;
+  --outcome-d: #5f6368;
+  --outcome-l: #b91c1c;
+  --cat-1: #b45309;
+  --cat-2: #0f766e;
+  --cat-3: #c2689e;
+  --cat-4: #33608c;
+  --zone-relegation: #d55e00;
+  /* Sequential scale: identical in both themes, because the heatmap draws a
+     fixed dark text on steps 0-4 and a fixed white text on steps 5-8. */
+  --seq-0: #f0f4f9;
+  --seq-1: #dbe9f6;
+  --seq-2: #9ecae1;
+  --seq-3: #6baed6;
+  --seq-4: #3f8fc4;
+  --seq-5: #2171b5;
+  --seq-6: #08519c;
+  --seq-7: #083f78;
+  --seq-8: #062d55;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: #0a0a0a;
+    --surface: #15171a;
+    --border: #3f3f46;
+    --control-border: #9ca3af;
     --foreground: #ededed;
+    --text: #ededed;
     --muted: #a1a1aa;
+    --accent: #56b4e9;
+    --focus-ring: #93c5fd;
     --online: #4ade80;
     --offline: #f87171;
+    --cat-1: #f59e0b;
+    --cat-2: #2dd4bf;
+    --cat-3: #f2a6c8;
+    --cat-4: #7fb3e0;
+    --zone-relegation: #d55e00;
+    /* The outcome fills and the sequential scale stay as they are in light:
+       white letters sit on the outcome fills and the heatmap steps carry fixed
+       text colours, so a second palette would break their contrast. */
   }
+}
+
+:root[data-theme="dark"] {
+  --background: #0a0a0a;
+  --surface: #15171a;
+  --border: #3f3f46;
+  --control-border: #9ca3af;
+  --foreground: #ededed;
+  --text: #ededed;
+  --muted: #a1a1aa;
+  --accent: #56b4e9;
+  --focus-ring: #93c5fd;
+  --online: #4ade80;
+  --offline: #f87171;
+  --cat-1: #f59e0b;
+  --cat-2: #2dd4bf;
+  --cat-3: #f2a6c8;
+  --cat-4: #7fb3e0;
+  --zone-relegation: #d55e00;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -43,4 +116,40 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:hover,
+a:focus-visible {
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+/* The charts animate nothing today; this keeps it that way for anyone who
+   asks their system to stop motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
