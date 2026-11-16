@@ -59,8 +59,7 @@ def get_standings(
         HTTPException: 404 when ``season`` is given and no season has that code,
             or when no season has a match while ``season`` is absent. The detail
             is a fixed sentence in both cases and never repeats the client
-            value, unlike the season and team endpoints, which quote their own
-            path parameter because that is the resource being addressed.
+            value, and the season and team endpoints follow the same rule.
     """
     season_id, season_code = _resolve_season(session, season=season)
 

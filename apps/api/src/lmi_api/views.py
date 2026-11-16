@@ -115,8 +115,7 @@ def resolve_season(session: Session, *, code: str | None) -> tuple[int, str]:
             match while no code was given. The detail is a fixed sentence and
             never repeats the value the client sent: the value is untrusted
             input, and the sentence already says which kind of thing is
-            unknown, unlike the season and team endpoints, which quote their own
-            path parameter because that is the resource being addressed.
+            unknown. The season and team endpoints follow the same rule.
     """
     if code is not None:
         stored = session.scalars(select(SeasonModel).where(SeasonModel.code == code)).first()
