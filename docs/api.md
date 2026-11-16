@@ -43,12 +43,17 @@ generated client models the real body instead of a default error envelope:
 | `GET /v1/teams` | unknown season code | declared, not reachable (its only parameter is an unconstrained string) | — |
 | `GET /v1/teams/{team_id}` | unknown team | non-integer identifier | — |
 | `GET /v1/teams/{team_id}/season-stats` | unknown team, unknown season code, a team that is not part of the season, or no season with matches | non-integer identifier | — |
+| `GET /v1/teams/{team_id}/focus` | unknown team, unknown season code, a team that is not part of the season, or no season with matches | non-integer identifier | — |
+| `GET /v1/teams/{team_id}/history` | unknown team | non-integer identifier | — |
+| `GET /v1/teams/{team_id}/relegation-race` | unknown team, unknown season code, a team that is not part of the season, or no completed season for the survival threshold | non-integer identifier | — |
 | `GET /v1/predictions` | unknown season code, or an unknown `match_id` or `team_id` | a `matchday`, `model`, `match_status`, `evaluation` or date value outside its rule | — |
 | `GET /v1/predictions/{prediction_id}` | unknown prediction | non-integer identifier | — |
 | `GET /v1/matches` | unknown season code or team identifier | a query value outside its rule | — |
 | `GET /v1/matches/{match_id}` | unknown match | non-integer identifier | — |
+| `GET /v1/matches/{match_id}/preview` | unknown match | non-integer identifier | — |
 | `GET /v1/standings` | unknown season code, or no season with matches | malformed `as_of` | — |
 | `GET /v1/model-metrics` | `no backtest run`: no succeeded run is stored, or `run_id` names one that is missing, running or failed | malformed `run_id` | — |
+| `GET /v1/model-metrics/live` | unknown season code, or no season with matches | declared, not reachable (its only parameter is an unconstrained string) | — |
 | `GET /v1/ingestion-runs` | unknown season code | a `source`, `status`, `limit` or `offset` value outside its rule | — |
 | `GET /v1/ingestion-runs/{run_id}` | unknown ingestion run | non-UUID identifier | — |
 | `POST /v1/simulations` | unknown season code, or no season has a match while the body names none | a body value outside its bounds, or an `as_of_date` later than the Madrid date | the queue refused the message |
@@ -322,6 +327,198 @@ One row of `matches` is shown; a season of 38 matchdays returns 38.
       }
     }
   ]
+}
+```
+
+### `GET /v1/teams/{team_id}/focus`
+
+One club's season as a single read: its table row, its recent form, its venue
+split, the fixtures still to come with the forecasts stored for them, and its
+outlook in the latest succeeded simulation.
+
+| Parameter | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `season` | string | the current season (see below) | Season code. An unknown code is a `404`. |
+
+**Which season by default.** The same rule the standings endpoint applies:
+without `season`, the answer is the greatest `start_year` among the seasons that
+have at least one match. When no season has a match the response is a `404` with
+the detail `No season with matches`, and a code no season carries is a `404`
+with the detail `Season not found`.
+
+**Which club.** The club has to be a side of at least one match of that season,
+whatever the status of that match, because the season's team set is the one the
+table ranks. A club that only plays another season is a `404` with the detail
+`Team not found in the season`; an identifier no club has is a `404` with the
+detail `Team not found`. A `team_id` that is not an integer is a `422` whose
+`detail` is `Request validation failed`. None of those sentences repeats the
+value the client sent.
+
+**The table row.** `standing` is the team's row of the season table: the nested
+`team` with its `id` and `name`, then `position`, `played`, `won`, `drawn`,
+`lost`, `goals_for`, `goals_against`, `goal_difference`, `points` and a `form`
+of the last five outcomes of the season. The field is nullable in the schema
+because the payload is also the shape a read over a partial table would return,
+but the team-set rule above makes it non-null for every team this endpoint
+serves: a null there means a broken read, not missing data.
+
+**The form and the splits.** `form` covers the last five played matches of the
+season, newest first. It carries the `team` the letters are seen from, `results`
+with one letter per match, `points`, `goals_for` and `goals_against` over
+exactly those matches, and `matches`, the same fixtures in the same order.
+`splits` covers every played match of the season by venue: `home` and `away`
+each carry `played`, `won`, `drawn`, `lost`, `goals_for`, `goals_against`,
+`points` and `points_per_game`, which is null for a side that played no match.
+The two records differ from `form` in scope, not in arithmetic.
+
+**The fixtures still to come.** `upcoming` lists the next five fixtures that are
+`scheduled` and dated on or after the Madrid date of the request, in
+kickoff-date then identifier order. Each entry nests `match` and `predictions`.
+The fixture is the summary the matches collection returns: `id`, `season`,
+`kickoff_date`, `kickoff_time`, `matchday`, `status`, `home_team`, `away_team`,
+`home_goals`, `away_goals`, `ht_home_goals`, `ht_away_goals` and `result`, where
+the goal and result fields are null while the fixture is still `scheduled`. Each
+prediction carries `prediction_id`, `model`, `model_version`, `created_at`,
+`as_of_date`, `probabilities` (of `home`, `draw` and `away`) and `evaluation`,
+which is the outcome the core scorer gives the stored row. `predictions` holds
+the standing row of each model: the newest row that can still stand, which for a
+fixture still to be played is the row the scorer calls `pending`, with the
+fallback to the newest `late` row when the model has no such row for the
+fixture, so a fixture whose date moved earlier than its rows still reports what
+was stored for it. The list is ordered by the report position of the model and
+then by its version. The five fixtures are read in one statement and evaluated
+once, so the number of queries does not grow with the number of fixtures, and a
+fixture with no stored forecast still appears with an empty `predictions` list.
+
+**The outlook.** `outlook` is the team's row of the latest succeeded simulation
+run of the season, the run chosen by `finished_at`, which is not the run with
+the latest `as_of_date`. Every field is a stored column of that run, so nothing
+is re-simulated: `run_id` is the trace back to the full table of the run, which
+`GET /v1/simulations/{run_id}` serves, and `as_of_date` is the cut the run
+simulated from. `expected_points` and `expected_position` are means over the
+simulated seasons and are therefore fractional; they are the stored
+`mean_points` and `mean_position` of the run. `p_title`, `p_ucl`, `p_europe` and
+`p_relegation` are the probabilities the projected table of a simulation
+defines: the club finishes first, inside the UCL places, inside the European
+places, or inside the relegation places, as
+[the projected table](#the-projected-table) states them. `points_p05` and
+`points_p95` are the 5th and the 95th percentile of the simulated final points
+total, which is why they are whole points while the two expected values are not.
+The field is null when the season has no succeeded run, or when that run stored
+no row for the team.
+
+**The derived values.** Every other value is derived on read, through the same
+core functions the standings, predictions and live-metrics endpoints use, so
+this view cannot disagree with them.
+
+One of the five matches behind `form`, one of the five fixtures of `upcoming`
+and one of its forecasts are shown.
+
+```json
+{
+  "team": { "id": 5, "name": "Barcelona" },
+  "season": "2026-27",
+  "standing": {
+    "position": 1,
+    "team": { "id": 5, "name": "Barcelona" },
+    "played": 13,
+    "won": 10,
+    "drawn": 2,
+    "lost": 1,
+    "goals_for": 34,
+    "goals_against": 12,
+    "goal_difference": 22,
+    "points": 32,
+    "form": ["W", "W", "L", "W", "W"]
+  },
+  "form": {
+    "team": { "id": 5, "name": "Barcelona" },
+    "results": ["W", "W", "L", "W", "W"],
+    "points": 12,
+    "goals_for": 13,
+    "goals_against": 5,
+    "matches": [
+      {
+        "id": 4290,
+        "season": "2026-27",
+        "kickoff_date": "2026-11-08",
+        "kickoff_time": "18:30:00",
+        "matchday": 12,
+        "status": "played",
+        "home_team": { "id": 5, "name": "Barcelona" },
+        "away_team": { "id": 8, "name": "Real Betis" },
+        "home_goals": 4,
+        "away_goals": 1,
+        "ht_home_goals": 2,
+        "ht_away_goals": 0,
+        "result": "H"
+      }
+    ]
+  },
+  "splits": {
+    "home": {
+      "played": 7,
+      "won": 6,
+      "drawn": 1,
+      "lost": 0,
+      "goals_for": 21,
+      "goals_against": 5,
+      "points": 19,
+      "points_per_game": 2.71
+    },
+    "away": {
+      "played": 6,
+      "won": 4,
+      "drawn": 1,
+      "lost": 1,
+      "goals_for": 13,
+      "goals_against": 7,
+      "points": 13,
+      "points_per_game": 2.17
+    }
+  },
+  "upcoming": [
+    {
+      "match": {
+        "id": 4311,
+        "season": "2026-27",
+        "kickoff_date": "2026-11-22",
+        "kickoff_time": "21:00:00",
+        "matchday": 14,
+        "status": "scheduled",
+        "home_team": { "id": 12, "name": "Valencia" },
+        "away_team": { "id": 5, "name": "Barcelona" },
+        "home_goals": null,
+        "away_goals": null,
+        "ht_home_goals": null,
+        "ht_away_goals": null,
+        "result": null
+      },
+      "predictions": [
+        {
+          "prediction_id": 9812,
+          "model": "dixon_coles",
+          "model_version": "1",
+          "created_at": "2026-11-16T06:00:12.418003Z",
+          "as_of_date": "2026-11-16",
+          "probabilities": { "home": 0.2814, "draw": 0.2602, "away": 0.4584 },
+          "evaluation": "pending"
+        }
+      ]
+    }
+  ],
+  "outlook": {
+    "run_id": "e76dd01f-21e0-46c1-ad86-404bc30a983e",
+    "as_of_date": "2026-11-16",
+    "p_title": 0.412,
+    "p_ucl": 0.874,
+    "p_europe": 0.951,
+    "p_relegation": 0.0,
+    "expected_points": 78.4,
+    "points_p05": 66,
+    "points_p95": 91,
+    "expected_position": 1.9
+  }
 }
 ```
 
@@ -693,6 +890,183 @@ publish shots, fouls, corners and cards, and not every one of them publishes
 `xg`. `home_xg` and `away_xg` are JSON numbers, not strings. An unknown
 identifier is a `404`; a non-integer one is a `422`.
 
+### `GET /v1/matches/{match_id}/preview`
+
+The pre-kickoff view of one fixture: the match itself, the form of both sides as
+it stood before it, the record of the pair, the stored forecasts of the fixture
+and the market price.
+
+The resource takes no query parameter: one fixture is one preview, and every
+value below is a stored row or is derived from one. One meeting of
+`head_to_head`, one fixture of each form summary and one forecast are shown.
+
+```json
+{
+  "match": {
+    "id": 7981,
+    "season": "2025-26",
+    "kickoff_date": "2026-05-10",
+    "kickoff_time": "21:00:00",
+    "matchday": 37,
+    "status": "played",
+    "home_team": { "id": 12, "name": "Valencia" },
+    "away_team": { "id": 5, "name": "Barcelona" },
+    "home_goals": 1,
+    "away_goals": 2,
+    "ht_home_goals": 0,
+    "ht_away_goals": 1,
+    "result": "A"
+  },
+  "home_form": {
+    "team": { "id": 12, "name": "Valencia" },
+    "results": ["D", "W", "L", "L", "W"],
+    "points": 7,
+    "goals_for": 6,
+    "goals_against": 5,
+    "matches": [
+      {
+        "id": 7975,
+        "season": "2025-26",
+        "kickoff_date": "2026-05-03",
+        "kickoff_time": "18:30:00",
+        "matchday": 36,
+        "status": "played",
+        "home_team": { "id": 12, "name": "Valencia" },
+        "away_team": { "id": 10, "name": "Eibar" },
+        "home_goals": 1,
+        "away_goals": 1,
+        "ht_home_goals": 1,
+        "ht_away_goals": 0,
+        "result": "D"
+      }
+    ]
+  },
+  "away_form": {
+    "team": { "id": 5, "name": "Barcelona" },
+    "results": ["W", "W", "W", "D", "W"],
+    "points": 13,
+    "goals_for": 12,
+    "goals_against": 4,
+    "matches": [
+      {
+        "id": 7976,
+        "season": "2025-26",
+        "kickoff_date": "2026-05-03",
+        "kickoff_time": "21:00:00",
+        "matchday": 36,
+        "status": "played",
+        "home_team": { "id": 5, "name": "Barcelona" },
+        "away_team": { "id": 8, "name": "Real Betis" },
+        "home_goals": 3,
+        "away_goals": 0,
+        "ht_home_goals": 2,
+        "ht_away_goals": 0,
+        "result": "H"
+      }
+    ]
+  },
+  "head_to_head": {
+    "played": 14,
+    "home_side_wins": 4,
+    "draws": 3,
+    "away_side_wins": 7,
+    "matches": [
+      {
+        "id": 7702,
+        "season": "2025-26",
+        "kickoff_date": "2025-12-14",
+        "kickoff_time": "21:00:00",
+        "matchday": 16,
+        "status": "played",
+        "home_team": { "id": 5, "name": "Barcelona" },
+        "away_team": { "id": 12, "name": "Valencia" },
+        "home_goals": 3,
+        "away_goals": 1,
+        "ht_home_goals": 1,
+        "ht_away_goals": 1,
+        "result": "H"
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "prediction_id": 9104,
+      "model": "elo",
+      "model_version": "1",
+      "created_at": "2026-05-09T06:00:07.113422Z",
+      "as_of_date": "2026-05-09",
+      "probabilities": { "home": 0.31, "draw": 0.28, "away": 0.41 },
+      "evaluation": "scored"
+    }
+  ],
+  "odds": {
+    "bookmaker": "market_avg",
+    "is_closing": false,
+    "home": 3.54,
+    "draw": 3.98,
+    "away": 1.84,
+    "implied": { "home": 0.262236, "draw": 0.233246, "away": 0.504518 }
+  }
+}
+```
+
+**The fixture.** `match` is the fixture in the summary shape the matches
+collection returns: `id`, `season`, `kickoff_date`, `kickoff_time`, `matchday`,
+`status`, `home_team` and `away_team` (each a club with its `id` and `name`),
+`home_goals`, `away_goals`, `ht_home_goals`, `ht_away_goals` and `result`.
+
+**The form before kickoff.** `home_form` and `away_form` are the form of each
+side over the played matches dated strictly before the fixture's own kickoff
+date, five at most, across seasons, newest first. Each carries the `team` the
+letters are seen from, `results` with one letter per match, `points`, `goals_for`
+and `goals_against` over exactly those matches, and `matches`, the same fixtures
+in the same order. The bound is the leakage rule: the fixture itself, any
+fixture of the same day and every later one are excluded, so the form is the one
+a reader could have seen before kickoff, and a played fixture shows the form it
+had then rather than the form it has now.
+
+**The record of the pair.** `head_to_head` applies the same rule to the pair:
+`played` counts every prior meeting of the two clubs, at either venue and in any
+season, strictly before the fixture date, while `matches` holds the ten most
+recent of them, newest first, so `played` can exceed the length of `matches`.
+The three counters are seen from this fixture's home side, not from the venue of
+each earlier meeting: `home_side_wins` counts the meetings that side won,
+`away_side_wins` the ones it lost and `draws` the ones neither won, so a club
+that was the visitor in a prior meeting still counts its own wins.
+
+**The forecasts.** `predictions` holds the standing stored forecast of each
+model of the fixture, whatever it earned: `prediction_id`, `model`,
+`model_version`, `created_at`, `as_of_date`, `probabilities` (of `home`, `draw`
+and `away`) and `evaluation`. The list is ordered by the report position of the
+model and then by its `model_version`, not in storage order. A played match
+yields `scored` briefs, a scheduled one `pending` and a withdrawn one
+`withdrawn`, and a model whose every row is `late` on a played or a scheduled
+fixture has no row that can still stand, so its newest row is served as `late`.
+`late` means the row was stamped at or after Madrid midnight of its match day,
+so it was not a pre-kickoff forecast: a fixture whose date moved earlier than
+its rows is one cause of that, not the rule. `superseded` is the outcome of a
+row that a later as-of date replaced within its match and model, and it is never
+served here: this section lists the standing row of each model, the newest row
+that is not retired, so a model that carries one on-time row and a later `late`
+row shows the on-time row. The evaluation is the core scorer's, so this section
+cannot disagree with `/v1/predictions`, where the replaced rows of the ledger
+are served when `latest_only` is `false`, or with `/v1/model-metrics/live`,
+which counts them as `n_superseded`.
+
+**The market price.** `odds` is the pre-closing 1x2 price of the fixture: the
+`bookmaker`, `is_closing`, the three decimal prices `home`, `draw` and `away`,
+and `implied`, the same price with the margin removed, so its `home`, `draw` and
+`away` sum to one. The price is selected by bookmaker priority `pinnacle`, then
+`market_avg`, then `bet365`, and `is_closing` is always `false`, because a
+closing price is never eligible whatever its bookmaker. `odds` is null when the
+fixture carries no eligible price, which is the normal state of a match still to
+be played because the current sources publish odds only with results; no price
+is invented.
+
+An unknown fixture is a `404` with the detail `Match not found`, and a
+`match_id` that is not an integer is a `422` whose `detail` is
+`Request validation failed`. Neither sentence repeats the identifier.
+
 ## Standings
 
 ### `GET /v1/standings`
@@ -1010,6 +1384,152 @@ model, `outcome` being `H`, `D` or `A` from the home side's point of view; an
 empty bin has `n: 0` and both summary values `null`. The lists are ordered by
 the producer: models in the order above, metrics by season and then `all` before
 `common`, calibration by model, outcome and bin index.
+
+### `GET /v1/model-metrics/live`
+
+The in-play report of one season: every stored prediction row evaluated as it
+stands, scored per model, on the matches all models share, and against the
+market.
+
+| Parameter | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `season` | string | the current season (see below) | Season code. An unknown code is a `404`. |
+
+Two of the model rows are shown, both covering the same twelve matches, so both
+stand on the shared set; the market reference covers the ten of those twelve
+that carry a price.
+
+```json
+{
+  "evaluated_as_of": "2026-11-16",
+  "models": [
+    {
+      "model": "home_win",
+      "model_version": "1",
+      "scores": {
+        "n_matches": 12,
+        "log_loss": 1.0522,
+        "brier": 0.6204,
+        "rps": 0.2318,
+        "accuracy": 0.3333
+      }
+    },
+    {
+      "model": "dixon_coles",
+      "model_version": "1",
+      "scores": {
+        "n_matches": 12,
+        "log_loss": 0.9741,
+        "brier": 0.5683,
+        "rps": 0.1802,
+        "accuracy": 0.5
+      }
+    }
+  ],
+  "common": {
+    "match_count": 12,
+    "models": [
+      {
+        "model": "home_win",
+        "model_version": "1",
+        "scores": {
+          "n_matches": 12,
+          "log_loss": 1.0522,
+          "brier": 0.6204,
+          "rps": 0.2318,
+          "accuracy": 0.3333
+        }
+      },
+      {
+        "model": "dixon_coles",
+        "model_version": "1",
+        "scores": {
+          "n_matches": 12,
+          "log_loss": 0.9741,
+          "brier": 0.5683,
+          "rps": 0.1802,
+          "accuracy": 0.5
+        }
+      }
+    ]
+  },
+  "market_reference": {
+    "model": "market",
+    "model_version": "1",
+    "scores": {
+      "n_matches": 10,
+      "log_loss": 0.9607,
+      "brier": 0.5602,
+      "rps": 0.1772,
+      "accuracy": 0.6
+    },
+    "stored_before_kickoff": false,
+    "match_count": 10,
+    "matches_without_odds": 2
+  },
+  "counts": {
+    "n_rows": 80,
+    "n_scored": 60,
+    "n_pending": 20,
+    "n_superseded": 0,
+    "n_late": 0,
+    "n_withdrawn": 0
+  }
+}
+```
+
+**Which season by default.** The same rule the standings endpoint applies:
+without `season`, the answer is the greatest `start_year` among the seasons that
+have at least one match, so both resources open on the season ingestion has
+loaded. When no season has a match the response is a `404` with the detail
+`No season with matches`; a code no season carries is a `404` with the detail
+`Season not found`. The shared problem responses declare a `422` for this route
+even though no validation failure can occur there: its only parameter is an
+unconstrained string, and an unknown season code is a `404`, the same note the
+`## Conventions` section makes for `GET /v1/teams`.
+
+**What live means.** "Live" is the in-play scoring of the stored prediction rows
+of one season: every row is evaluated as it stands, and the numbers are the ones
+the worker's `predict --report` prints, because both call the same core
+function. The season bounds the match identifiers that are read, never another
+season's predictions. `evaluated_as_of` is the Madrid date of the request.
+
+**The counts.** `counts` says which rows the metrics cover: `n_rows` is every
+evaluated prediction row, `n_scored` the rows with a result and an on-time
+prediction, `n_pending` the on-time rows that stand for a fixture still to be
+played, `n_superseded` the on-time rows a later as-of date replaced, `n_late`
+the rows stamped at or after Madrid midnight of their match day and
+`n_withdrawn` the rows whose match was withdrawn. Only a scored row carries a
+score.
+
+**The models.** `models` has one entry per model and version with scored rows,
+each carrying `model`, `model_version` and `scores`, and each computed on its own
+match set. The rows are ordered by the report position of the model, as the
+model registry lists the names, and then by `model_version`, not in storage
+order; a model name the registry does not list sorts last. `scores` carries
+`n_matches`, the scored matches behind the numbers, and the mean `log_loss`,
+`brier` and `rps`, with `accuracy` the share of correct top outcomes. As in the
+backtest report above, the three errors are lower is better and the accuracy
+higher is better.
+
+**The comparison.** `common` is the same comparison restricted to the matches
+every model scored, which is the fair one: `match_count` is the size of the
+shared set and `models` holds one entry per model on it, in that same order. The
+shared set is built per model name, so two versions of one model contribute the
+union of their matches to it, while each entry still covers only the shared
+matches it holds a scored row for and an entry with none is omitted. It is null
+when no match is shared.
+
+**The market reference.** `market_reference` is the market benchmark recomputed
+from the pre-closing 1x2 odds of the played matches in that cohort, with the
+margin removed. It carries `model` and `model_version` of the market model,
+`scores` in the same shape as the model rows, `match_count`, the number of
+matches it covers, and `matches_without_odds`, the matches it had to skip for
+missing odds, so its `match_count` is below the `match_count` of `common` when a
+shared match carried no price; a skipped match leaves the model entries above
+untouched. `stored_before_kickoff` is always `false`, because the reference is a
+benchmark recomputed on read and not a prediction the worker stored before
+kickoff. It is null when no odds are available.
 
 ## Ingestion runs
 
