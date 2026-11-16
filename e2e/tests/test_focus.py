@@ -301,3 +301,87 @@ def test_an_unknown_season_offers_a_way_out(page: Page, dashboard_url: str) -> N
     season = page.get_by_role("combobox", name="Season")
     expect(season).to_have_count(1)
     expect(season).to_be_visible()
+
+
+HEADER_TERMS = ("Position", "Points", "Goal difference", "Expected points", "P(relegation)")
+POINTS_SECTION = "section[aria-labelledby='points-heading']"
+SPLITS_SECTION = "section[aria-labelledby='splits-heading']"
+CUMULATIVE_CAPTION = "Cumulative points against market expectation"
+ROLLING_CAPTION = "Rolling five-match averages"
+ABOVE_THE_LINE = "Above the line = results better than the market expected."
+COVERAGE = re.compile(r"for \d+ of \d+ played matches")
+SPLIT_CAPTIONS = (
+    re.compile(r"^Home and away record"),
+    re.compile(r"^Record against top, middle and bottom opponents"),
+    re.compile(r"^Discipline per match"),
+)
+MODEL_BAR_CAPTION = re.compile(r": home win, draw and away win$")
+MATCH_HREF = re.compile(r"^/matches/\d+$")
+
+
+@pytest.mark.loaded
+def test_the_header_shows_the_tiles_and_both_selectors(page: Page, dashboard_url: str) -> None:
+    """Guard the header: the glance tiles and the season and team selectors."""
+    path = _default_focus_path(page, dashboard_url)
+    _open(page, dashboard_url, path)
+
+    terms = [text.strip() for text in page.locator("main dl").first.locator("dt").all_inner_texts()]
+    for term in HEADER_TERMS:
+        assert term in terms, f"the header tiles {terms} lack {term!r}"
+
+    # Each selector wraps its `<select>` in its `<label>`, so the label text holds
+    # every option; the two selects are found by what they offer instead.
+    selects = page.locator("main select")
+    expect(selects).to_have_count(2)
+    season_select = selects.filter(
+        has=page.locator("option", has_text=re.compile(r"^\d{4}-\d{2}$"))
+    )
+    team_select = selects.filter(has=page.locator("option", has_text=DEFAULT_CLUB))
+    expect(season_select).to_have_count(1)
+    expect(team_select).to_have_count(1)
+
+
+@pytest.mark.loaded
+def test_the_season_diagnosis_renders_its_charts_and_tables(page: Page, dashboard_url: str) -> None:
+    """Guard section 2: both charts with their reading aids, and the three tables."""
+    path = _default_focus_path(page, dashboard_url)
+    _open(page, dashboard_url, path)
+
+    points = page.locator(POINTS_SECTION)
+    for caption in (CUMULATIVE_CAPTION, ROLLING_CAPTION):
+        figure = _figure(points, caption)
+        expect(figure).to_have_count(1)
+        expect(figure.locator('svg[role="img"]')).to_have_count(1)
+
+    cumulative_text = _figure(points, CUMULATIVE_CAPTION).inner_text()
+    assert ABOVE_THE_LINE in cumulative_text, "the cumulative chart lacks its reading aid"
+    assert COVERAGE.search(cumulative_text) is not None, (
+        "the cumulative chart does not state its market coverage as n of N"
+    )
+
+    splits = page.locator(SPLITS_SECTION)
+    for caption in SPLIT_CAPTIONS:
+        table = splits.locator("table").filter(has=page.locator("caption", has_text=caption))
+        expect(table).to_have_count(1)
+        expect(table.locator("tbody tr").first).to_be_attached()
+
+
+@pytest.mark.loaded
+def test_the_next_match_links_to_its_preview_with_model_bars(
+    page: Page, dashboard_url: str
+) -> None:
+    """Guard section 5: the next fixture links to its page and shows the forecasts."""
+    path = _default_focus_path(page, dashboard_url)
+    _open(page, dashboard_url, path)
+
+    section = page.locator(NEXT_MATCH_SECTION)
+    hrefs = section.locator("a").evaluate_all("links => links.map(l => l.getAttribute('href'))")
+    assert any(MATCH_HREF.match(href or "") for href in hrefs), (
+        f"the next-match section links to {hrefs} and none is a match page"
+    )
+    bars = section.locator("figure").filter(
+        has=page.locator("figcaption", has_text=MODEL_BAR_CAPTION)
+    )
+    assert bars.count() >= 1, (
+        "the next match shows no model probability bar; the loaded tier runs make predict"
+    )
