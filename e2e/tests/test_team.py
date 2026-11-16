@@ -97,6 +97,14 @@ def _column_headers(table: Locator) -> list[str]:
     return [text.strip() for text in table.locator(":scope > thead > tr > th").all_inner_texts()]
 
 
+def _assert_column_scopes(table: Locator) -> None:
+    """Assert that every column header names its own column as its scope."""
+    headers = table.locator(":scope > thead > tr > th").all()
+    assert headers, "the table must render column headers"
+    scopes = [header.get_attribute("scope") for header in headers]
+    assert scopes == ["col"] * len(headers), f"every column header needs scope=col, found {scopes}"
+
+
 def _row_headers(table: Locator) -> list[str]:
     """Return the trimmed row headers of a table's body, in order.
 
@@ -166,6 +174,7 @@ def test_the_season_sections_render_from_the_loaded_data(page: Page, dashboard_u
     record = record_region.get_by_role("table", name=f"Home and away record, {season}")
     expect(record).to_have_count(1)
     assert _column_headers(record) == list(RECORD_COLUMNS), "the record table changed its columns"
+    _assert_column_scopes(record)
     body_rows = record.locator(":scope > tbody > tr")
     expect(body_rows).to_have_count(2)
     assert _row_headers(record) == ["Home", "Away"], "the record must keep one row per venue"
@@ -188,6 +197,7 @@ def test_the_season_sections_render_from_the_loaded_data(page: Page, dashboard_u
     assert _row_headers(profile_table) == list(PROFILE_ROWS), (
         "the profile data table must name the seven metrics in order"
     )
+    _assert_column_scopes(profile_table)
 
     results_region = page.get_by_role("region", name="Results")
     form = results_region.locator("figure")
@@ -200,6 +210,7 @@ def test_the_season_sections_render_from_the_loaded_data(page: Page, dashboard_u
     results = results_region.get_by_role("table", name=f"Results, {season}")
     expect(results).to_have_count(1)
     assert _column_headers(results) == list(RESULT_COLUMNS), "the results table changed its columns"
+    _assert_column_scopes(results)
     result_rows = results.locator(":scope > tbody > tr")
     expect(result_rows.first).to_be_visible()
     for index in range(result_rows.count()):
