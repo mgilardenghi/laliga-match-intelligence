@@ -1,0 +1,186 @@
+.figure {
+  margin: 0;
+  /* A figure is a flex item on the pages that stack charts in a column, so its
+     automatic minimum width must not be the intrinsic width of the heatmap
+     grid; otherwise the intrinsic width grows the whole page on a phone. */
+  min-width: 0;
+  color: var(--text, var(--foreground, #171717));
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.caption {
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.text {
+  fill: currentColor;
+}
+
+.mutedText {
+  fill: currentColor;
+  opacity: 0.68;
+}
+
+.axisText {
+  fill: currentColor;
+  font-size: 9px;
+  opacity: 0.72;
+}
+
+.axisLine {
+  stroke: currentColor;
+  stroke-width: 0.8;
+  opacity: 0.4;
+}
+
+.gridLine {
+  stroke: var(--border, #d4d4d8);
+  stroke-width: 0.6;
+}
+
+.accentStroke {
+  stroke: var(--accent, #0072b2);
+}
+
+.note {
+  margin-top: 0.4rem;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+}
+
+.details {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.summary {
+  cursor: pointer;
+  color: var(--muted, #5f6368);
+}
+
+.tableWrap {
+  margin-top: 0.4rem;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.table caption {
+  padding-bottom: 0.25rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.table th,
+.table td {
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--border, #d4d4d8);
+  text-align: left;
+  vertical-align: top;
+}
+
+.table thead th,
+.table tbody th {
+  font-weight: 600;
+}
+
+.probLabel {
+  fill: currentColor;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.leaderLine {
+  stroke: currentColor;
+  stroke-width: 0.7;
+  opacity: 0.55;
+}
+
+.segmentName {
+  fill: currentColor;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.endLabel {
+  fill: currentColor;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.panelHeading {
+  fill: currentColor;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.legendText {
+  fill: currentColor;
+  font-size: 9px;
+}
+
+.heatmapScroller {
+  /* The scroller owns the horizontal overflow; without this the grid's
+     intrinsic width is also its minimum width and pushes the page wider. */
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.heatmapLayout {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+}
+
+.heatmapLabels {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  background: var(--background, #ffffff);
+  box-shadow: 1px 0 0 var(--border, #d4d4d8);
+}
+
+.heatmapTeam {
+  display: flex;
+  align-items: center;
+  padding-right: 0.4rem;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.heatmapSvg {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.heatmapCellText {
+  fill: #111827;
+  font-size: 8px;
+}
+
+.heatmapZoneLabel {
+  /* Without an explicit fill an SVG text node is black, which disappears on the
+     dark background; currentColor follows the page text in both themes. */
+  fill: currentColor;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.currentMarker {
+  fill: var(--background, #ffffff);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
