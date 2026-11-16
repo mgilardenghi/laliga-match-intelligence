@@ -168,11 +168,8 @@ def test_help_lists_the_three_m4_commands(capsys: pytest.CaptureFixture[str]) ->
     assert "daily" in help_text
 
 
-def test_predict_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
-    code = main(["predict"])
-
-    assert code == 2
-    assert capsys.readouterr().err.strip() == "predict: not implemented"
+# `predict` is implemented, so its stub assertion is gone: `tests/test_predict_cli.py`
+# covers the command's flags, exit codes and stored rows.
 
 
 def test_daily_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
