@@ -10,7 +10,13 @@ import dataclasses
 import datetime
 
 import pytest
-from lmi_core.standings import MatchResult, StandingRow, compute_standings
+from lmi_core.standings import (
+    MatchResult,
+    StandingRow,
+    compute_standings,
+    outcome,
+    points_for,
+)
 
 ALPHA = 1
 BRAVO = 2
@@ -310,6 +316,15 @@ def test_an_unknown_team_and_a_self_match_raise() -> None:
         compute_standings(TEAMS, [match(99, ALPHA, 1, 0)])
     with pytest.raises(ValueError, match="cannot play itself"):
         compute_standings(TEAMS, [match(ALPHA, ALPHA, 1, 0)])
+
+
+def test_outcome_and_points_for_are_the_single_result_rule() -> None:
+    # The same 2-0 score, seen from each side, yields W and L; a level score is
+    # D for both sides. A result earns three, one or no points.
+    assert outcome(2, 0) == "W"
+    assert outcome(0, 2) == "L"
+    assert outcome(2, 2) == "D"
+    assert [points_for("W"), points_for("D"), points_for("L")] == [3, 1, 0]
 
 
 def test_the_public_dataclasses_keep_the_specified_shape() -> None:

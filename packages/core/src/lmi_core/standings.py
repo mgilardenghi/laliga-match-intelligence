@@ -36,9 +36,14 @@ Away goals are never used, at any step.
 import datetime
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Final, Literal
 
-_WIN_POINTS = 3
-_DRAW_POINTS = 1
+Result = Literal["W", "D", "L"]
+"""One match result from the point of view of one team."""
+
+_RESULT_POINTS: Final[Mapping[Result, int]] = {"W": 3, "D": 1, "L": 0}
+"""The points each result earns: three for a win, one for a draw, none for a loss."""
+
 _FORM_LENGTH = 5
 
 
@@ -95,6 +100,20 @@ class _Totals:
         return self.goals_for - self.goals_against
 
 
+def outcome(goals_for: int, goals_against: int) -> Result:
+    """Return ``"W"``, ``"D"`` or ``"L"`` from the point of view of ``goals_for``."""
+    if goals_for > goals_against:
+        return "W"
+    if goals_for < goals_against:
+        return "L"
+    return "D"
+
+
+def points_for(result: Result) -> int:
+    """Return the league points ``result`` earns: three, one or none."""
+    return _RESULT_POINTS[result]
+
+
 def compute_standings(
     teams: Mapping[int, str], results: Iterable[MatchResult]
 ) -> list[StandingRow]:
@@ -123,10 +142,10 @@ def compute_standings(
             match.home_goals,
         )
         history[match.home_team_id].append(
-            (match.kickoff_date, _outcome(match.home_goals, match.away_goals))
+            (match.kickoff_date, outcome(match.home_goals, match.away_goals))
         )
         history[match.away_team_id].append(
-            (match.kickoff_date, _outcome(match.away_goals, match.home_goals))
+            (match.kickoff_date, outcome(match.away_goals, match.home_goals))
         )
 
     rows: list[StandingRow] = []
@@ -233,26 +252,17 @@ def _totals_of(totals: dict[int, _Totals], team_id: int) -> _Totals:
 
 def _add_match(totals: _Totals, goals_for: int, goals_against: int) -> None:
     """Add one match to ``totals``, seen from the team those goals belong to."""
+    result = outcome(goals_for, goals_against)
     totals.played += 1
     totals.goals_for += goals_for
     totals.goals_against += goals_against
-    if goals_for > goals_against:
+    if result == "W":
         totals.won += 1
-        totals.points += _WIN_POINTS
-    elif goals_for == goals_against:
+    elif result == "D":
         totals.drawn += 1
-        totals.points += _DRAW_POINTS
     else:
         totals.lost += 1
-
-
-def _outcome(goals_for: int, goals_against: int) -> str:
-    """Return ``"W"``, ``"D"`` or ``"L"`` from the point of view of ``goals_for``."""
-    if goals_for > goals_against:
-        return "W"
-    if goals_for < goals_against:
-        return "L"
-    return "D"
+    totals.points += points_for(result)
 
 
 def _form(history: list[tuple[datetime.date, str]]) -> tuple[str, ...]:
