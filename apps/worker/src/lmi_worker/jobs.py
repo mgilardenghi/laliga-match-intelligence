@@ -17,6 +17,82 @@ window lets a second executor take a ``running`` row over. When no worker
 restarts, the boot-time sweep is what closes the gap, and the worst case is the
 30-minute stale window stated in the ADR-0004 amendment.
 
+The two tasks run to completion under time limits sized from the measured cost
+of their work, not from the stale window. On the reference stack one daily cycle
+costs about 29 seconds and the largest legal simulation request costs about 65
+seconds (50 000 runs; the API accepts 1 000 to 50 000 and the sampler is linear
+in the run count), while the default 10 000 runs cost 15.9 seconds.
+``lmi.simulate`` therefore gets a 240-second soft limit and a 300-second hard
+limit, about 3.7 and 4.6 times the worst legal request, and ``lmi.daily`` gets
+420 and 600 seconds, about 14 and 20 times the measured cycle. The hard limit
+must stay under the claim's 30-minute
+:data:`~lmi_core.simulation.service.STALE_AFTER` window: a longer one could kill
+a worker after another executor had already taken the run over, and the same run
+would execute twice. 300 seconds is a sixth of that window and 600 seconds a
+third, so a run the hard limit kills is never still executing when the stale
+branch becomes available.
+
+A soft-limit hit raises :class:`celery.exceptions.SoftTimeLimitExceeded`, which
+is an ``Exception``. :func:`~lmi_core.simulation.service.execute_run` catches
+every ``Exception`` from the claimed work, rolls it back and records the row
+``failed``, so the run is terminal and never left ``running``. This module does
+not catch or convert that exception; there is no ``try`` around ``execute_run``.
+The daily task runs its simulation in-process through the same function, so the
+same guarantee holds there, and the cycle reports the failed run in its own log
+line and exit code.
+
+The recorded text comes from the exception rather than from this module: the
+timeout handler raises it with no message, so ``execute_run`` stores what
+``str`` of an argument-less exception gives (``SoftTimeLimitExceeded()``), and
+the column names the cause without this file inventing a message.
+
+Both tasks retry transient infrastructure failures only, bounded to two retries
+with an exponential, jittered backoff capped at 60 seconds:
+:data:`TRANSIENT_ERRORS` is a database connection lost or refused and a
+socket-level connection failure. Both tasks are idempotent. The claim moves a
+row to ``running`` only when it is ``queued`` or stale, so a second delivery of
+the same message matches no row and returns. The daily cycle's three steps are
+idempotent too: the ingest upserts, a stored prediction is immutable and a repeat
+batch only counts ``existing``, and a repeat simulation dedupes on the natural
+key. A retry is a new message, not a redelivery: ``task_acks_late`` keeps the
+message when the process dies, but Celery's retry re-publishes and acknowledges
+the old delivery.
+
+What a retry covers is narrow by construction. ``execute_run`` catches every
+``Exception`` from the claimed work itself, so the only failures that reach the
+task are those raised outside that guard: chiefly the claim's own connection
+failure (``_claim`` is not guarded, so a database that is refusing connections
+raises ``OperationalError`` out of ``execute_run``) and the engine setup. In both
+cases the row is still ``queued``, so the retry does real work. A transient
+failure after the claim never reaches the task at all: the row is already
+``failed``, or still ``running`` when the bookkeeping write failed too, and the
+retry then matches no row and returns without doing anything. The retry cannot
+re-claim a row the failed attempt finished; the sweep, or the next worker start,
+recovers a row left ``running`` after
+:data:`~lmi_core.simulation.service.STALE_AFTER`. A deterministic failure is
+never retried: a time-limit hit, a model fit failure (``ModelFitError``) and a
+data or configuration error (``ValueError``) are not in the tuple, and the tuple
+deliberately does not use ``SQLAlchemyError``, which would also cover
+deterministic integrity and programming errors. The daily cycle's own steps
+contain their failures deliberately, because a failed download must not cost the
+day's forecast, so a retry there covers the exception that escapes that
+containment, not a step that logged and returned, and not a transient failure a
+step already converted to its exit code: that containment lives in
+:mod:`lmi_core.daily` and :mod:`lmi_worker.daily`, outside this module.
+
+Those classes are the only portable signal this file has. A deterministic
+failure that surfaces as one of them, an authentication failure reported as
+``OperationalError`` for instance, is therefore retried up to the bound before
+the task fails. The cost is two messages and a few seconds of backoff, and the
+row is still ``queued``, so the next sweep owns the work again.
+
+Broker publishes from this module are bounded too. The sweep sends through
+``app.send_task`` under :data:`PUBLISH_RETRY_POLICY`: three attempts with at most
+one second between them, so a Redis blip cannot turn one stale row into an
+unbounded hang, while a message that is still lost is repaired by the next sweep.
+The API has its own Celery application and its own bounded default policy, which
+this file does not reach.
+
 Importing this module builds the Celery application but opens no broker
 connection: Celery connects lazily when a task is sent or consumed.
 """
@@ -34,7 +110,7 @@ from lmi_core.db.models import SimulationRun
 from lmi_core.db.session import make_engine, session_factory
 from lmi_core.simulation.service import QUEUED_STALE_AFTER, STALE_AFTER, execute_run
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from lmi_worker import daily as daily_cycle
@@ -46,6 +122,68 @@ QUEUE_NAME: Final = "lmi"
 
 SIMULATE_TASK: Final = "lmi.simulate"
 DAILY_TASK: Final = "lmi.daily"
+
+SIMULATE_SOFT_TIME_LIMIT: Final = 240
+"""Soft time limit of ``lmi.simulate`` in seconds.
+
+The reference stack executes a live simulation of the latest season with the
+default 10 000 runs in 15.9 seconds wall clock, and the sampler is linear in
+``n_runs``, so the largest legal request (about 65 seconds) is the worst case.
+240 seconds is about 3.7 times that worst legal request.
+"""
+
+SIMULATE_TIME_LIMIT: Final = 300
+"""Hard time limit of ``lmi.simulate`` in seconds.
+
+300 seconds is about 4.6 times the worst legal request and a sixth of the
+claim's 30-minute :data:`~lmi_core.simulation.service.STALE_AFTER` window, so a
+run the hard limit kills is never still executing when the stale branch becomes
+available.
+"""
+
+DAILY_SOFT_TIME_LIMIT: Final = 420
+"""Soft time limit of ``lmi.daily`` in seconds.
+
+The reference stack runs one daily cycle in about 29 seconds (6.6 seconds of
+ingest, 6.4 of live prediction and 15.9 of simulation). 420 seconds is about 14
+times that measurement, which leaves room for the ingest step's network pauses
+on a slow day.
+"""
+
+DAILY_TIME_LIMIT: Final = 600
+"""Hard time limit of ``lmi.daily`` in seconds.
+
+600 seconds is about 20 times the measured daily cycle and a third of the claim's
+30-minute :data:`~lmi_core.simulation.service.STALE_AFTER` window, so the hard
+limit cannot kill a worker after another executor has taken a run over.
+"""
+
+TRANSIENT_ERRORS: Final = (OperationalError, InterfaceError, ConnectionError)
+"""The infrastructure failures both tasks retry.
+
+``OperationalError`` is a database connection lost or refused, ``InterfaceError``
+is a broken database interface, and ``ConnectionError`` is a socket-level
+connection failure. ``OperationalError`` also carries deterministic failures such
+as an authentication error, which this file cannot separate from a lost
+connection; the module docstring states the cost of that. ``SQLAlchemyError`` is
+deliberately not used: it would also cover deterministic integrity and
+programming errors that a retry cannot fix.
+"""
+
+PUBLISH_RETRY_POLICY: Final = {
+    "max_retries": 3,
+    "interval_start": 0.0,
+    "interval_step": 0.2,
+    "interval_max": 1.0,
+}
+"""Bound on the broker publish retries of the messages this application sends.
+
+The application sends only the sweep's messages, so this bounds the retries of a
+stale row's publish: three attempts with at most one second between them. A
+Redis blip cannot turn one stale row into an unbounded hang, and a message that
+is still lost is repaired by the next sweep. The API has its own Celery
+application and its own bounded default policy, which this file does not reach.
+"""
 
 _WORKER_READY_UID: Final = "lmi_worker.requeue_stale"
 """The dispatch id that makes connecting the signal receiver idempotent."""
@@ -68,6 +206,9 @@ app.conf.update(
     # whose worker is still computing it.
     broker_transport_options={"visibility_timeout": 3600},
     task_default_queue=QUEUE_NAME,
+    # Bound the broker's publish retries for the messages this application sends.
+    task_publish_retry=True,
+    task_publish_retry_policy=PUBLISH_RETRY_POLICY,
 )
 
 # 06:00 Europe/Madrid. The schedule is what keeps the last pre-kickoff
@@ -104,9 +245,28 @@ def run_daily_task() -> None:
 
 
 # Registration without the decorator: Celery ships no type information, and
-# this form keeps the task functions plain module-level functions.
-simulate = app.task(name=SIMULATE_TASK)(run_simulation_task)
-daily = app.task(name=DAILY_TASK)(run_daily_task)
+# this form keeps the task functions plain module-level functions. Both tasks run
+# under a measured time limit and retry only :data:`TRANSIENT_ERRORS`.
+simulate = app.task(
+    name=SIMULATE_TASK,
+    soft_time_limit=SIMULATE_SOFT_TIME_LIMIT,
+    time_limit=SIMULATE_TIME_LIMIT,
+    autoretry_for=TRANSIENT_ERRORS,
+    max_retries=2,
+    retry_backoff=True,
+    retry_backoff_max=60,
+    retry_jitter=True,
+)(run_simulation_task)
+daily = app.task(
+    name=DAILY_TASK,
+    soft_time_limit=DAILY_SOFT_TIME_LIMIT,
+    time_limit=DAILY_TIME_LIMIT,
+    autoretry_for=TRANSIENT_ERRORS,
+    max_retries=2,
+    retry_backoff=True,
+    retry_backoff_max=60,
+    retry_jitter=True,
+)(run_daily_task)
 
 
 def requeue_stale(
@@ -133,6 +293,12 @@ def requeue_stale(
     next row, so a single refused message cannot strand every stale row behind
     it. Only the ids actually handed to ``enqueue`` are returned; a failed send
     is absent from the result and from the log line the caller reports.
+
+    A refused send leaves the row ``queued`` and writes nothing: ``requested_at``
+    stays as it was. The next sweep sends it only once ``requested_at`` is older
+    than :data:`QUEUED_STALE_AFTER` (one minute). Because the sweep only runs on
+    ``worker_ready``, the real delay is the next worker start, at least one
+    minute after the request.
 
     Args:
         session_factory: the factory of the session the query uses.
