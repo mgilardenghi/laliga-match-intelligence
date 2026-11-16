@@ -4,9 +4,9 @@ Each resource module defines its router as
 ``APIRouter(prefix="/<kebab-path>", tags=["<kebab-path>"])``, so the resource
 name appears once and the tag groups the endpoints in the documentation. A
 resource whose paths live under another resource keeps that shared prefix and
-uses its own tag, which is why ``team_focus`` serves ``/teams`` with the
-``team-focus`` tag and ``match_preview`` serves ``/matches`` with the
-``match-preview`` tag.
+the tag of that parent resource, so one entity stays one group in the
+documentation: ``team_focus`` serves ``/teams`` with the ``teams`` tag and
+``match_preview`` serves ``/matches`` with the ``matches`` tag.
 
 :data:`V1_ROUTERS` is the single shared line a new resource group edits:
 :func:`lmi_api.main.create_app` mounts every entry under ``/v1`` in one loop, so
