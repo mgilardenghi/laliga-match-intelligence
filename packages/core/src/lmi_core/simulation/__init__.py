@@ -12,10 +12,14 @@ Importing this package only binds names.
 from typing import Final
 
 from lmi_core.simulation.engine import (
+    FixtureOutcomeProbs,
+    NextMatchCounts,
+    Outcome,
     Qualification,
     SeasonSimulation,
     SimFixture,
     TeamSimulation,
+    fixture_outcome_probs,
     simulate_season,
 )
 
@@ -24,9 +28,13 @@ DEFAULT_SEED: Final = 0
 
 __all__ = [
     "DEFAULT_SEED",
+    "FixtureOutcomeProbs",
+    "NextMatchCounts",
+    "Outcome",
     "Qualification",
     "SeasonSimulation",
     "SimFixture",
     "TeamSimulation",
+    "fixture_outcome_probs",
     "simulate_season",
 ]

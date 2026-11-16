@@ -475,4 +475,4 @@ def test_upgrade_downgrade_upgrade_on_an_empty_database_succeeds(database: Datab
 
 
 def test_the_migration_chain_has_exactly_one_head() -> None:
-    assert ScriptDirectory(str(MIGRATIONS_DIR)).get_heads() == ["0003"]
+    assert ScriptDirectory(str(MIGRATIONS_DIR)).get_heads() == ["0004"]

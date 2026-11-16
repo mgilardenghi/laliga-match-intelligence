@@ -38,13 +38,28 @@ from sqlalchemy import Select, func, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from lmi_core.db.models import Match, Season, SimulationRun, SimulationTeamResult, Team
+from lmi_core.db.models import (
+    Match,
+    Season,
+    SimulationFixture,
+    SimulationNextMatch,
+    SimulationRun,
+    SimulationTeamResult,
+    Team,
+)
 from lmi_core.evaluation.backtest import data_fingerprint
 from lmi_core.modeling.data import load_match_data
 from lmi_core.modeling.dixon_coles import DixonColesModel
 from lmi_core.modeling.types import Fixtures, History
 from lmi_core.results.store import installed_code_version
-from lmi_core.simulation.engine import Qualification, SeasonSimulation, SimFixture, simulate_season
+from lmi_core.simulation.engine import (
+    FixtureOutcomeProbs,
+    Qualification,
+    SeasonSimulation,
+    SimFixture,
+    fixture_outcome_probs,
+    simulate_season,
+)
 from lmi_core.standings import MatchResult, StandingRow, compute_standings
 
 __all__ = [
@@ -95,7 +110,14 @@ _INSERT_ATTEMPTS: Final = 3
 
 
 class _SeasonInputs:
-    """The stored match rows of one season, split for the engine."""
+    """The stored match rows of one season, split for the engine.
+
+    ``next_match_by_team`` maps a team id to the match id of the first simulated
+    fixture it plays in ``(kickoff_date, id)`` order, the same order the API
+    lists remaining fixtures in. A withdrawn match is never chosen, and neither
+    is a fixed result: only a fixture the run simulates can answer what a club's
+    next match is.
+    """
 
     def __init__(
         self,
@@ -103,11 +125,13 @@ class _SeasonInputs:
         teams: dict[int, str],
         fixed: list[MatchResult],
         fixtures: list[SimFixture],
+        next_match_by_team: dict[int, int],
         n_withdrawn: int,
     ) -> None:
         self.teams = teams
         self.fixed = fixed
         self.fixtures = fixtures
+        self.next_match_by_team = next_match_by_team
         self.n_withdrawn = n_withdrawn
 
 
@@ -352,6 +376,7 @@ def _execute(session_factory: sessionmaker[Session], run_id: uuid.UUID, started:
             odds_source=tuple(None for _ in inputs.fixtures),
         )
         score_probs = model.score_matrix(fixtures)
+        fixture_probs = fixture_outcome_probs(inputs.fixtures, score_probs)
         qualification = Qualification(
             ucl_positions=run.ucl_positions,
             europe_positions=run.europe_positions,
@@ -365,6 +390,7 @@ def _execute(session_factory: sessionmaker[Session], run_id: uuid.UUID, started:
             n_runs=run.n_runs,
             seed=run.seed,
             qualification=qualification,
+            condition_on=inputs.next_match_by_team,
         )
         current = {row.team_id: row for row in compute_standings(inputs.teams, inputs.fixed)}
         fingerprint = data_fingerprint(history)
@@ -375,6 +401,7 @@ def _execute(session_factory: sessionmaker[Session], run_id: uuid.UUID, started:
             session,
             run,
             simulation=simulation,
+            fixture_probs=fixture_probs,
             current=current,
             fingerprint=fingerprint,
             description=description,
@@ -406,6 +433,7 @@ def _season_inputs(session: Session, season_id: int, as_of_date: datetime.date) 
 
     fixed: list[MatchResult] = []
     fixtures: list[SimFixture] = []
+    next_match_by_team: dict[int, int] = {}
     n_withdrawn = 0
     for match in matches:
         if match.status == "withdrawn":
@@ -422,11 +450,19 @@ def _season_inputs(session: Session, season_id: int, as_of_date: datetime.date) 
                     sim_date=max(match.kickoff_date, as_of_date),
                 )
             )
+            # The first simulated fixture a club meets in kickoff order is its
+            # next match. ``sim_date`` is never consulted: a postponed fixture
+            # collapses to the as-of date and would reorder the choice, and a
+            # status check beyond the withdrawn rule could let a backfill run
+            # read knowledge of later matches.
+            next_match_by_team.setdefault(match.home_team_id, match.id)
+            next_match_by_team.setdefault(match.away_team_id, match.id)
     fixtures.sort(key=lambda fixture: (fixture.sim_date, fixture.match_id))
     return _SeasonInputs(
         teams=teams,
         fixed=fixed,
         fixtures=fixtures,
+        next_match_by_team=next_match_by_team,
         n_withdrawn=n_withdrawn,
     )
 
@@ -489,6 +525,7 @@ def _store_success(
     run: SimulationRun,
     *,
     simulation: SeasonSimulation,
+    fixture_probs: tuple[FixtureOutcomeProbs, ...],
     current: dict[int, StandingRow],
     fingerprint: str,
     description: dict[str, object],
@@ -525,8 +562,34 @@ def _store_success(
                 p_relegation=team.p_relegation,
             )
         )
+    fixture_rows = [
+        SimulationFixture(
+            run_id=run.id,
+            match_id=fixture.match_id,
+            p_home=fixture.p_home,
+            p_draw=fixture.p_draw,
+            p_away=fixture.p_away,
+        )
+        for fixture in fixture_probs
+    ]
+    next_match_rows = [
+        SimulationNextMatch(
+            run_id=run.id,
+            team_id=counts.team_id,
+            match_id=counts.match_id,
+            outcome=counts.outcome,
+            n_outcome=counts.n_outcome,
+            n_relegated=counts.n_relegated,
+            n_europe=counts.n_europe,
+            n_title=counts.n_title,
+            points_sum=counts.points_sum,
+        )
+        for counts in simulation.next_match
+    ]
     finished_at = _database_now(session)
     session.add_all(rows)
+    session.add_all(fixture_rows)
+    session.add_all(next_match_rows)
     run.status = "succeeded"
     run.finished_at = finished_at
     run.duration_ms = duration_ms

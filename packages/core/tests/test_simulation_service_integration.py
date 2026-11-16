@@ -21,6 +21,7 @@ from typing import Any
 import alembic.command
 import pytest
 from lmi_core.config import Settings
+from lmi_core.db import models as db_models
 from lmi_core.db.alembic_support import alembic_config
 from lmi_core.db.models import Match, Season, SimulationRun, SimulationTeamResult, Team
 from lmi_core.db.session import make_engine, session_factory
@@ -280,6 +281,84 @@ def _team_rows(database: Database, run_id: uuid.UUID) -> list[SimulationTeamResu
                 .order_by(SimulationTeamResult.team_id)
             )
         )
+
+
+def _fixture_rows(database: Database, run_id: uuid.UUID) -> list[db_models.SimulationFixture]:
+    """Return one run's stored fixture probabilities in match-id order."""
+    with database.sessions() as session:
+        return list(
+            session.scalars(
+                select(db_models.SimulationFixture)
+                .where(db_models.SimulationFixture.run_id == run_id)
+                .order_by(db_models.SimulationFixture.match_id)
+            )
+        )
+
+
+def _next_match_rows(database: Database, run_id: uuid.UUID) -> list[db_models.SimulationNextMatch]:
+    """Return one run's stored next-match counts in team and outcome order."""
+    with database.sessions() as session:
+        return list(
+            session.scalars(
+                select(db_models.SimulationNextMatch)
+                .where(db_models.SimulationNextMatch.run_id == run_id)
+                .order_by(
+                    db_models.SimulationNextMatch.team_id,
+                    db_models.SimulationNextMatch.outcome,
+                )
+            )
+        )
+
+
+def _match_ids_by_fixture(
+    database: Database, season_id: int
+) -> dict[tuple[datetime.date, int, int], int]:
+    """Return each stored match id by its kickoff date and two team ids."""
+    with database.sessions() as session:
+        matches = list(session.scalars(select(Match).where(Match.season_id == season_id)))
+    return {
+        (match.kickoff_date, match.home_team_id, match.away_team_id): match.id for match in matches
+    }
+
+
+def _is_simulated(spec: MatchSpec, as_of_date: datetime.date) -> bool:
+    """Return whether the service simulates one synthetic match."""
+    return spec.status != "withdrawn" and not (
+        spec.status == "played" and spec.kickoff_date < as_of_date
+    )
+
+
+def _simulated_fixture_ids(
+    specs: Sequence[MatchSpec],
+    match_ids: dict[tuple[datetime.date, int, int], int],
+    teams: dict[str, int],
+    as_of_date: datetime.date,
+) -> set[int]:
+    """Return the ids of the simulated fixtures, computed from the specs alone."""
+    return {
+        match_ids[(spec.kickoff_date, teams[spec.home_name], teams[spec.away_name])]
+        for spec in specs
+        if _is_simulated(spec, as_of_date)
+    }
+
+
+def _next_match_ids(
+    specs: Sequence[MatchSpec],
+    match_ids: dict[tuple[datetime.date, int, int], int],
+    teams: dict[str, int],
+    as_of_date: datetime.date,
+) -> dict[int, int]:
+    """Return each team's first simulated fixture id in kickoff order, from the specs."""
+    first: dict[int, int] = {}
+    for spec in sorted(specs, key=lambda item: item.kickoff_date):
+        if not _is_simulated(spec, as_of_date):
+            continue
+        home_id = teams[spec.home_name]
+        away_id = teams[spec.away_name]
+        match_id = match_ids[(spec.kickoff_date, home_id, away_id)]
+        first.setdefault(home_id, match_id)
+        first.setdefault(away_id, match_id)
+    return first
 
 
 def _snapshot(
@@ -725,3 +804,169 @@ def test_failure_is_stored_without_reraising(database: Database) -> None:
     assert "teams must not be empty" in run.error
     assert len(run.error) <= 2000
     assert _team_rows(database, run_id) == []
+
+
+def test_executed_run_stores_one_row_per_simulated_fixture(database: Database) -> None:
+    """Every simulated fixture stores one probability triple that sums to one."""
+    season_id = _create_season(database.sessions)
+    teams = _create_teams(database.sessions)
+    start = datetime.date(2099, 1, 1)
+    specs = _season_specs(start, played_through=3)
+    _store_matches(database.sessions, season_id=season_id, teams=teams, specs=specs)
+    as_of = start + datetime.timedelta(days=19)
+
+    run_id, _ = _request_run(database, as_of)
+    simulation_service.execute_run(database.sessions, run_id)
+
+    run = _load_run(database, run_id)
+    match_ids = _match_ids_by_fixture(database, season_id)
+    expected_ids = _simulated_fixture_ids(specs, match_ids, teams, as_of)
+    rows = _fixture_rows(database, run_id)
+    assert {row.match_id for row in rows} == expected_ids
+    assert len(rows) == run.n_simulated
+    for row in rows:
+        assert abs(row.p_home + row.p_draw + row.p_away - 1.0) < 1e-6
+
+
+def test_next_match_rows_name_each_teams_first_simulated_fixture(
+    database: Database,
+) -> None:
+    """Every team stores three rows for one fixture: its first simulated one."""
+    season_id = _create_season(database.sessions)
+    teams = _create_teams(database.sessions)
+    start = datetime.date(2099, 1, 1)
+    specs = _season_specs(start, played_through=3)
+    _store_matches(database.sessions, season_id=season_id, teams=teams, specs=specs)
+    as_of = start + datetime.timedelta(days=19)
+
+    run_id, _ = _request_run(database, as_of)
+    simulation_service.execute_run(database.sessions, run_id)
+
+    match_ids = _match_ids_by_fixture(database, season_id)
+    expected = _next_match_ids(specs, match_ids, teams, as_of)
+    rows = _next_match_rows(database, run_id)
+    assert len(rows) == 3 * len(teams)
+    assert set(expected) == set(teams.values())
+    stored_ids_by_team: dict[int, set[int]] = {}
+    outcomes_by_team: dict[int, set[str]] = {}
+    for row in rows:
+        stored_ids_by_team.setdefault(row.team_id, set()).add(row.match_id)
+        outcomes_by_team.setdefault(row.team_id, set()).add(row.outcome)
+    assert set(stored_ids_by_team) == set(teams.values())
+    for team_id, stored_ids in stored_ids_by_team.items():
+        assert stored_ids == {expected[team_id]}
+        assert outcomes_by_team[team_id] == {"win", "draw", "loss"}
+
+
+def test_next_match_counts_reproduce_the_stored_probabilities(database: Database) -> None:
+    """The per-outcome counts mix back to the stored qualification probabilities."""
+    season_id = _create_season(database.sessions)
+    teams = _create_teams(database.sessions)
+    start = datetime.date(2099, 1, 1)
+    specs = _season_specs(start, played_through=3)
+    _store_matches(database.sessions, season_id=season_id, teams=teams, specs=specs)
+    as_of = start + datetime.timedelta(days=19)
+
+    run_id, _ = _request_run(database, as_of)
+    simulation_service.execute_run(database.sessions, run_id)
+
+    run = _load_run(database, run_id)
+    n_runs = run.n_runs
+    team_rows = {row.team_id: row for row in _team_rows(database, run_id)}
+    grouped: dict[int, list[db_models.SimulationNextMatch]] = {}
+    for row in _next_match_rows(database, run_id):
+        grouped.setdefault(row.team_id, []).append(row)
+    assert set(grouped) == set(team_rows)
+    for team_id, rows in grouped.items():
+        team_row = team_rows[team_id]
+        assert sum(row.n_outcome for row in rows) == n_runs
+        relegation = sum(
+            (row.n_outcome / n_runs) * (row.n_relegated / row.n_outcome)
+            for row in rows
+            if row.n_outcome
+        )
+        europe = sum(
+            (row.n_outcome / n_runs) * (row.n_europe / row.n_outcome)
+            for row in rows
+            if row.n_outcome
+        )
+        title = sum(
+            (row.n_outcome / n_runs) * (row.n_title / row.n_outcome)
+            for row in rows
+            if row.n_outcome
+        )
+        assert abs(relegation - team_row.p_relegation) < 1e-9
+        assert abs(europe - team_row.p_europe) < 1e-9
+        assert abs(title - team_row.p_title) < 1e-9
+
+
+def test_detail_rows_stay_within_the_storage_bound(database: Database) -> None:
+    """The two detail tables hold at most 440 rows for one run."""
+    season_id = _create_season(database.sessions)
+    teams = _create_teams(database.sessions)
+    start = datetime.date(2099, 1, 1)
+    specs = _season_specs(start, played_through=3)
+    _store_matches(database.sessions, season_id=season_id, teams=teams, specs=specs)
+    as_of = start + datetime.timedelta(days=19)
+
+    run_id, _ = _request_run(database, as_of)
+    simulation_service.execute_run(database.sessions, run_id)
+
+    run = _load_run(database, run_id)
+    fixtures = _fixture_rows(database, run_id)
+    next_matches = _next_match_rows(database, run_id)
+    assert len(fixtures) == run.n_simulated
+    assert len(next_matches) == 3 * len(teams)
+    assert len(fixtures) + len(next_matches) <= 440
+
+
+def test_the_next_match_follows_the_kickoff_not_the_score_date(
+    database: Database,
+) -> None:
+    """A postponed pile-up keeps the kickoff order, not the collapsed ``sim_date`` order.
+
+    The season rows are stored with the last matchday first, the way a backfill
+    that ingested a rescheduled fixture late would, so the match id runs opposite
+    to the kickoff order. Every remaining fixture is dated before the as-of date
+    and still scheduled, so all of them are simulated and every one collapses
+    onto the as-of date in ``sim_date`` order. The two candidate orders therefore
+    disagree on purpose: following the kickoff names each club's earliest
+    fixture, while following ``sim_date`` would break the tie by match id and
+    name its latest one.
+    """
+    season_id = _create_season(database.sessions)
+    teams = _create_teams(database.sessions)
+    start = datetime.date(2099, 1, 1)
+    specs = _season_specs(start, played_through=3)
+    _store_matches(
+        database.sessions,
+        season_id=season_id,
+        teams=teams,
+        specs=list(reversed(specs)),
+    )
+    as_of = start + datetime.timedelta(days=40)
+
+    run_id, _ = _request_run(database, as_of)
+    simulation_service.execute_run(database.sessions, run_id)
+
+    match_ids = _match_ids_by_fixture(database, season_id)
+    expected = _next_match_ids(specs, match_ids, teams, as_of)
+    stored_ids_by_team: dict[int, set[int]] = {}
+    for row in _next_match_rows(database, run_id):
+        stored_ids_by_team.setdefault(row.team_id, set()).add(row.match_id)
+    assert {team_id: min(ids) for team_id, ids in stored_ids_by_team.items()} == expected
+    assert all(len(ids) == 1 for ids in stored_ids_by_team.values())
+
+    # The guard has teeth only while the two orders really disagree: the first
+    # club's earliest remaining kickoff carries the highest of its match ids.
+    early = match_ids[
+        (start + datetime.timedelta(days=21), teams[TEAM_NAMES[1]], teams[TEAM_NAMES[0]])
+    ]
+    middle = match_ids[
+        (start + datetime.timedelta(days=28), teams[TEAM_NAMES[2]], teams[TEAM_NAMES[0]])
+    ]
+    late = match_ids[
+        (start + datetime.timedelta(days=35), teams[TEAM_NAMES[3]], teams[TEAM_NAMES[0]])
+    ]
+    assert late < middle < early
+    assert expected[teams[TEAM_NAMES[0]]] == early
