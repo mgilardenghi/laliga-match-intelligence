@@ -1,4 +1,4 @@
-"""The shared read layer of the four T5 detail routes.
+"""The shared read layer of the detail routes.
 
 ``GET /v1/predictions``, ``GET /v1/model-metrics/live``,
 ``GET /v1/teams/{team_id}/focus`` and ``GET /v1/matches/{match_id}/preview``
@@ -25,6 +25,16 @@ differently.
 The match preview reads the same stored results from another angle, so its two
 readers live here too: the prior meetings of a pair, strictly before the
 fixture's own date, and the record those meetings add up to.
+
+The season statistics price each fixture from the stored odds, so their
+pre-closing price reader lives here as well: one statement selects the most
+trusted pre-closing ``1x2`` price of each requested match, and the season
+statistics and the season's relegation view cannot price a match differently.
+
+The simulation history reads one point per as-of date of a season, from the
+latest succeeded run of each date. It lives here because the history endpoint
+and the relegation view serve the same series: one reader decides which run
+stands for a date, instead of each endpoint deciding for itself.
 """
 
 import datetime
@@ -36,15 +46,18 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from lmi_core.db.models import Match as MatchModel
+from lmi_core.db.models import MatchOdd as MatchOddModel
 from lmi_core.db.models import Prediction as PredictionModel
 from lmi_core.db.models import Season as SeasonModel
 from lmi_core.db.models import SimulationRun as SimulationRunModel
 from lmi_core.db.models import SimulationTeamResult as SimulationTeamResultModel
 from lmi_core.db.models import Team as TeamModel
+from lmi_core.live.data import ODDS_PRIORITY
 from lmi_core.live.schemas import EvaluatedPrediction, PredictionRow
 from lmi_core.modeling.registry import MODEL_NAMES
 from lmi_core.standings import MatchResult
-from sqlalchemy import ColumnElement, and_, or_, select
+from sqlalchemy import ColumnElement, and_, case, or_, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
 from lmi_api.schemas.matches import MatchOutcome, MatchStatus, MatchSummary
@@ -52,6 +65,11 @@ from lmi_api.schemas.predictions import (
     ModelName,
     PredictionBrief,
     Probabilities,
+)
+from lmi_api.schemas.simulations import (
+    SimulationHistoryPoint,
+    SimulationHistoryTeam,
+    SimulationKind,
 )
 from lmi_api.schemas.standings import StandingForm
 from lmi_api.schemas.team_focus import FormSummary, SimulationOutlook, SplitRecord
@@ -72,6 +90,9 @@ _POINTS: Final[Mapping[StandingForm, int]] = {"W": 3, "D": 1, "L": 0}
 
 _Side = Literal["home", "away"]
 """The two venues a split record is kept for."""
+
+_ONE_X_TWO: Final[str] = "1x2"
+"""The market of a 1x2 price, the only market the shared reads price a match with."""
 
 
 @dataclass(frozen=True)
@@ -461,6 +482,61 @@ def load_season_standings(
     return teams, results
 
 
+def load_pre_closing_prices(
+    session: Session, *, match_ids: Sequence[int]
+) -> dict[int, tuple[float, float, float]]:
+    """Return the most trusted pre-closing ``1x2`` price of each requested match.
+
+    The eligible rows are the pre-closing ``1x2`` prices of a bookmaker of
+    :data:`lmi_core.live.data.ODDS_PRIORITY`, ordered by match and then by the
+    priority rank, so the first row of a match is the one the live loader and
+    the match preview would also select. A closing price is excluded in SQL,
+    whatever its bookmaker: it is only known at kickoff.
+
+    One statement serves every match. The rows are ordered so that the most
+    trusted row of a fixture comes first, and the first row of each fixture is
+    then kept in Python: the priority list bounds the candidates to one per
+    bookmaker, and PostgreSQL ``DISTINCT ON`` is not needed to keep the read to
+    one statement. A fixture with no eligible price is absent from the mapping.
+
+    The season statistics and the season's relegation view read this function,
+    so the two cannot price a match from a different row.
+
+    Args:
+        session: a session bound to the application database.
+        match_ids: the fixtures to price. An empty sequence issues no statement.
+
+    Returns:
+        The ``(home, draw, away)`` decimal prices of each priceable match, by
+        match identifier.
+    """
+    if not match_ids:
+        return {}
+    priority = case(
+        *((MatchOddModel.bookmaker == name, rank) for rank, name in enumerate(ODDS_PRIORITY)),
+        else_=len(ODDS_PRIORITY),
+    )
+    statement = (
+        select(
+            MatchOddModel.match_id,
+            MatchOddModel.home,
+            MatchOddModel.draw,
+            MatchOddModel.away,
+        )
+        .where(
+            MatchOddModel.match_id.in_(match_ids),
+            MatchOddModel.is_closing.is_(False),
+            MatchOddModel.market == _ONE_X_TWO,
+            MatchOddModel.bookmaker.in_(ODDS_PRIORITY),
+        )
+        .order_by(MatchOddModel.match_id, priority)
+    )
+    prices: dict[int, tuple[float, float, float]] = {}
+    for match_id, home, draw, away in session.execute(statement).all():
+        prices.setdefault(int(match_id), (float(home), float(draw), float(away)))
+    return prices
+
+
 def load_played_summaries(
     session: Session,
     *,
@@ -769,6 +845,91 @@ def load_latest_simulation_outlook(
     )
 
 
+def load_simulation_history_points(
+    session: Session, *, season_id: int, team_ids: Sequence[int] | None = None
+) -> list[SimulationHistoryPoint]:
+    """Return one point per as-of date of a season, ascending by that date.
+
+    A date contributes the latest succeeded run of that date and nothing else:
+    when a day was requested twice and both attempts succeeded, the point is the
+    one that finished last, so the history is the series of final answers and
+    not a series of attempts. A date without a succeeded run contributes no
+    point, so the series is a record of forecasts and not a calendar.
+
+    ``team_ids`` restricts the nested team rows to those clubs, keeping the
+    other columns of each point; ``None`` reads every club. A date whose run
+    holds none of the requested clubs keeps its point with an empty ``teams``
+    list, because the point is a stored forecast and dropping it would silently
+    shorten the season.
+
+    The request issues at most two statements: one for the runs and one for
+    their team rows, the second only when at least one run was found. Both joins
+    are explicit, because the models declare no relationship.
+
+    Args:
+        session: a session bound to the application database.
+        season_id: the stored identifier of the season to read.
+        team_ids: restrict the nested team rows to these clubs; ``None`` reads
+            every club.
+
+    Returns:
+        The points in as-of date order, each with its team rows in projected
+        table order.
+    """
+    latest_succeeded = (
+        select(SimulationRunModel.id, SimulationRunModel.as_of_date)
+        .where(
+            SimulationRunModel.season_id == season_id,
+            SimulationRunModel.status == "succeeded",
+        )
+        .ext(distinct_on(SimulationRunModel.as_of_date))
+        .order_by(
+            SimulationRunModel.as_of_date,
+            SimulationRunModel.finished_at.desc().nulls_last(),
+            SimulationRunModel.requested_at.desc(),
+            SimulationRunModel.id.desc(),
+        )
+        .subquery()
+    )
+    runs = list(
+        session.scalars(
+            select(SimulationRunModel)
+            .join(latest_succeeded, latest_succeeded.c.id == SimulationRunModel.id)
+            .order_by(SimulationRunModel.as_of_date)
+        )
+    )
+
+    teams_by_run: dict[UUID, list[SimulationHistoryTeam]] = {run.id: [] for run in runs}
+    if teams_by_run:
+        team_statement = (
+            select(SimulationTeamResultModel, TeamModel.name)
+            .join(TeamModel, TeamModel.id == SimulationTeamResultModel.team_id)
+            .where(SimulationTeamResultModel.run_id.in_(list(teams_by_run)))
+        )
+        if team_ids is not None:
+            team_statement = team_statement.where(SimulationTeamResultModel.team_id.in_(team_ids))
+        team_statement = team_statement.order_by(
+            SimulationTeamResultModel.run_id,
+            SimulationTeamResultModel.mean_position,
+            SimulationTeamResultModel.mean_points.desc(),
+            TeamModel.name,
+            TeamModel.id,
+        )
+        for result, name in session.execute(team_statement).all():
+            teams_by_run[result.run_id].append(_history_team(result, name))
+
+    return [
+        SimulationHistoryPoint(
+            run_id=run.id,
+            as_of_date=run.as_of_date,
+            kind=cast(SimulationKind, run.kind),
+            last_complete_matchday=run.last_complete_matchday,
+            teams=teams_by_run[run.id],
+        )
+        for run in runs
+    ]
+
+
 def _position(row: EvaluatedPrediction) -> tuple[datetime.date, datetime.datetime]:
     """Return the ledger position of one row: its as-of date, then its write instant."""
     return (row.as_of_date, row.created_at)
@@ -817,3 +978,20 @@ def _outcome(goals_for: int, goals_against: int) -> StandingForm:
     if goals_for < goals_against:
         return "L"
     return "D"
+
+
+def _history_team(result: SimulationTeamResultModel, name: str) -> SimulationHistoryTeam:
+    """Return the payload of one team row inside one point of the history.
+
+    Only the columns the history compares across as-of dates are carried, so a
+    point stays small whatever the number of teams and dates.
+    """
+    return SimulationHistoryTeam(
+        team=Team(id=result.team_id, name=name),
+        p_title=result.p_title,
+        p_ucl=result.p_ucl,
+        p_europe=result.p_europe,
+        p_relegation=result.p_relegation,
+        expected_points=result.mean_points,
+        expected_position=result.mean_position,
+    )
