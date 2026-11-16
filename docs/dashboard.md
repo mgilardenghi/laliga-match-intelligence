@@ -50,8 +50,23 @@ surfaces as a type error in the dashboard instead of as a runtime surprise.
 ## Browser tests
 
 The suite lives in `e2e/` and runs with Playwright through
-`uv run --group e2e pytest`. First-time setup installs the browser:
-`uv run --group e2e playwright install chromium`.
+`uv run --group e2e pytest`. First-time setup:
+
+1. `make setup` once. The throwaway Compose stack reads the same environment
+   file as the local stack (placeholder values copied from the example file), and
+   `make e2e` fails during Compose interpolation without it.
+2. `uv run --group e2e playwright install chromium` installs the browser.
+3. On a bare Linux or WSL machine the browser also needs system libraries
+   (for example `libnspr4` and `libnss3`). Install them once with
+   `uv run --group e2e playwright install-deps chromium`, which asks for
+   administrator rights. CI installs its own browser and needs nothing from you.
+
+The `E2E_PROJECT`, `E2E_API_PORT` and `E2E_WEB_PORT` overrides are checked by
+`make e2e-guard` before any Docker command, and the checks are tested. The guard
+stops names and ports that could reach the local stack. It does not claim to
+sanitize a value that Make itself would expand (such as `$(shell ...)`): that
+value comes from your own environment or command line, which already runs code as
+you.
 
 There are two tiers. `empty` runs against a stack with no data and is the only
 tier CI runs. `loaded` runs against real ingested data and is local only.

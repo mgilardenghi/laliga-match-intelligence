@@ -759,8 +759,7 @@ export interface paths {
          *         HTTPException: 404 when ``season`` is given and no season has that code,
          *             or when no season has a match while ``season`` is absent. The detail
          *             is a fixed sentence in both cases and never repeats the client
-         *             value, unlike the season and team endpoints, which quote their own
-         *             path parameter because that is the resource being addressed.
+         *             value, and the season and team endpoints follow the same rule.
          */
         get: operations["get_standings"];
         put?: never;
@@ -892,9 +891,8 @@ export interface paths {
          *     Raises:
          *         HTTPException: 404 when no team has ``team_id``, when ``season`` names
          *             no stored season, or when the team plays no match of the resolved
-         *             season. The first detail quotes the path parameter, which is the
-         *             resource being addressed; the other two are fixed sentences and
-         *             never repeat the value the client sent.
+         *             season. All three details are fixed sentences and never repeat the
+         *             value the client sent.
          */
         get: operations["get_team_focus"];
         put?: never;
@@ -963,6 +961,8 @@ export interface components {
          *
          *     An empty bin (``n = 0``) has no mean prediction and no observed frequency;
          *     the database stores that as two NULLs and this DTO states the same rule.
+         *     The four floats are probabilities or probability bin edges, so each one is
+         *     finite and inside ``0..1``, and the two edges are ordered.
          */
         CalibrationBin: {
             /** Bin Index */

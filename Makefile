@@ -87,6 +87,10 @@ e2e-guard:
 	@# it is interpolated into a shell command: the exact string `lmi` is not the
 	@# only value that could reach that project (`lmi ` would), and a value holding
 	@# shell syntax would rewrite the command instead of naming a project.
+	@# The checks cover shell metacharacters, not Make-level expansion: a value such
+	@# as `$$(shell ...)` is expanded by Make before the recipe runs. That value can
+	@# only come from the caller's own environment or command line, which already
+	@# has the caller's rights, so it is not a boundary this guard defends.
 	@case "$(E2E_PROJECT)" in \
 		''|lmi) echo "e2e-guard: E2E_PROJECT must not be empty or 'lmi' (got '$(E2E_PROJECT)')" >&2; exit 1 ;; \
 	esac
