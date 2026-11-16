@@ -78,13 +78,14 @@ contain their failures deliberately, because a failed download must not cost the
 day's forecast, so a retry there covers the exception that escapes that
 containment, not a step that logged and returned, and not a transient failure a
 step already converted to its exit code: that containment lives in
-:mod:`lmi_core.daily` and :mod:`lmi_worker.daily`, outside this module.
+:mod:`lmi_worker.daily`, outside this module.
 
 Those classes are the only portable signal this file has. A deterministic
 failure that surfaces as one of them, an authentication failure reported as
 ``OperationalError`` for instance, is therefore retried up to the bound before
-the task fails. The cost is two messages and a few seconds of backoff, and the
-row is still ``queued``, so the next sweep owns the work again.
+the task fails. The cost is two retry deliveries and a few seconds of backoff,
+and the row is still ``queued`` afterwards: it waits for the next worker-ready
+sweep to re-enqueue it, as :func:`requeue_stale` describes.
 
 Broker publishes from this module are bounded too. The sweep sends through
 ``app.send_task`` under :data:`PUBLISH_RETRY_POLICY`: three attempts with at most
