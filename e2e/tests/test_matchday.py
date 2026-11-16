@@ -200,6 +200,10 @@ def _psql(sql: str) -> str:
     guard validates, and it is passed as an argument, never through a shell.
     """
     project = os.environ.get("E2E_PROJECT", "lmi-e2e")
+    # The developer's own stack is the Compose project `lmi`; this helper writes,
+    # so it refuses that name even though the Makefile guard already does.
+    if project.lower() == "lmi":
+        pytest.fail("E2E_PROJECT names the developer stack `lmi`; refusing to write to it")
     command = [
         "docker",
         "compose",
