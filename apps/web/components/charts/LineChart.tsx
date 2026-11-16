@@ -13,7 +13,9 @@ export type LineSeries = {
    * Leave this series out of the y domain and draw no path for it: it becomes a
    * marker at the plot edge nearest its value (top when above the domain,
    * bottom when below it) and its last finite value prints in the gutter, so the
-   * series is never silently dropped.
+   * series is never silently dropped. A value that ends up on or inside the
+   * domain is drawn as an ordinary end label instead, because it is not off
+   * scale and has no edge to name.
    */
   readonly offScale?: boolean;
 };
@@ -171,16 +173,19 @@ export function LineChart(props: LineChartProps): ReactElement {
     }
     const colour = colours[seriesIndex];
     const index = Math.min(last.index, xLabels.length - 1);
-    if (item.offScale === true) {
+    // A value the caller marks off scale is drawn at the edge it passed and its
+    // entry names that edge. A value on or inside the domain is not off scale at
+    // all, so it keeps an ordinary end label and makes no claim about direction:
+    // a value exactly on a bound must not be described as having passed the
+    // opposite one.
+    const outsideDomain = last.value > yMax || last.value < yMin;
+    if (item.offScale === true && outsideDomain) {
       offScaleEntries.push({
         name: item.name,
         value: last.value,
         colour,
         left: xScale.center(Math.max(0, index)),
-        // A value that is not below the domain keeps the top edge the marker
-        // has always used, so an off-scale series never changes words or place
-        // by a rounding step.
-        above: !(last.value < yMin),
+        above: last.value > yMax,
       });
       return;
     }

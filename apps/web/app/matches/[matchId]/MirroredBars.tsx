@@ -36,12 +36,15 @@ export type MirroredBarsProps = {
   readonly note?: ReactNode;
 };
 
-const WIDTH = 560;
+const WIDTH = 620;
 // The value of a bar prints at its outer end, outside the plot, so both sides
-// keep a gutter of their own: it holds a formatted value such as "12.34" at
-// 12 px without reaching the metric labels or running past the drawing.
-const PLOT_LEFT = 152;
-const PLOT_RIGHT = 488;
+// keep a lane of their own: it holds a formatted value such as "12.34" at 12 px
+// without reaching the metric labels or running past the drawing. The labels and
+// the plot therefore have separate edges; a single shared edge would leave the
+// value a few pixels wide and let it print over the label.
+const LABEL_EDGE = 150;
+const PLOT_LEFT = 206;
+const PLOT_RIGHT = 542;
 const VALUE_GAP = 5;
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const HALF_WIDTH = CENTRE - PLOT_LEFT;
@@ -124,7 +127,7 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
               return (
                 <g key={row.label}>
                   <text
-                    x={PLOT_LEFT - 10}
+                    x={LABEL_EDGE}
                     y={centreY}
                     textAnchor="end"
                     dominantBaseline="central"
@@ -152,6 +155,18 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
                       className={styles.chartOwn}
                     />
                   ) : null}
+                  {leagueX === null ? null : (
+                    <line
+                      x1={leagueX}
+                      y1={y - 2}
+                      x2={leagueX}
+                      y2={y + BAR_HEIGHT + 2}
+                      className={styles.chartLeague}
+                    />
+                  )}
+                  {/* The values come last so a league marker that happens to
+                      sit beside a value is drawn under it rather than through
+                      it; the number stays legible where the two meet. */}
                   {row.own === null ? null : (
                     <text
                       x={CENTRE + ownWidth + VALUE_GAP}
@@ -173,15 +188,6 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
                     >
                       {formatValue(row.against, 2)}
                     </text>
-                  )}
-                  {leagueX === null ? null : (
-                    <line
-                      x1={leagueX}
-                      y1={y - 2}
-                      x2={leagueX}
-                      y2={y + BAR_HEIGHT + 2}
-                      className={styles.chartLeague}
-                    />
                   )}
                 </g>
               );
