@@ -1,25 +1,227 @@
+/*
+ * The table page: the heading, the season selector, the standings table and the
+ * projection charts.
+ *
+ * Only this page's own layout lives here. The heading block is page-local, but
+ * the selector, the empty and problem states and the charts come from shared
+ * modules, so a change to those is never repeated here. Every colour is a token
+ * from globals.css; the zone tints are mixes of those tokens, never new values.
+ */
+
 .main {
   display: flex;
-  flex: 1;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
   gap: 1.25rem;
-  max-width: 42rem;
+  /* An explicit width: `margin: auto` on the cross axis would otherwise switch
+     this flex item to shrink-to-fit and size the page by the intrinsic width of
+     the table instead of by the viewport. */
+  width: 100%;
+  max-width: 72rem;
+  min-width: 0;
   margin: 0 auto;
-  padding: 3rem 1.5rem;
-  text-align: center;
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+/* The heading block of the page. It is not a `header` element: the shell owns
+   the document header, and a second one would read as a duplicate landmark. */
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .title {
-  font-size: clamp(1.75rem, 4vw, 2.5rem);
-  font-weight: 700;
+  font-size: clamp(1.5rem, 4vw, 2rem);
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
 
-.description {
+.intro {
+  max-width: 48rem;
   color: var(--muted);
-  font-size: 1.0625rem;
   line-height: 1.6;
+}
+
+/* The selector keeps the width of its own control instead of stretching across
+   the page column. */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+/* A section is a flex item of `.main`; its automatic minimum width must not be
+   the intrinsic width of the table or the charts, or the page grows sideways. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.sectionTitle {
+  font-size: 1.25rem;
+}
+
+.charts {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+/* The scroller owns the horizontal overflow: without `min-width: 0` the table's
+   intrinsic width would also be its minimum width and push the page wider. */
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 32rem;
+  border-collapse: collapse;
+  color: var(--text);
+}
+
+.caption {
+  padding-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.cell {
+  padding: 0.5rem 0.5rem 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.headCell {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* Counters read as a column of digits, so they align on their right edge. */
+.numeric {
+  padding-right: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The position column travels with the reader while the table scrolls
+   sideways, so the rank a stat belongs to never leaves the viewport. Its
+   background is opaque because the cells must not show through it. */
+.stickyColumn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--background);
+}
+
+.positionCell {
+  width: 4.5rem;
+  min-width: 4.5rem;
+  padding-right: 0.5rem;
+}
+
+.position {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The zone is text as well as colour: the badge names it, and the small mark
+   carries the zone token. Colour is never the only channel. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-top: 0.15rem;
+  color: var(--text);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.badge::before {
+  flex: 0 0 auto;
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--zone-mark, var(--muted));
+  content: "";
+}
+
+.teamCell {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.formCell {
+  min-width: 7rem;
+}
+
+/* Goal counts are the first columns to go on a phone: the table keeps the
+   ranking counters and the projected columns, and the cells stay in the DOM so
+   a wide screen still gets them. */
+.colOptional {
+  display: none;
+}
+
+/* One tint per zone, mixed from the zone token over the page background. The
+   mix uses var(--background) rather than `transparent` so the sticky position
+   cell stays opaque when it travels over the rest of the row. */
+.zoneUcl {
+  --zone-mark: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--background));
+}
+
+.zoneEurope {
+  --zone-mark: var(--muted);
+  background: color-mix(in srgb, var(--muted) 8%, var(--background));
+}
+
+.zoneRelegation {
+  --zone-mark: var(--zone-relegation);
+  background: color-mix(in srgb, var(--zone-relegation) 8%, var(--background));
+}
+
+/* The tinted row replaces the sticky column's own background: inheriting the
+   row colour keeps the cell part of the row instead of punching a hole in it. */
+.zoneUcl .stickyColumn,
+.zoneEurope .stickyColumn,
+.zoneRelegation .stickyColumn {
+  background: inherit;
+}
+
+@media (min-width: 640px) {
+  .main {
+    padding: 2rem 1.5rem 3rem;
+  }
+
+  .table {
+    min-width: 46rem;
+  }
+
+  .colOptional {
+    display: table-cell;
+  }
+}
+
+@media (min-width: 1024px) {
+  .main {
+    padding: 2.5rem 2rem 4rem;
+  }
+
+  .sectionTitle {
+    font-size: 1.5rem;
+  }
+
+  .charts {
+    gap: 2.5rem;
+  }
 }
