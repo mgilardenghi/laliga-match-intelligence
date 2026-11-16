@@ -904,6 +904,193 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Team History
+         * @description Return the multi-season history of one club.
+         *
+         *     ``team`` is the stored club. An identifier no stored club has is a 404; a
+         *     stored club that has played no match at all is a 200 with an empty
+         *     ``seasons`` and an empty ``largest_drop``, because a club without history is
+         *     not an error and a line of zeros would invent a season it never played.
+         *
+         *     A season is listed exactly when the club played at least one match in it,
+         *     meaning a match with status ``played`` and both goal columns set. A season in
+         *     which the club only had fixtures, or none at all, is not listed. The order of
+         *     the seasons, the per-field denominators, the null-is-never-zero rule and the
+         *     drop rules are :mod:`lmi_core.analytics.history`'s and are not restated here.
+         *
+         *     ``position`` is the club's place in the season's table as
+         *     :func:`lmi_core.standings.compute_standings` ranks it. The ranking receives
+         *     the same two inputs the standings endpoint uses: every club that appears as
+         *     a side of any match of the season, whatever that match's status, and the
+         *     season's played results. Both are read from the one statement that loads the
+         *     seasons' matches, so a history row can never contradict the standings
+         *     endpoint and no season needs a table query of its own.
+         *
+         *     Each counted match is the club's side of one played fixture: the stored
+         *     score flipped by venue, the expected points of the one eligible pre-closing
+         *     ``1x2`` price when the fixture has one, and the shots, shots on target and
+         *     cards of each side flipped by venue. ``cards_for`` is the club's own yellow
+         *     plus red and is null only when the row carries neither value, which is why a
+         *     row that records zero keeps zero. A fixture without a statistics row leaves
+         *     every statistics field null, and one missing column stays null without
+         *     zeroing its neighbours. A closing price is never read, whatever its
+         *     bookmaker, because it is only known at kickoff, and a bookmaker outside the
+         *     priority of :data:`lmi_core.live.data.ODDS_PRIORITY` is not eligible.
+         *
+         *     The season lines and ``largest_drop`` are the output of
+         *     :func:`lmi_core.analytics.history.summarise` mapped field for field. Nothing
+         *     is rounded, re-sorted or recomputed here.
+         *
+         *     The request issues at most six statements whatever the number of seasons and
+         *     matches: the club, the seasons of its played matches, every match of those
+         *     seasons in one statement, the names of those clubs for the ranking's final
+         *     tie-break, the statistics rows of the club's played matches and their
+         *     pre-closing prices. The club's own rows are picked out of the matches
+         *     statement in Python, so no per-season query is issued. A club that played no
+         *     match stops after the first two statements and answers the empty history, so
+         *     the count never grows with the payload.
+         *
+         *     The return annotation is the response model, so no ``response_model`` is
+         *     passed.
+         *
+         *     Raises:
+         *         HTTPException: 404 when no stored team has ``team_id``.
+         */
+        get: operations["get_team_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/relegation-race": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Team Relegation Race
+         * @description Return the relegation race of one club in one season.
+         *
+         *     ``team`` is the stored club and ``season`` the resolved season code, so a
+         *     client can pass the code back to the other endpoints. An omitted season is
+         *     the season that starts latest among the seasons with a match, an unknown code
+         *     is the 404 ``Season not found``, an identifier no stored club has is the 404
+         *     ``Team not found``, and a stored club that is not a side of any match of the
+         *     resolved season is the 404 ``Team not found in season``. Every detail is a
+         *     fixed sentence and none repeats the value the client sent.
+         *
+         *     ``survival_threshold`` reads **every** stored season, not the resolved one:
+         *     the line answers what the league usually demanded to survive, and a sample of
+         *     the one season in front of the client would be the current table wearing the
+         *     name of a history. Each season is ranked by
+         *     :func:`lmi_core.standings.compute_standings` over its whole team set and its
+         *     played results, and one :class:`lmi_core.analytics.relegation.SeasonTable`
+         *     per season is handed to
+         *     :func:`lmi_core.analytics.relegation.survival_threshold` with
+         *     ``relegation_positions=Qualification().relegation_positions``. The
+         *     configured count is the only relegation count in the repository -- the
+         *     simulator and the API build every run from it -- so a copy of it here would
+         *     drift from the qualification the stored runs were requested with. The
+         *     completeness rule, the counted place and the median are that module's rules
+         *     and are not restated here; the result is served field for field.
+         *
+         *     A ``None`` from the core function -- no stored season is a completed 20-club
+         *     season of 2005-06 or later -- is the 404 ``no completed season``. The field
+         *     is not nullable by design. Falling back to the current table, or serving a
+         *     zero, would read to a client as a survival line somebody computed out of a
+         *     sample that does not exist.
+         *
+         *     ``rivals`` is the latest succeeded simulation of the resolved season, one
+         *     row per club, ordered the way
+         *     :func:`lmi_api.views.load_latest_simulation_outlook` orders the run it
+         *     describes: ``finished_at`` descending with the rows still missing that stamp
+         *     last, then ``as_of_date`` descending and finally the identifier descending.
+         *     Only ``succeeded`` counts. A queued, running or failed run measures nothing,
+         *     so serving its partial row would report a simulation that never finished.
+         *
+         *     The run's team rows become :class:`lmi_core.analytics.relegation.RankedTeam`
+         *     values and :func:`lmi_core.analytics.relegation.nearest_rivals` cuts them to
+         *     the subject club plus the :data:`_RIVAL_COUNT` clubs nearest to it by
+         *     expected position. The group is served in expected-position order with each
+         *     club's stored current points, mean points, relegation probability and the two
+         *     points quantiles, so the whole group reads in table order. When the selected
+         *     run holds no row for the subject club, ``rivals`` is served empty rather than
+         *     raising: the run exists and the club is simply absent from it, and ``run_id``
+         *     still names the run the rest of the answer was read from.
+         *
+         *     With no succeeded run the answer is still a 200: ``run_id`` and
+         *     ``as_of_date`` are null, ``rivals`` is empty and ``series`` holds the season
+         *     code and no point, while the threshold and the remaining fixtures are served
+         *     as usual. A race without a simulation is a state of the data, not an error.
+         *
+         *     ``series`` is :func:`lmi_api.views.load_simulation_history_points` of the
+         *     resolved season restricted to the rival identifiers, wrapped in
+         *     :class:`~lmi_api.schemas.simulations.SimulationHistory`. Restricting the read
+         *     is what keeps the series comparable: it is the group's history, not the
+         *     league's, and one point per as-of date of the season comes from the latest
+         *     succeeded run of that date. An empty group serves the season code and no
+         *     point, because there is no club whose history it would be.
+         *
+         *     ``remaining_fixtures`` is the club's ``scheduled`` matches of the resolved
+         *     season, ascending by kickoff date and then identifier, each with the stored
+         *     fixture summary, the venue the club plays it at, and the opponent's position
+         *     in the resolved season's table. That table is
+         *     :func:`lmi_core.standings.compute_standings` over the season's team set and
+         *     played results, read out of the same all-matches statement the threshold
+         *     uses, so the two cannot rank the season differently. ``None`` is kept for an
+         *     opponent the table does not rank.
+         *
+         *     ``p_win``, ``p_draw`` and ``p_loss`` are always ``null`` today, and so is
+         *     ``next_match``. Those are the R5 per-fixture and next-match simulation
+         *     outputs, which this milestone does not store: the fields are declared
+         *     nullable so a stored simulation can fill them without a contract change, and
+         *     the read serves them as null instead of inventing a number or a placeholder
+         *     model.
+         *
+         *     The request issues at most nine statements whatever the number of seasons and
+         *     fixtures: the club, the season resolution, every stored season, every match
+         *     of every season, the names of those clubs, the latest succeeded run with its
+         *     team rows and their club names, the history runs, the history team rows and
+         *     the fixture summaries. The club's own fixtures and the resolved season's
+         *     table are picked out of the all-matches statement in Python, so no read here
+         *     is one statement per season or per fixture. Three of the nine are conditional:
+         *     the names read is skipped when no match is stored at all, the two history
+         *     statements are issued only when the race has rivals, and the summary
+         *     statement only when the club has a remaining fixture. A race over a season
+         *     with a match, without a succeeded run and without a remaining fixture stops
+         *     after six.
+         *
+         *     The return annotation is the response model, so no ``response_model`` is
+         *     passed.
+         *
+         *     Raises:
+         *         HTTPException: 404 when no stored team has ``team_id``, when ``season``
+         *             names no stored season, when no season has a match while ``season``
+         *             is absent, when the team is not a side of any match of the resolved
+         *             season, or when no stored season is a completed one.
+         */
+        get: operations["get_team_relegation_race"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}/season-stats": {
         parameters: {
             query?: never;
@@ -948,7 +1135,8 @@ export interface paths {
          *     :data:`lmi_core.live.data.ODDS_PRIORITY`, and the selected row per match is
          *     the most trusted of them, by the priority rank the live loader and the match
          *     preview also apply. A closing price is never read, whatever its bookmaker:
-         *     it is only known at kickoff. One statement reads every eligible row of the
+         *     it is only known at kickoff. One statement of
+         *     :func:`lmi_api.views.load_pre_closing_prices` reads every eligible row of the
          *     club's played matches, ordered by fixture and then by that rank, and the
          *     first row of each fixture is kept in Python. The priority list holds three
          *     bookmakers, so a fixture can add at most three candidate rows: the read is
@@ -1763,6 +1951,51 @@ export interface components {
             run: components["schemas"]["BacktestRunOut"];
         };
         /**
+         * NextMatch
+         * @description The club's next fixture and the projection of each of its outcomes.
+         *
+         *     ``match_id`` names the fixture the outcomes belong to, so a client links to
+         *     the match endpoint without matching on a date, and the outcomes nest under
+         *     it so one response carries both.
+         */
+        NextMatch: {
+            /** Match Id */
+            match_id: number;
+            outcomes: components["schemas"]["NextMatchOutcomes"];
+        };
+        /**
+         * NextMatchOutcome
+         * @description What one outcome of the next match would do to the club's projected season.
+         *
+         *     The four probabilities and the expected total are what the next-match
+         *     simulation of the run reports for that outcome, so a client compares a win,
+         *     a draw and a loss on one scale instead of reading one projected table.
+         */
+        NextMatchOutcome: {
+            /** Expected Points */
+            expected_points: number;
+            /** P Europe */
+            p_europe: number;
+            /** P Outcome */
+            p_outcome: number;
+            /** P Relegation */
+            p_relegation: number;
+            /** P Title */
+            p_title: number;
+        };
+        /**
+         * NextMatchOutcomes
+         * @description The three outcomes of the next match, each with its projection.
+         *
+         *     Every outcome is present, because the value of the block is the comparison:
+         *     a client that lacks one of the three cannot say what a draw would cost.
+         */
+        NextMatchOutcomes: {
+            draw: components["schemas"]["NextMatchOutcome"];
+            loss: components["schemas"]["NextMatchOutcome"];
+            win: components["schemas"]["NextMatchOutcome"];
+        };
+        /**
          * PerMatch
          * @description The team's own and its opponents' per-match averages over the season.
          *
@@ -2028,6 +2261,87 @@ export interface components {
              * @default about:blank
              */
             type: string;
+        };
+        /**
+         * RelegationRace
+         * @description One club's relegation race in one season.
+         *
+         *     ``survival_threshold`` is the historical survival line the club is measured
+         *     against, ``rivals`` the club and the nearest clubs of the latest succeeded
+         *     simulation, ``series`` the run history of exactly those clubs, and
+         *     ``remaining_fixtures`` the club's fixtures still to play. ``run_id`` and
+         *     ``as_of_date`` name the simulation the rivals and the series come from and
+         *     are null when the season has none.
+         *
+         *     ``next_match`` is null in this milestone. Its shape is already here, so the
+         *     day the run stores the per-outcome projections they are served in this
+         *     payload instead of in a new resource.
+         */
+        RelegationRace: {
+            /** As Of Date */
+            as_of_date: string | null;
+            next_match: components["schemas"]["NextMatch"] | null;
+            /** Remaining Fixtures */
+            remaining_fixtures: components["schemas"]["RemainingFixture"][];
+            /** Rivals */
+            rivals: components["schemas"]["RelegationRival"][];
+            /** Run Id */
+            run_id: string | null;
+            /** Season */
+            season: string;
+            series: components["schemas"]["SimulationHistory"];
+            survival_threshold: components["schemas"]["SurvivalThreshold"];
+            team: components["schemas"]["Team"];
+        };
+        /**
+         * RelegationRival
+         * @description One club of the race, with the stored numbers the group compares.
+         *
+         *     ``team`` is the club, ``current_points`` its real total at the run's as-of
+         *     date, and the rest are the run's projection of it: the mean final total, the
+         *     relegation probability and the low and high ends of the projected total.
+         *     Every number is a stored column of that one run, so no value here is
+         *     re-simulated or recomputed on read.
+         */
+        RelegationRival: {
+            /** Current Points */
+            current_points: number;
+            /** Expected Points */
+            expected_points: number;
+            /** P Relegation */
+            p_relegation: number;
+            /** Points P05 */
+            points_p05: number;
+            /** Points P95 */
+            points_p95: number;
+            team: components["schemas"]["Team"];
+        };
+        /**
+         * RemainingFixture
+         * @description One fixture the club still has to play, with what is known about it.
+         *
+         *     ``venue`` is where the club plays it, and ``opponent_position`` the
+         *     opponent's place in the season's table, or null for a club the table does
+         *     not rank. ``p_win``, ``p_draw`` and ``p_loss`` are the per-fixture
+         *     simulation outputs the run will store, and are null today: the fields exist
+         *     so a stored simulation fills them without a contract change, not because the
+         *     numbers are currently computed and withheld.
+         */
+        RemainingFixture: {
+            match: components["schemas"]["MatchSummary"];
+            /** Opponent Position */
+            opponent_position: number | null;
+            /** P Draw */
+            p_draw: number | null;
+            /** P Loss */
+            p_loss: number | null;
+            /** P Win */
+            p_win: number | null;
+            /**
+             * Venue
+             * @enum {string}
+             */
+            venue: "home" | "away";
         };
         /**
          * Rolling5
@@ -2578,6 +2892,28 @@ export interface components {
             yellow: number | null;
         };
         /**
+         * SurvivalThreshold
+         * @description The historical survival line of the league, as the payload serves it.
+         *
+         *     ``points_median`` is the median final total of the counted place over the
+         *     counted seasons and is never rounded, while ``points_min`` and
+         *     ``points_max`` are the extremes of the same sample. ``seasons_used`` makes
+         *     the sample size visible, so a median of one season is not read as a median
+         *     of ten, and ``position`` names the place the sample was read from.
+         */
+        SurvivalThreshold: {
+            /** Points Max */
+            points_max: number;
+            /** Points Median */
+            points_median: number;
+            /** Points Min */
+            points_min: number;
+            /** Position */
+            position: number;
+            /** Seasons Used */
+            seasons_used: number;
+        };
+        /**
          * Team
          * @description One club as the API returns it.
          *
@@ -2614,6 +2950,89 @@ export interface components {
             team: components["schemas"]["Team"];
             /** Upcoming */
             upcoming: components["schemas"]["UpcomingMatch"][];
+        };
+        /**
+         * TeamHistory
+         * @description A club's seasons, ascending, and the steepest decline of each metric.
+         *
+         *     ``seasons`` lists only the seasons the club played, so a season it did not
+         *     play is absent rather than a line of zeros; a club with no played match has
+         *     an empty list. ``largest_drop`` is empty when nothing declined and when
+         *     fewer than two seasons are listed. Both the order and the emptiness rules
+         *     are :mod:`lmi_core.analytics.history`'s.
+         */
+        TeamHistory: {
+            /** Largest Drop */
+            largest_drop: components["schemas"]["TeamHistoryDrop"][];
+            /** Seasons */
+            seasons: components["schemas"]["TeamHistorySeason"][];
+            team: components["schemas"]["Team"];
+        };
+        /**
+         * TeamHistoryDrop
+         * @description The steepest decline of one metric between two adjacent seasons.
+         *
+         *     ``metric`` is the payload key of the number the entry describes: one of
+         *     ``points_pg``, ``goals_for_pg``, ``goals_against_pg``, ``shots_for_pg``,
+         *     ``shots_against_pg``, ``sot_for_pg``, ``sot_against_pg``, ``cards_pg`` and
+         *     ``xpts_pg``. It stays a plain string because that list is the rule of
+         *     :mod:`lmi_core.analytics.history`; a second copy here would be free to drift
+         *     from it.
+         *
+         *     ``delta`` is negative and oriented so it always means the club got worse.
+         *     ``from_season`` is the earlier season and ``to_season`` the later, both taken
+         *     from the history order. A pair with a missing value on either side is
+         *     skipped for that metric, because a gap in the source is not a fall to zero.
+         */
+        TeamHistoryDrop: {
+            /** Delta */
+            delta: number;
+            /** From Season */
+            from_season: string;
+            /** Metric */
+            metric: string;
+            /** To Season */
+            to_season: string;
+        };
+        /**
+         * TeamHistorySeason
+         * @description One season of a club's history, with its table position and per-game averages.
+         *
+         *     ``position`` is the club's place in that season's table, ``None`` when the
+         *     table holds no row for it. ``played``, ``points``, ``points_pg``,
+         *     ``goals_for_pg`` and ``goals_against_pg`` are always known for a listed
+         *     season; every other average is ``None`` when no counted match of that season
+         *     carries the value, and is averaged over only the matches that do. Those
+         *     denominators and the null-is-never-zero rule belong to
+         *     :mod:`lmi_core.analytics.history`.
+         */
+        TeamHistorySeason: {
+            /** Cards Pg */
+            cards_pg: number | null;
+            /** Goals Against Pg */
+            goals_against_pg: number;
+            /** Goals For Pg */
+            goals_for_pg: number;
+            /** Played */
+            played: number;
+            /** Points */
+            points: number;
+            /** Points Pg */
+            points_pg: number;
+            /** Position */
+            position: number | null;
+            /** Season */
+            season: string;
+            /** Shots Against Pg */
+            shots_against_pg: number | null;
+            /** Shots For Pg */
+            shots_for_pg: number | null;
+            /** Sot Against Pg */
+            sot_against_pg: number | null;
+            /** Sot For Pg */
+            sot_for_pg: number | null;
+            /** Xpts Pg */
+            xpts_pg: number | null;
         };
         /**
          * TeamSeasonStats
@@ -3540,6 +3959,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TeamFocus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    get_team_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamHistory"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    get_team_relegation_race: {
+        parameters: {
+            query?: {
+                season?: string | null;
+            };
+            header?: never;
+            path: {
+                team_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelegationRace"];
                 };
             };
             /** @description Not Found */
