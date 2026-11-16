@@ -289,11 +289,10 @@ export async function TeamPage(props: TeamPageProps): Promise<ReactElement> {
           <div className={styles.glanceRow}>
             <dt className={styles.glanceTerm}>Market xPts</dt>
             <dd className={styles.glanceValue}>
-              {stats.xpts_market === null
-                ? EM_DASH
-                : `${formatPoints(stats.xpts_market)} (${formatCount(
-                    stats.xpts_coverage,
-                  )} of ${formatCount(stats.played)} matches priced)`}
+              {stats.xpts_market === null ? EM_DASH : formatPoints(stats.xpts_market)}{" "}
+              {`(${formatCount(stats.xpts_coverage)} of ${formatCount(
+                stats.played,
+              )} matches priced)`}
             </dd>
           </div>
           <div className={styles.glanceRow}>
