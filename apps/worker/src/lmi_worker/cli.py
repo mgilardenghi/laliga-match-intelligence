@@ -2,9 +2,10 @@
 
 ``ingest`` and ``status`` exist since M1. ``ingest`` downloads one source file
 per planned job, loads it and records every run; ``status`` prints the current
-state of the data without touching the network. The M4 commands ``predict``,
-``simulate`` and ``daily`` are registered here, but their bodies land in a later
-M4 task, so each of them is a stub that exits with code 2. ``python -m
+state of the data without touching the network. Of the M4 commands, ``predict``
+is implemented: it stores today's live predictions or prints the live metrics
+report. ``simulate`` and ``daily`` are registered here, but their bodies land in
+a later M4 task, so each of them is a stub that exits with code 2. ``python -m
 lmi_worker`` runs the same entry point, and the Compose worker uses ``status``
 so starting the stack never contacts a source.
 
@@ -31,6 +32,7 @@ from lmi_worker import http
 from lmi_worker.backtest import add_backtest_parser, run_backtest_command
 from lmi_worker.ingest.pipeline import Fetcher, JobResult, run_jobs
 from lmi_worker.ingest.plan import PlanError, plan_jobs
+from lmi_worker.predict import add_predict_parser, run_predict_command
 from lmi_worker.status import collect_status, format_status
 
 logger = logging.getLogger(__name__)
@@ -82,10 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
         "status",
         help="Print the stored seasons, table counts, latest runs and digest.",
     )
-    subparsers.add_parser(
-        "predict",
-        help="Fit the model and store the live predictions (not implemented yet).",
-    )
+    add_predict_parser(subparsers)
     subparsers.add_parser(
         "simulate",
         help="Run the season simulator (not implemented yet).",
@@ -119,9 +118,7 @@ def main(
     if args.command == "backtest":
         return run_backtest_command(args)
     if args.command == "predict":
-        from lmi_worker.predict import main as predict_main
-
-        return predict_main()
+        return run_predict_command(args)
     if args.command == "simulate":
         from lmi_worker.simulate import main as simulate_main
 
