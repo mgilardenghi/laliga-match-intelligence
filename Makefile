@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose
 
-.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest lint test test-integration build clean
+.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler lint test test-integration build clean
 
 # Throwaway database for the integration tests. Same image as Compose, a host
 # port that is unlikely to collide, and placeholder credentials only.
@@ -20,11 +20,12 @@ setup: ## Create .env if missing and install Python and Node dependencies
 	pnpm install --frozen-lockfile
 
 up: ## Build and start the local Docker Compose stack, then wait for health
-	# The migration job and the worker are one-shot, and `up --wait` fails on any
-	# container that exits even with status 0. So the long-running services are
-	# waited on in their own call, with `--no-deps` because their dependencies
-	# are already started or already finished here, and the exit code of the
-	# migration job is checked explicitly.
+	# The migration job is one-shot, and `up --wait` fails on any container that
+	# exits even with status 0. So the long-running services are waited on in their
+	# own call, with `--no-deps` because their dependencies are already started or
+	# already finished here, and the exit code of the migration job is checked
+	# explicitly. The worker is long-running as well: it consumes the job queue, so
+	# it is started without `--wait` once the migration job has been waited on.
 	$(COMPOSE) up -d --build --wait db redis
 	# The migration job is built here like the other images: a changed migration or
 	# seed must never be applied by the image already on disk.
@@ -59,6 +60,15 @@ ingest-backfill: ingest-deps ## Run the ingestion for every season from 2005-06 
 
 backtest: ingest-deps ## Run the walk-forward backtest and store its results
 	$(COMPOSE) run --rm --no-deps worker python -m lmi_worker backtest $(ARGS)
+
+predict: ingest-deps ## Run the live predictions for the current season and store them
+	$(COMPOSE) run --rm --no-deps worker python -m lmi_worker predict $(ARGS)
+
+simulate: ingest-deps ## Run a Monte Carlo season simulation and store its results
+	$(COMPOSE) run --rm --no-deps worker python -m lmi_worker simulate $(ARGS)
+
+scheduler: ## Start the Celery beat scheduler (profile "scheduler"; its daily cycle downloads data)
+	$(COMPOSE) --profile scheduler up -d --build scheduler
 
 lint: ## Run Python and web linters, formatters and type checks
 	uv run ruff check .

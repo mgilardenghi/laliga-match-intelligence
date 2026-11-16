@@ -88,18 +88,40 @@ services:
     environment:
       <<: *database_environment
       REDIS_URL: redis://redis:6379/0
-    # One-shot job: print the database status and exit; `restart: "no"` keeps it
-    # from being relaunched by the Docker daemon.
+    # Long-running queue consumer: it drains the `lmi` queue, and `restart:
+    # unless-stopped` keeps it up between jobs and across a daemon restart.
     #
-    # The default command must never contact a live data source: a CI run and the
-    # plain `make up` start have to work offline, so this worker only reads the
-    # database and prints a status report. Ingestion downloads the source files,
-    # so it is an explicit command: `make ingest` or `make ingest-backfill`.
-    command: ["python", "-m", "lmi_worker", "status"]
-    restart: "no"
+    # It is still offline-safe: the worker only consumes jobs, `lmi.simulate`
+    # reads PostgreSQL only, and the default stack therefore never contacts a live
+    # data source, so a CI run and the plain `make up` start work offline.
+    # Ingestion downloads the source files, so it stays an explicit command
+    # (`make ingest` or `make ingest-backfill`), which keeps working because
+    # `compose run` overrides this command.
+    command: ["celery", "-A", "lmi_worker.jobs:app", "worker", "--loglevel=INFO", "--concurrency=1", "-Q", "lmi"]
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Celery beat, the clock of the daily cycle (06:00 Europe/Madrid). It sits in
+  # the `scheduler` profile and is off by default because its daily cycle
+  # downloads data, and the default stack must stay offline. `make scheduler`
+  # starts it.
+  scheduler:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    profiles: ["scheduler"]
+    environment:
+      <<: *database_environment
+      REDIS_URL: redis://redis:6379/0
+    command: ["celery", "-A", "lmi_worker.jobs:app", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
+    restart: unless-stopped
+    depends_on:
       redis:
         condition: service_healthy
       migrate:
