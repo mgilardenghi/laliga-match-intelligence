@@ -20,6 +20,7 @@ answered with a body that carries no detail.
 
 import http
 import logging
+from collections.abc import Mapping
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
@@ -65,13 +66,18 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
     The title is the status phrase and the detail is the message the endpoint
     chose. Both are written by this application, never by the client, so
     repeating the detail is safe.
+
+    The headers of the exception are forwarded to the response, because a status
+    the API raises can carry a protocol header the client needs -- the ``Allow``
+    header of a 405 names the methods the path serves -- and a problem details
+    body must not cost the caller that header.
     """
     problem = Problem(
         title=_status_title(exc.status_code),
         status=exc.status_code,
         detail=str(exc.detail),
     )
-    return _problem_response(problem)
+    return _problem_response(problem, headers=exc.headers)
 
 
 async def _validation_exception_handler(
@@ -120,10 +126,16 @@ def _status_title(status_code: int) -> str:
         return "Error"
 
 
-def _problem_response(problem: Problem) -> JSONResponse:
-    """Render ``problem`` with the status and media type it describes."""
+def _problem_response(problem: Problem, headers: Mapping[str, str] | None = None) -> JSONResponse:
+    """Render ``problem`` with the status and media type it describes.
+
+    ``headers`` carries the protocol headers of the exception being described,
+    such as the ``Allow`` header of a 405. It is empty for every handler that
+    has no such header to forward.
+    """
     return JSONResponse(
         status_code=problem.status,
         content=problem.model_dump(),
         media_type=PROBLEM_MEDIA_TYPE,
+        headers=headers,
     )

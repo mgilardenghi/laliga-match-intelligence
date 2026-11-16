@@ -112,9 +112,8 @@ def get_team_focus(team_id: int, session: SessionDep, season: str | None = None)
     Raises:
         HTTPException: 404 when no team has ``team_id``, when ``season`` names
             no stored season, or when the team plays no match of the resolved
-            season. The first detail quotes the path parameter, which is the
-            resource being addressed; the other two are fixed sentences and
-            never repeat the value the client sent.
+            season. All three details are fixed sentences and never repeat the
+            value the client sent.
     """
     stored_team = session.scalar(select(TeamModel).where(TeamModel.id == team_id))
     if stored_team is None:

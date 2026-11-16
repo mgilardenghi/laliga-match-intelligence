@@ -31,7 +31,7 @@ type `application/problem+json`:
 | `type` | Always `about:blank`: the API publishes no problem type URIs. The status and the title carry the meaning. |
 | `title` | The HTTP status phrase. |
 | `status` | The status code, repeated in the body. |
-| `detail` | A sentence written by the API, never a stack trace or a SQL fragment. The matches, standings, model-metrics, ingestion-runs and simulations routes use a fixed sentence that never repeats a value the client sent; the older seasons and teams routes quote the value they were given, which a follow-up task unifies. |
+| `detail` | A sentence written by the API, never a stack trace or a SQL fragment. The matches, standings, model-metrics, ingestion-runs and simulations routes use a fixed sentence that never repeats a value the client sent, and so do the seasons and teams routes. |
 | `errors` | Present only on a validation failure: one entry per rejected value with `loc`, `msg` and `type`. The rejected value itself is never echoed. |
 
 The statuses a route can return are declared in its OpenAPI responses, so the

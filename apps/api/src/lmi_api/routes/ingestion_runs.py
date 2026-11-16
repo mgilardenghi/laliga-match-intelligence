@@ -179,9 +179,8 @@ def _raise_if_season_is_unknown(session: Session, code: str) -> None:
 
     It runs before the page statement, because the count alone cannot tell an
     unknown code from a known one that matches no run. The detail is a fixed
-    sentence: the value the client sent is not repeated, unlike the season
-    endpoints, which quote their own path parameter because that is the resource
-    being addressed.
+    sentence: the value the client sent is not repeated, and the season
+    endpoints follow the same rule.
 
     Raises:
         HTTPException: no season has ``code``.

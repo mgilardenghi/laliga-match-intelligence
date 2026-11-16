@@ -1,12 +1,11 @@
 """Tests for the baselines and for the model registry.
 
-``home_win`` and ``base_rate`` are the only models this task builds, so the
-registry is tested for the two resolvable names and for the loud failure of the
-three names whose modules a later task adds.
+The registry declares five names, and every one of them resolves. This module
+tests both baselines and pins the loud failure of a name outside the registry
+in :func:`test_make_model_rejects_an_unknown_name`.
 """
 
 import datetime
-import importlib
 
 import numpy as np
 import pytest
@@ -28,7 +27,6 @@ from modeling.leakage_harness import (
 
 SEED = 11
 CUTOFF = datetime.date(2021, 1, 9)
-UNBUILT_MODELS = ("market", "elo", "dixon_coles")
 
 
 def test_model_names_are_the_five_public_names() -> None:
@@ -60,20 +58,6 @@ def test_make_model_resolves_the_baselines(name: str, expected: type[Model]) -> 
 def test_make_model_rejects_an_unknown_name() -> None:
     with pytest.raises(ValueError, match="unknown model"):
         make_model("poisson", seed=SEED)
-
-
-@pytest.mark.parametrize("name", UNBUILT_MODELS)
-def test_make_model_raises_while_the_model_module_does_not_exist(name: str) -> None:
-    try:
-        importlib.import_module(f"lmi_core.modeling.{name}")
-    except ModuleNotFoundError:
-        with pytest.raises(ModuleNotFoundError):
-            make_model(name, seed=SEED)
-    else:
-        pytest.importorskip(
-            f"lmi_core.modeling.{name}",
-            reason=f"lmi_core.modeling.{name} exists, so this test no longer applies",
-        )
 
 
 def test_home_win_predicts_the_home_side_with_certainty() -> None:

@@ -75,7 +75,7 @@ def test_list_teams_of_an_unknown_season_is_not_found(api_client: TestClient) ->
         "type": "about:blank",
         "title": "Not Found",
         "status": 404,
-        "detail": "Season '1999-00' not found",
+        "detail": "Season not found",
         "errors": None,
     }
 
@@ -98,7 +98,7 @@ def test_get_an_unknown_team_is_not_found(api_client: TestClient) -> None:
     assert problem["type"] == "about:blank"
     assert problem["title"] == "Not Found"
     assert problem["status"] == 404
-    assert problem["detail"] == "Team 9999999 not found"
+    assert problem["detail"] == "Team not found"
     assert problem["errors"] is None
 
 

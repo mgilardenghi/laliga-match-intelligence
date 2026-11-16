@@ -188,8 +188,7 @@ def _raise_if_filter_value_is_unknown(
     It is called only when a filtered page is empty, because the count alone
     cannot tell an unknown season code or team identifier from a known one that
     matches no fixture. The detail is a fixed sentence: the value the client
-    sent is not repeated, unlike the season and team endpoints, which quote
-    their own path parameter because that is the resource being addressed.
+    sent is not repeated, and the season and team endpoints follow the same rule.
 
     Raises:
         HTTPException: ``season`` is set and no season has that code, or
