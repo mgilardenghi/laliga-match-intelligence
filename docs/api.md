@@ -349,10 +349,7 @@ the season code, so two reads of one history serve the same list.
 **The position.** `position` is the club's place in that season's table as the
 [standings endpoint](#get-v1standings) ranks it: the team set is every club that
 appears as a side of any match of the season, and the counted results are the
-played ones. Both endpoints rank a season with the same function over the same
-kind of input, so for one stored state of a season they cannot place a club
-differently; a club the table does not rank keeps a `null` instead of a
-borrowed place. Two requests are still two reads of a stored state that can
+played ones. Both endpoints rank a season with the same function, so over the same results they place a club the same way, and a club the table does not rank keeps a `null` instead of a borrowed place. A standings request that passes `as_of` counts only the matches up to that date, which is a shorter season than this resource reports, so that table can rank the club differently on purpose. Two requests are still two reads of a stored state that can
 move between them, and a club that changes place after a result is stored is a
 change of the data rather than a disagreement about the rule.
 
