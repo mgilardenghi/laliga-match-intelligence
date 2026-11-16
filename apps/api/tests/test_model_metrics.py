@@ -329,9 +329,23 @@ def test_get_model_metrics_with_a_malformed_run_id_is_rejected_without_echoing_i
 def test_get_model_metrics_serves_the_path_without_a_trailing_slash(
     api_client: TestClient,
 ) -> None:
+    """The bare path is served directly instead of redirecting to the slash one.
+
+    The test stores no run, and every test of this module runs inside a
+    transaction that is rolled back -- a ``db_session.commit()`` only commits a
+    savepoint -- so the shared database holds no committed backtest run. The
+    default ``GET /v1/model-metrics`` therefore answers 404 deterministically,
+    with the fixed problem body of a missing run, and the exact status and body
+    are what this test pins.
+
+    The assertion still proves the absence of a trailing-slash redirect: a route
+    served at ``/v1/model-metrics/`` would answer 307 to this request, because
+    ``follow_redirects`` is false, and not the 404 of the missing run.
+    """
     response = api_client.get("/v1/model-metrics", follow_redirects=False)
 
-    assert response.status_code in {200, 404}
+    assert response.status_code == 404
+    assert_no_backtest_run(response)
 
 
 def test_openapi_documents_the_model_metrics_contract() -> None:

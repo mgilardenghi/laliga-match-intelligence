@@ -13,6 +13,16 @@ any value that differs from that ratio by more than
 :data:`COVERAGE_TOLERANCE`. The rule keeps a producer from reporting a coverage
 that the store would silently replace with the recomputed ratio.
 
+The numeric bounds alone do not reject a non-finite float, because NaN and
+infinity are not ordered against them, so every float field of :class:`MetricRow`
+and :class:`CalibrationBin` also sets ``allow_inf_nan=False``. A non-finite
+value and a calibration value outside ``0..1`` are contract violations at this
+layer: the DTO is where a bad number stops before a reader sees it. The
+calibration fields are probabilities and probability bin edges, and the
+producer builds the edges as ``bin_index / n_bins`` and
+``(bin_index + 1) / n_bins``, so a bin also rejects ``bin_lower > bin_upper``.
+No table carries a CHECK for either rule: this is the DTO layer only.
+
 The model names are declared twice on purpose: :data:`BACKTEST_MODEL_NAMES`
 fixes the report order and :data:`ModelName` is the literal every DTO uses.
 Both must stay identical to the names in the database models module and in the
@@ -129,11 +139,11 @@ class MetricRow(BaseModel):
     subset: Subset
     n_matches: int = Field(gt=0)
     n_fixtures: int = Field(ge=0)
-    coverage: float = Field(ge=0, le=1)
-    log_loss: float = Field(ge=0)
-    brier: float = Field(ge=0, le=2)
-    rps: float = Field(ge=0, le=1)
-    accuracy: float = Field(ge=0, le=1)
+    coverage: float = Field(ge=0, le=1, allow_inf_nan=False)
+    log_loss: float = Field(ge=0, allow_inf_nan=False)
+    brier: float = Field(ge=0, le=2, allow_inf_nan=False)
+    rps: float = Field(ge=0, le=1, allow_inf_nan=False)
+    accuracy: float = Field(ge=0, le=1, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def _counts_and_coverage_agree(self) -> Self:
@@ -160,6 +170,8 @@ class CalibrationBin(BaseModel):
 
     An empty bin (``n = 0``) has no mean prediction and no observed frequency;
     the database stores that as two NULLs and this DTO states the same rule.
+    The four floats are probabilities or probability bin edges, so each one is
+    finite and inside ``0..1``, and the two edges are ordered.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -167,11 +179,11 @@ class CalibrationBin(BaseModel):
     model: ModelName
     outcome: Outcome
     bin_index: int = Field(ge=0, le=99)
-    bin_lower: float
-    bin_upper: float
+    bin_lower: float = Field(ge=0, le=1, allow_inf_nan=False)
+    bin_upper: float = Field(ge=0, le=1, allow_inf_nan=False)
     n: int = Field(ge=0)
-    mean_predicted: float | None
-    observed_frequency: float | None
+    mean_predicted: float | None = Field(ge=0, le=1, allow_inf_nan=False)
+    observed_frequency: float | None = Field(ge=0, le=1, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def _empty_bin_has_no_values(self) -> Self:
@@ -180,6 +192,20 @@ class CalibrationBin(BaseModel):
             raise ValueError("an empty calibration bin must have mean_predicted = null")
         if (self.n == 0) != (self.observed_frequency is None):
             raise ValueError("an empty calibration bin must have observed_frequency = null")
+        return self
+
+    @model_validator(mode="after")
+    def _edges_are_ordered(self) -> Self:
+        """Reject a bin that starts above its own end.
+
+        :func:`lmi_core.evaluation.metrics.calibration_bins` builds the edges as
+        ``bin_index / n_bins`` and ``(bin_index + 1) / n_bins``, so a stored bin
+        with reversed edges describes a range no producer can create.
+        """
+        if self.bin_lower > self.bin_upper:
+            raise ValueError(
+                f"bin_lower must not exceed bin_upper, got {self.bin_lower} > {self.bin_upper}"
+            )
         return self
 
 

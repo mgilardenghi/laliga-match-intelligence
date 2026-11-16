@@ -329,7 +329,7 @@ def test_an_unknown_team_an_unknown_season_and_a_team_of_another_season_are_not_
     )
 
     for response, detail in (
-        (unknown_team, f"Team {unknown} not found"),
+        (unknown_team, "Team not found"),
         (unknown_season, "Season not found"),
         (other_season, "Team not found in the season"),
     ):

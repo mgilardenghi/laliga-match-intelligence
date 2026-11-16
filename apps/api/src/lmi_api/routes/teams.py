@@ -18,10 +18,14 @@ def team_not_found(team_id: int) -> HTTPException:
     """Return the 404 error for a team ``team_id`` that is not stored.
 
     It returns the error instead of raising it so the caller raises it on the
-    line that detected the miss, where the condition is visible. The message
-    quotes the identifier the client sent, which is the client's own input.
+    line that detected the miss, where the condition is visible.
+
+    ``team_id`` stays in the signature because the callers name the miss with
+    it, and it is deliberately not echoed: a 404 detail is fixed app-authored
+    text and never repeats client input. The sentence says which kind of thing
+    is unknown, which is all the client needs to act on.
     """
-    return HTTPException(status_code=404, detail=f"Team {team_id} not found")
+    return HTTPException(status_code=404, detail="Team not found")
 
 
 @router.get("", responses=PROBLEM_RESPONSES)

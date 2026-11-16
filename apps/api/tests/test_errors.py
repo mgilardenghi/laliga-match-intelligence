@@ -102,6 +102,27 @@ def test_a_raised_http_exception_becomes_a_problem_details_body() -> None:
     }
 
 
+def test_a_method_not_allowed_keeps_the_allow_header_of_the_status() -> None:
+    """A problem body must not cost the client a header the status carries.
+
+    The application raises this 405 itself, for a path that only serves another
+    method, and that exception carries the ``Allow`` header. A client reads the
+    allowed methods from the response instead of guessing them, so the handler
+    has to forward the header of the exception it describes.
+    """
+    application = _application_with_failing_routes()
+
+    with TestClient(application) as client:
+        response = client.post("/test/validated")
+
+    assert response.status_code == 405
+    assert response.headers["content-type"].startswith(PROBLEM_MEDIA_TYPE)
+    problem = response.json()
+    assert problem["status"] == 405
+    assert problem["title"] == "Method Not Allowed"
+    assert "GET" in response.headers["allow"]
+
+
 def test_a_rejected_query_parameter_is_described_without_echoing_its_value() -> None:
     application = _application_with_failing_routes()
 

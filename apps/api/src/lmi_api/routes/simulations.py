@@ -454,9 +454,8 @@ def _stored_season(session: Session, code: str) -> SeasonModel:
 
     Raises:
         HTTPException: no season has ``code``. The detail is a fixed sentence and
-            never repeats the value the client sent, unlike the season endpoints,
-            which quote their own path parameter because that is the resource
-            being addressed.
+            never repeats the value the client sent, and the season endpoints
+            follow the same rule.
     """
     stored = session.scalars(select(SeasonModel).where(SeasonModel.code == code)).first()
     if stored is None:
