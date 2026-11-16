@@ -204,6 +204,6 @@ Raw data is downloaded at runtime and is not included in this repository.
 
 ## License
 
-No license file exists yet. All rights reserved until a license is chosen.
+The code is released under the [MIT License](LICENSE). The match data is not part of the repository: it is downloaded at runtime from the sources listed above, under their own terms.
 
 This project is not affiliated with LaLiga or any football club.
