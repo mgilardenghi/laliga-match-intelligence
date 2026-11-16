@@ -3,7 +3,7 @@ name = "lmi-api"
 version = "0.1.0"
 description = "FastAPI service: the only entry point to LMI data."
 requires-python = ">=3.14,<3.15"
-dependencies = ["lmi-core", "fastapi", "uvicorn[standard]"]
+dependencies = ["celery[redis]", "lmi-core", "fastapi", "uvicorn[standard]"]
 
 [tool.uv.sources]
 lmi-core = { workspace = true }

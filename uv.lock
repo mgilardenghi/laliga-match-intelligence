@@ -408,6 +408,7 @@ name = "lmi-api"
 version = "0.1.0"
 source = { editable = "apps/api" }
 dependencies = [
+    { name = "celery", extra = ["redis"] },
     { name = "fastapi" },
     { name = "lmi-core" },
     { name = "uvicorn", extra = ["standard"] },
@@ -415,6 +416,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "celery", extras = ["redis"] },
     { name = "fastapi" },
     { name = "lmi-core", editable = "packages/core" },
     { name = "uvicorn", extras = ["standard"] },
