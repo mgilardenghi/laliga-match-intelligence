@@ -133,8 +133,10 @@ def _played_match_link(page: Page, dashboard_url: str) -> str:
     """Return the match link of a played card on matchday 1, or skip."""
     page.goto(f"{dashboard_url}/matchday?matchday=1")
     played = page.locator("article").filter(has_text="Played")
-    if played.count() == 0:
-        pytest.skip("no card on matchday 1 is marked Played in the loaded dataset")
+    assert played.count() >= 1, (
+        "no card on matchday 1 is marked Played: the loaded dataset must already "
+        "have played a matchday of the current season"
+    )
     href = played.first.get_by_role("link").first.get_attribute("href")
     assert href is not None and MATCH_URL.search(href), f"the played card links to {href!r}"
     return href
@@ -147,8 +149,8 @@ def test_a_played_match_shows_the_market_bar_with_its_label(page: Page, dashboar
     page.goto(f"{dashboard_url}{href}")
 
     market = page.locator("figure").filter(has=page.locator("figcaption", has_text=MARKET_CAPTION))
-    if market.count() == 0:
-        pytest.skip("the played fixture carries no pre-closing price, so no market bar")
+    # The loaded data carries a pre-closing price for every played fixture, so a
+    # missing bar is a regression, not a data gap.
     expect(market).to_have_count(1)
     expect(market.locator('svg[role="img"]')).to_have_count(1)
     expect(market.locator(":scope > p")).to_have_text(MARKET_NOTE)

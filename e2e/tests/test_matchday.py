@@ -176,6 +176,7 @@ def test_an_out_of_range_matchday_falls_back_to_a_valid_page(
 
     nav = page.get_by_role("navigation", name="Matchday")
     hrefs = nav.get_by_role("link").evaluate_all("links => links.map(l => l.getAttribute('href'))")
+    assert len(hrefs) >= 1, f"?matchday={value} renders no pager link"
     for href in hrefs:
         found = re.search(r"matchday=(-?\d+)", href or "")
         assert found is not None, f"the pager links to {href!r}"

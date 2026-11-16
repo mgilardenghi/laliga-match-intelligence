@@ -220,8 +220,9 @@ def test_a_season_without_a_simulation_offers_make_simulate(page: Page, dashboar
         if has_rows and asks:
             unsimulated = code
             break
-    if unsimulated is None:
-        pytest.skip("every season with results has a stored simulation in this dataset")
+    # The loaded tier stores one simulation, for the current season only, so an
+    # older season with results must offer the command; finding none is a bug.
+    assert unsimulated is not None, "no season with results shows the make simulate state"
 
     page.goto(f"{dashboard_url}/?season={unsimulated}")
 
