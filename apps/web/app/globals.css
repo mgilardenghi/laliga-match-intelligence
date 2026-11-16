@@ -27,7 +27,23 @@
   --cat-2: #0f766e;
   --cat-3: #c2689e;
   --cat-4: #33608c;
-  --zone-relegation: #d55e00;
+  /* Semantic colour tokens shared by the charts, the legend and the tiles.
+     Every existing token above keeps working: none is renamed or removed.
+     The three `--result-*` fills are identical in both themes on purpose:
+     their hex fallback is handed to `inkForFill`
+     (components/charts/contrast.ts), so a token whose fallback picks the
+     label ink must keep fallback == token value in every theme. Blue and
+     orange differ in lightness as well as hue, so the legend still reads in
+     greyscale and for colour-blind readers. */
+  --side-home: #0b5cad;
+  --side-draw: #9aa3af;
+  --side-away: #e07b28;
+  --result-w: #0f7b3f;
+  --result-d: #5b6472;
+  --result-l: #b3261e;
+  --zone-ucl: #0f7b3f;
+  --zone-europe: #5b6472;
+  --zone-relegation: #b3261e;
   /* Sequential scale: identical in both themes. The heatmap derives each
      label's ink from the luminance of the hex fallback it paints with
      (components/charts/contrast.ts), so a token must keep its fallback's value;
@@ -60,7 +76,17 @@
     --cat-2: #2dd4bf;
     --cat-3: #f2a6c8;
     --cat-4: #7fb3e0;
-    --zone-relegation: #d55e00;
+    /* Same names and meanings as the light block above. The `--result-*` fills
+       keep their light values because their fallback picks the label ink. */
+    --side-home: #56b4e9;
+    --side-draw: #a1a1aa;
+    --side-away: #f59e0b;
+    --result-w: #0f7b3f;
+    --result-d: #5b6472;
+    --result-l: #b3261e;
+    --zone-ucl: #4ade80;
+    --zone-europe: #a1a1aa;
+    --zone-relegation: #f87171;
     /* The outcome fills and the sequential scale stay as they are in light:
        their label ink is derived from each fill's hex fallback, so a dark
        override of these tokens would no longer match the ink chosen for it. */
@@ -83,7 +109,17 @@
   --cat-2: #2dd4bf;
   --cat-3: #f2a6c8;
   --cat-4: #7fb3e0;
-  --zone-relegation: #d55e00;
+  /* Same names and meanings as the light block above. The `--result-*` fills
+     keep their light values because their fallback picks the label ink. */
+  --side-home: #56b4e9;
+  --side-draw: #a1a1aa;
+  --side-away: #f59e0b;
+  --result-w: #0f7b3f;
+  --result-d: #5b6472;
+  --result-l: #b3261e;
+  --zone-ucl: #4ade80;
+  --zone-europe: #a1a1aa;
+  --zone-relegation: #f87171;
   color-scheme: dark;
 }
 

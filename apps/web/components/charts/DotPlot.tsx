@@ -9,6 +9,13 @@ export type DotPlotReference = {
   readonly metric: string;
   readonly label: string;
   readonly value: number;
+  /**
+   * Leave this reference out of the x domain it would otherwise widen and mark
+   * it at the panel edge instead, with its label and its value spelled out in
+   * HTML. A reference whose value still falls inside the domain is drawn in
+   * place, because a marker at the edge would misplace it.
+   */
+  readonly offScale?: boolean;
 };
 
 export type DotPlotProps = {
@@ -18,6 +25,11 @@ export type DotPlotProps = {
     readonly values: readonly (number | null)[];
   }[];
   readonly references?: readonly DotPlotReference[];
+  /**
+   * An explicit x domain per metric name. A metric without an entry keeps the
+   * fitted data-extent domain.
+   */
+  readonly domains?: Readonly<Record<string, readonly [number, number]>>;
   readonly id?: string;
   readonly title?: string;
   readonly description?: string;
@@ -28,33 +40,48 @@ const DEFAULT_TITLE = "Model metrics compared";
 const DEFAULT_DESCRIPTION =
   "One panel per metric, with one row per model. Filled dots show each model's value; dashed lines mark reference values.";
 
-const WIDTH = 480;
-const PLOT_LEFT = 100;
-const PLOT_RIGHT = 466;
-const ROW_HEIGHT = 20;
-const HEADER_HEIGHT = 38;
-const AXIS_LABEL_HEIGHT = 16;
-const PANEL_GAP = 14;
+const TICK_COUNT = 4;
+// The plot column is measured in percent, so every mark position is a share of
+// it and no coordinate depends on the rendered pixel width.
+const PLOT_UNITS = 100;
 // Reference labels sit on two rows so two references with nearly the same value
 // cannot overwrite each other.
 const LABEL_ROWS = 2;
-const LABEL_ROW_GAP = 12;
-const LABEL_HALF_WIDTH = 24;
 
-// Every fallback keeps at least 3:1 against both the light and the dark page
-// background, so a chart is legible before the theme tokens exist.
-const MODEL_COLOURS: readonly string[] = [
-  "var(--cat-1, #b45309)",
-  "var(--cat-2, #0f766e)",
-  "var(--cat-3, #cc79a7)",
-  "var(--cat-4, #33608c)",
+// The dot colour for each model comes from a static class map, so the palette
+// stays in the stylesheet and no colour is written inline.
+const MODEL_CLASSES: readonly string[] = [
+  styles.dotCat1,
+  styles.dotCat2,
+  styles.dotCat3,
+  styles.dotCat4,
 ];
-const MUTED_COLOUR = "var(--muted, #6b7280)";
+const MUTED_CLASS = styles.dotMuted;
 
 type PlacedReference = DotPlotReference & {
   readonly x: number;
   readonly row: number;
 };
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, value));
+}
+
+function isValue(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * The room a reference label needs on either side of its line, in percent of
+ * the plot column: 12 px text is about half an em per character, and the column
+ * is a few hundred pixels wide.
+ */
+function labelHalfWidth(label: string): number {
+  return Math.min(30, 1.1 + label.length * 1.1);
+}
 
 /**
  * Place reference labels on the lowest row that still has room, so labels of
@@ -62,7 +89,7 @@ type PlacedReference = DotPlotReference & {
  */
 function placeReferences(
   references: readonly DotPlotReference[],
-  scale: (value: number) => number,
+  position: (value: number) => number,
 ): readonly PlacedReference[] {
   const ordered = [...references].sort((left, right) => left.value - right.value);
   const occupied: { low: number; high: number }[][] = Array.from(
@@ -71,9 +98,10 @@ function placeReferences(
   );
   const placed: PlacedReference[] = [];
   for (const reference of ordered) {
-    const x = scale(reference.value);
-    const low = x - LABEL_HALF_WIDTH;
-    const high = x + LABEL_HALF_WIDTH;
+    const x = position(reference.value);
+    const half = labelHalfWidth(reference.label);
+    const low = x - half;
+    const high = x + half;
     const row = occupied.findIndex((spans) =>
       spans.every((span) => high <= span.low || low >= span.high),
     );
@@ -84,25 +112,49 @@ function placeReferences(
   return placed;
 }
 
+/**
+ * The x domain of one metric: the explicit one when the caller gave a usable
+ * domain, otherwise the data extent with the padding a dot plot needs. A dot
+ * plot has no zero baseline to preserve, so the axis spans the data instead of
+ * starting at zero: otherwise every model collapses onto one x position and the
+ * chart says nothing.
+ */
+function resolveDomain(
+  values: readonly number[],
+  explicit: readonly [number, number] | undefined,
+): readonly [number, number] {
+  if (
+    explicit !== undefined &&
+    Number.isFinite(explicit[0]) &&
+    Number.isFinite(explicit[1]) &&
+    explicit[0] < explicit[1]
+  ) {
+    return explicit;
+  }
+  const minimum = values.length > 0 ? Math.min(...values) : 0;
+  const maximum = values.length > 0 ? Math.max(...values) : 1;
+  const span = maximum - minimum;
+  const padding = span > 0 ? span * 0.08 : Math.max(0.05, Math.abs(maximum) * 0.1);
+  return [minimum - padding, maximum + padding];
+}
+
 export function DotPlot(props: DotPlotProps): ReactElement {
   const {
     metrics,
     rows,
     references,
+    domains,
     id,
     title = DEFAULT_TITLE,
     description = DEFAULT_DESCRIPTION,
     note,
   } = props;
   const ids = chartIds(id ?? title);
-
-  const panelHeight =
-    HEADER_HEIGHT + Math.max(1, rows.length) * ROW_HEIGHT + 4 + AXIS_LABEL_HEIGHT;
-  const height =
-    10 + Math.max(1, metrics.length) * panelHeight + Math.max(0, metrics.length - 1) * PANEL_GAP;
+  const allReferences = references ?? [];
 
   return (
     <ChartFigure
+      ids={ids}
       title={title}
       description={description}
       table={{
@@ -114,117 +166,165 @@ export function DotPlot(props: DotPlotProps): ReactElement {
             return [
               metric,
               row.model,
-              value === null || value === undefined || !Number.isFinite(value)
-                ? "—"
-                : formatNumber(value, 3),
+              isValue(value) ? formatNumber(value, 3) : "—",
             ];
           }),
         ),
       }}
       note={note}
     >
-      <svg
+      <div
         role="img"
         aria-labelledby={ids.labelledBy}
-        viewBox={`0 0 ${WIDTH} ${height}`}
-        className={styles.svg}
-        preserveAspectRatio="xMidYMid meet"
+        className={`${styles.plot} ${styles.dotChart}`}
       >
-        <title id={ids.titleId}>{title}</title>
-        <desc id={ids.descId}>{description}</desc>
         {metrics.map((metric, metricIndex) => {
-          const panelTop = 10 + metricIndex * (panelHeight + PANEL_GAP);
-          const rowsTop = panelTop + HEADER_HEIGHT;
-          const axisY = rowsTop + Math.max(1, rows.length) * ROW_HEIGHT + 4;
-          const metricReferences = (references ?? []).filter(
-            (reference) => reference.metric === metric,
-          );
-          const values = rows
+          const modelValues = rows
             .map((row) => row.values[metricIndex])
-            .filter(
-              (value): value is number =>
-                value !== null && value !== undefined && Number.isFinite(value),
-            )
-            .concat(metricReferences.map((reference) => reference.value));
-          // A dot plot has no zero baseline to preserve, so the axis spans the
-          // data instead of starting at zero: otherwise every model collapses
-          // onto one x position and the chart says nothing.
-          const minimum = values.length > 0 ? Math.min(...values) : 0;
-          const maximum = values.length > 0 ? Math.max(...values) : 1;
-          const span = maximum - minimum;
-          const padding = span > 0 ? span * 0.08 : Math.max(0.05, Math.abs(maximum) * 0.1);
-          const scale = linearScale(
-            [minimum - padding, maximum + padding],
-            [PLOT_LEFT, PLOT_RIGHT],
+            .filter((value): value is number => isValue(value));
+          // A reference without a number has no place on a numeric axis.
+          const metricReferences = allReferences.filter(
+            (reference) => reference.metric === metric && Number.isFinite(reference.value),
           );
-          const ticks = scale.ticks(4);
-          const placed = placeReferences(metricReferences, (value) => scale.scale(value));
+          // An off-scale reference never widens the domain it is off.
+          const inScaleValues = metricReferences
+            .filter((reference) => reference.offScale !== true)
+            .map((reference) => reference.value);
+          const domain = resolveDomain([...modelValues, ...inScaleValues], domains?.[metric]);
+          const axis = linearScale(domain, [0, PLOT_UNITS]);
+          const position = (value: number): number => clampPercent(axis.scale(value));
+          const ticks = axis.ticks(TICK_COUNT);
+          const inside = metricReferences.filter(
+            (reference) => reference.value >= domain[0] && reference.value <= domain[1],
+          );
+          const outside = metricReferences.filter(
+            (reference) => reference.value < domain[0] || reference.value > domain[1],
+          );
+          const placed = placeReferences(inside, position);
 
           return (
-            <g key={metric}>
-              <text x={PLOT_LEFT} y={panelTop + 12} className={styles.panelHeading}>
-                {metric}
-              </text>
-              {ticks.map((tick) => {
-                const x = scale.scale(tick);
-                return (
-                  <g key={`${metric}-tick-${tick}`}>
-                    <line x1={x} y1={rowsTop - 4} x2={x} y2={axisY} className={styles.gridLine} />
-                    <text x={x} y={axisY + 12} textAnchor="middle" className={styles.axisText}>
-                      {formatNumber(tick, Math.abs(tick) < 10 ? 2 : 0)}
-                    </text>
-                  </g>
-                );
-              })}
-              <line x1={PLOT_LEFT} y1={axisY} x2={PLOT_RIGHT} y2={axisY} className={styles.axisLine} />
-              {rows.map((row, rowIndex) => {
-                const value = row.values[metricIndex];
-                const y = rowsTop + rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
-                const colour = MODEL_COLOURS[rowIndex] ?? MUTED_COLOUR;
-                return (
-                  <g key={`${metric}-${row.model}`}>
-                    <text
-                      x={PLOT_LEFT - 8}
-                      y={y}
-                      textAnchor="end"
-                      dominantBaseline="central"
-                      className={styles.segmentName}
-                    >
-                      {row.model}
-                    </text>
-                    {value !== null && value !== undefined && Number.isFinite(value) ? (
-                      <circle cx={scale.scale(value)} cy={y} r={4} style={{ fill: colour }} />
-                    ) : null}
-                  </g>
-                );
-              })}
-              {placed.map((reference) => (
-                <g key={`${metric}-${reference.label}`}>
-                  <line
-                    x1={reference.x}
-                    y1={rowsTop - 4}
-                    x2={reference.x}
-                    y2={axisY}
-                    style={{
-                      stroke: "var(--muted, #6b7280)",
-                      strokeWidth: 1,
-                      strokeDasharray: "3 3",
-                    }}
-                  />
-                  <text
-                    x={reference.x}
-                    y={rowsTop - 8 - reference.row * LABEL_ROW_GAP}
-                    textAnchor="middle"
-                    className={styles.axisText}
+            <div key={metric} className={styles.dotPanel}>
+              <p className={styles.panelTitle}>{metric}</p>
+              {placed.length > 0 ? (
+                <div className={styles.referenceRow}>
+                  <span aria-hidden="true" />
+                  <div className={styles.referenceTrack}>
+                    {placed.map((reference) => (
+                      <span
+                        key={`${metric}-label-${reference.label}`}
+                        className={styles.referenceLabel}
+                        style={{
+                          left: `${reference.x}%`,
+                          bottom: `${reference.row * 0.95}rem`,
+                        }}
+                      >
+                        {reference.label}
+                      </span>
+                    ))}
+                  </div>
+                  <span aria-hidden="true" />
+                </div>
+              ) : null}
+              <div className={styles.dotRows}>
+                {rows.map((row, rowIndex) => {
+                  const value = row.values[metricIndex];
+                  const colourClass = MODEL_CLASSES[rowIndex] ?? MUTED_CLASS;
+                  return (
+                    <div key={`${metric}-${row.model}`} className={styles.dotRow}>
+                      <span className={styles.chartLabel}>{row.model}</span>
+                      <div className={styles.dotTrack}>
+                        {isValue(value) ? (
+                          <span
+                            className={`${styles.dotMark} ${colourClass}`}
+                            style={{ left: `${position(value)}%` }}
+                          />
+                        ) : null}
+                      </div>
+                      <span className={styles.chartValue}>
+                        {isValue(value) ? formatNumber(value, 3) : "—"}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className={styles.plotLayer}>
+                  <svg
+                    aria-hidden="true"
+                    focusable="false"
+                    viewBox={`0 0 ${PLOT_UNITS} ${PLOT_UNITS}`}
+                    preserveAspectRatio="none"
+                    className={styles.plotOverlay}
                   >
-                    {reference.label}
-                  </text>
-                </g>
-              ))}
-            </g>
+                    {ticks.map((tick) => (
+                      <line
+                        key={`${metric}-grid-${tick}`}
+                        x1={position(tick)}
+                        x2={position(tick)}
+                        y1={0}
+                        y2={PLOT_UNITS}
+                        className={styles.plotGridLine}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
+                    <line
+                      x1={0}
+                      x2={PLOT_UNITS}
+                      y1={PLOT_UNITS}
+                      y2={PLOT_UNITS}
+                      className={styles.plotAxisLine}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                  {placed.map((reference) => (
+                    <span
+                      key={`${metric}-line-${reference.label}`}
+                      className={styles.referenceLine}
+                      style={{ left: `${reference.x}%` }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className={styles.tickRow}>
+                <span aria-hidden="true" />
+                <div className={styles.tickTrack}>
+                  {ticks.map((tick) => (
+                    <span
+                      key={`${metric}-tick-${tick}`}
+                      className={styles.tickLabel}
+                      style={{ left: `${position(tick)}%` }}
+                    >
+                      {formatNumber(tick, Math.abs(tick) < 10 ? 2 : 0)}
+                    </span>
+                  ))}
+                </div>
+                <span aria-hidden="true" />
+              </div>
+              {outside.map((reference) => {
+                const above = reference.value > domain[1];
+                return (
+                  <div key={`${metric}-off-${reference.label}`} className={styles.offScaleRow}>
+                    <span aria-hidden="true" />
+                    <div className={styles.offScaleTrack}>
+                      <span
+                        aria-hidden="true"
+                        className={
+                          above ? styles.offScaleMarkerHigh : styles.offScaleMarkerLow
+                        }
+                      />
+                      <p className={styles.offScaleNote}>
+                        {`${reference.label} ${formatNumber(reference.value, 3)}`}{" "}
+                        <span className={styles.offScaleTag}>
+                          {above ? "above the axis" : "below the axis"}
+                        </span>
+                      </p>
+                    </div>
+                    <span aria-hidden="true" />
+                  </div>
+                );
+              })}
+            </div>
           );
         })}
-      </svg>
+      </div>
     </ChartFigure>
   );
 }

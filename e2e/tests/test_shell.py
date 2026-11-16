@@ -21,7 +21,7 @@ NAV_ITEMS = (
     ("/matchday", "Matchday"),
     ("/teams", "Teams"),
     ("/focus", "Focus"),
-    ("/performance", "Performance"),
+    ("/performance", "Model performance"),
 )
 
 THEME_COOKIE = "lmi_theme"

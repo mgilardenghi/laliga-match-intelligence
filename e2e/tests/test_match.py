@@ -75,12 +75,12 @@ def test_a_match_card_opens_the_pre_match_view(page: Page, dashboard_url: str) -
     expect(forms).to_have_count(2)
 
     # At least one model probability bar, with an accessible name. A bar is a
-    # chart, so it is a figure with a caption and a labelled SVG.
+    # chart, so it is a figure with a caption and a labelled plot.
     bars = page.locator("figure").filter(
         has=page.locator("figcaption", has_text=PROBABILITY_CAPTION)
     )
     assert bars.count() >= 1, "the pre-match view renders no probability figure"
-    expect(bars.first.locator('svg[role="img"]')).to_have_accessible_name(re.compile(r"\S+"))
+    expect(bars.first.locator('[role="img"]')).to_have_accessible_name(re.compile(r"\S+"))
 
 
 @pytest.mark.loaded
@@ -152,7 +152,7 @@ def test_a_played_match_shows_the_market_bar_with_its_label(page: Page, dashboar
     # The loaded data carries a pre-closing price for every played fixture, so a
     # missing bar is a regression, not a data gap.
     expect(market).to_have_count(1)
-    expect(market.locator('svg[role="img"]')).to_have_count(1)
+    expect(market.locator('[role="img"]')).to_have_count(1)
     expect(market.locator(":scope > p")).to_have_text(MARKET_NOTE)
 
 
@@ -178,6 +178,6 @@ def test_the_head_to_head_and_profile_render(page: Page, dashboard_url: str) -> 
     )
     expect(profiles).to_have_count(2)
     for index in range(2):
-        expect(profiles.nth(index).locator('svg[role="img"]')).to_have_accessible_name(
+        expect(profiles.nth(index).locator('[role="img"]')).to_have_accessible_name(
             re.compile(r"\S")
         )

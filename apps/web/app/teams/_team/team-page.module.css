@@ -242,13 +242,20 @@
   font-weight: 400;
 }
 
-/* The profile chart scales to the width of its figure; the viewBox keeps the
-   internal coordinates, so the labels stay in proportion on a phone. */
+/* The profile chart is drawn at its natural size: the component gives the SVG
+   the pixel width and height of its own `viewBox`, so the rendered scale is
+   exactly 1 and no label inside it is ever scaled. */
 .svg {
   display: block;
-  width: 100%;
-  height: auto;
-  overflow: visible;
+}
+
+/* The scroller owns the horizontal overflow of a drawing wider than a phone.
+   `min-width: 0` keeps a container that is itself a flex item from sizing to
+   the drawing's intrinsic width, so the drawing scrolls instead of pushing the
+   page wider. */
+.chartScroller {
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .axisLine {
@@ -256,14 +263,16 @@
   stroke-width: 1;
 }
 
+/* The drawing is at its natural size, so these pixels are the pixels the
+   reader sees and both sizes sit on the chart text scale. */
 .axisText {
   fill: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .metricLabel {
   fill: var(--text);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .forBar {

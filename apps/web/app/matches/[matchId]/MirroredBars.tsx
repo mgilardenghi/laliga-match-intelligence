@@ -79,86 +79,89 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
       }}
       note={note}
     >
-      <svg
-        role="img"
-        aria-labelledby={ids.labelledBy}
-        viewBox={`0 0 ${WIDTH} ${height}`}
-        className={styles.chartSvg}
-        preserveAspectRatio="xMidYMid meet"
-      >
-        <title id={ids.titleId}>{title}</title>
-        <desc id={ids.descId}>{description}</desc>
-        <text
-          x={PLOT_LEFT}
-          y={14}
-          textAnchor="start"
-          className={styles.chartAxis}
-        >
-          {againstLabel}
-        </text>
-        <text x={PLOT_RIGHT} y={14} textAnchor="end" className={styles.chartAxis}>
-          {ownLabel}
-        </text>
-        <line
-          x1={CENTRE}
-          y1={TOP - 4}
-          x2={CENTRE}
-          y2={height - BOTTOM}
-          className={styles.chartAxisLine}
-        />
-        {rows.map((row, index) => {
-          const y = TOP + index * ROW_HEIGHT;
-          const centreY = y + BAR_HEIGHT / 2;
-          // Each row is scaled to its own largest value, so a row of goals and
-          // a row of shots both use the width they need.
-          const scale = linearScale([0, niceMax(value(row))], [0, HALF_WIDTH]);
-          const ownWidth = row.own === null ? 0 : scale.scale(row.own);
-          const againstWidth = row.against === null ? 0 : scale.scale(row.against);
-          const leagueX = row.league === null ? null : CENTRE - scale.scale(row.league);
-          return (
-            <g key={row.label}>
-              <text
-                x={PLOT_LEFT - 10}
-                y={centreY}
-                textAnchor="end"
-                dominantBaseline="central"
-                className={styles.chartLabel}
-              >
-                {row.label}
-              </text>
-              {againstWidth > 0 ? (
-                <rect
-                  x={CENTRE - againstWidth}
-                  y={y}
-                  width={againstWidth}
-                  height={BAR_HEIGHT}
-                  rx={2}
-                  className={styles.chartAgainst}
-                />
-              ) : null}
-              {ownWidth > 0 ? (
-                <rect
-                  x={CENTRE}
-                  y={y}
-                  width={ownWidth}
-                  height={BAR_HEIGHT}
-                  rx={2}
-                  className={styles.chartOwn}
-                />
-              ) : null}
-              {leagueX === null ? null : (
-                <line
-                  x1={leagueX}
-                  y1={y - 2}
-                  x2={leagueX}
-                  y2={y + BAR_HEIGHT + 2}
-                  className={styles.chartLeague}
-                />
-              )}
-            </g>
-          );
-        })}
-      </svg>
+      <div className={styles.chartScroller}>
+          <svg
+            role="img"
+            aria-labelledby={ids.labelledBy}
+            viewBox={`0 0 ${WIDTH} ${height}`}
+            className={styles.chartSvg}
+            style={{ width: `${WIDTH}px`, height: `${height}px` }}
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <title id={ids.titleId}>{title}</title>
+            <desc id={ids.descId}>{description}</desc>
+            <text
+              x={PLOT_LEFT}
+              y={14}
+              textAnchor="start"
+              className={styles.chartAxis}
+            >
+              {againstLabel}
+            </text>
+            <text x={PLOT_RIGHT} y={14} textAnchor="end" className={styles.chartAxis}>
+              {ownLabel}
+            </text>
+            <line
+              x1={CENTRE}
+              y1={TOP - 4}
+              x2={CENTRE}
+              y2={height - BOTTOM}
+              className={styles.chartAxisLine}
+            />
+            {rows.map((row, index) => {
+              const y = TOP + index * ROW_HEIGHT;
+              const centreY = y + BAR_HEIGHT / 2;
+              // Each row is scaled to its own largest value, so a row of goals and
+              // a row of shots both use the width they need.
+              const scale = linearScale([0, niceMax(value(row))], [0, HALF_WIDTH]);
+              const ownWidth = row.own === null ? 0 : scale.scale(row.own);
+              const againstWidth = row.against === null ? 0 : scale.scale(row.against);
+              const leagueX = row.league === null ? null : CENTRE - scale.scale(row.league);
+              return (
+                <g key={row.label}>
+                  <text
+                    x={PLOT_LEFT - 10}
+                    y={centreY}
+                    textAnchor="end"
+                    dominantBaseline="central"
+                    className={styles.chartLabel}
+                  >
+                    {row.label}
+                  </text>
+                  {againstWidth > 0 ? (
+                    <rect
+                      x={CENTRE - againstWidth}
+                      y={y}
+                      width={againstWidth}
+                      height={BAR_HEIGHT}
+                      rx={2}
+                      className={styles.chartAgainst}
+                    />
+                  ) : null}
+                  {ownWidth > 0 ? (
+                    <rect
+                      x={CENTRE}
+                      y={y}
+                      width={ownWidth}
+                      height={BAR_HEIGHT}
+                      rx={2}
+                      className={styles.chartOwn}
+                    />
+                  ) : null}
+                  {leagueX === null ? null : (
+                    <line
+                      x1={leagueX}
+                      y1={y - 2}
+                      x2={leagueX}
+                      y2={y + BAR_HEIGHT + 2}
+                      className={styles.chartLeague}
+                    />
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+      </div>
     </ChartFigure>
   );
 }

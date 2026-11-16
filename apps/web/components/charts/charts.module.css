@@ -14,17 +14,243 @@
   font-weight: 600;
 }
 
-.svg {
-  display: block;
-  width: 100%;
-  height: auto;
+/* Text for assistive technology only: the description a chart wires into
+   `aria-labelledby` without drawing it in the scaled marks. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-/* The compact form strip sits inside a table row, so it keeps a fixed short
-   height instead of scaling with the column width. The row then stays at most
-   28px of chart plus the cell's vertical padding. */
-.formCompactSvg {
-  height: 28px;
+/* The shared shell of a chart whose labels are HTML and whose marks are an SVG
+   overlay. The plot keeps a readable width on a wide page and never forces the
+   page wider than the viewport, because its own minimum is zero and the mark
+   overlay is absolutely positioned. */
+.plot {
+  position: relative;
+  min-width: 0;
+  max-width: 40rem;
+}
+
+/* One row of the label column and the plot column. The chart sets the track
+   widths as custom properties so the absolutely positioned mark overlay can
+   line up with the plot column exactly. */
+.row {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  align-items: center;
+  column-gap: var(--chart-column-gap);
+  height: var(--chart-row-height);
+}
+
+.chartLabel {
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  /* A full team name wraps onto a second line instead of being clipped or
+     shortened with an ellipsis. */
+  overflow-wrap: anywhere;
+}
+
+.chartValue {
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.barTrack {
+  position: relative;
+  height: 1rem;
+}
+
+/* The interval bars set the lengths every row grid and the mark overlay share. */
+.intervalChart {
+  --chart-label-width: 8.5rem;
+  --chart-value-width: 2.5rem;
+  --chart-column-gap: 0.5rem;
+  --chart-row-height: 2.5rem;
+}
+
+/* The p05-p95 range: a thin track behind the interquartile bar. */
+.barRange {
+  position: absolute;
+  top: 50%;
+  height: 0.375rem;
+  border-radius: 0.1875rem;
+  background: var(--muted, #6b7280);
+  opacity: 0.55;
+  transform: translateY(-50%);
+}
+
+/* The p25-p75 interquartile range. */
+.barMiddle {
+  position: absolute;
+  top: 50%;
+  height: 0.875rem;
+  border-radius: 0.1875rem;
+  background: var(--accent, #0072b2);
+  opacity: 0.9;
+  transform: translateY(-50%);
+}
+
+/* Current points: a rotated square, so the marker keeps a diamond shape at any
+   size without a scaled SVG path. */
+.barCurrent {
+  position: absolute;
+  top: 50%;
+  width: 0.5rem;
+  height: 0.5rem;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  background: var(--background, #ffffff);
+  transform: translate(-50%, -50%) rotate(45deg);
+  /* The diamond is a marker over the marks, so it paints above the grid and
+     threshold lines of the overlay. */
+  z-index: 2;
+}
+
+.rows {
+  position: relative;
+}
+
+/* The absolutely positioned SVG overlay of the plot column. `left` and `right`
+   repeat the row grid so every mark lands on the track the HTML bars use. */
+.plotLayer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--chart-label-width) + var(--chart-column-gap));
+  right: calc(var(--chart-value-width) + var(--chart-column-gap));
+  pointer-events: none;
+}
+
+.plotOverlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.plotGridLine {
+  stroke: var(--border, #d4d4d8);
+  stroke-width: 1;
+}
+
+.plotAxisLine {
+  stroke: currentColor;
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.medianTick {
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.thresholdLine {
+  stroke: var(--zone-relegation, #d55e00);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+/* The tick row repeats the row grid: an empty label column, the axis labels and
+   an empty value column, so a tick sits under the value it measures. */
+.tickRow {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  column-gap: var(--chart-column-gap);
+  margin-top: 0.15rem;
+}
+
+.tickTrack {
+  position: relative;
+  height: 1rem;
+}
+
+/* Ticks are HTML at the type scale, positioned by percentage, never text in a
+   scaled viewBox. */
+.tickLabel {
+  position: absolute;
+  top: 0;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.thresholdRow {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  column-gap: var(--chart-column-gap);
+  margin-bottom: 0.15rem;
+}
+
+.thresholdTrack {
+  position: relative;
+  height: 1rem;
+}
+
+/* The label of the threshold line: HTML text above the plot, under the same
+   percentage as the line in the SVG. */
+.thresholdLabel {
+  position: absolute;
+  bottom: 0;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* The shell of a chart SVG that is not an overlay. The component gives it the
+   pixel width and height of its own `viewBox`, so the rendered scale is exactly
+   1 and no label inside it is ever scaled; the horizontal scroller around it
+   takes a width that does not fit. */
+.svg {
+  display: block;
+}
+
+/* A form strip is drawn at its natural size, so nothing in it is ever scaled:
+   the component gives the SVG the CSS width and height of its `viewBox` in px.
+   It also never shrinks, so a table row keeps its height. */
+.formStripSvg {
+  display: block;
+  flex: 0 0 auto;
+}
+
+/* The letter inside an outcome square. Its fill is derived from the square's
+   hex fallback by `inkForFill`, so it is set inline. */
+.formLetter {
+  font-weight: 700;
+}
+
+.formLetterFull {
+  font-size: 14px;
+}
+
+.formLetterCompact {
+  font-size: 12px;
+}
+
+/* The "newest" marker under the first square: 12 px, the smallest size the
+   chart text scale allows. */
+.formNewest {
+  fill: currentColor;
+  font-size: 12px;
 }
 
 .text {
@@ -36,9 +262,12 @@
   opacity: 0.68;
 }
 
-.axisText {
+/* The axis endpoints of the calibration chart. That plot is drawn at its
+   natural size, so these pixels are the pixels the reader sees and the size can
+   sit on the chart text scale. */
+.calibrationAxisText {
   fill: currentColor;
-  font-size: 9px;
+  font-size: 11px;
   opacity: 0.72;
 }
 
@@ -103,39 +332,127 @@
   font-weight: 600;
 }
 
-.probLabel {
-  fill: currentColor;
-  font-size: 10px;
+/* Probability bar: an HTML stacked bar. Every label is HTML at the type scale
+and the marks are the segments themselves, so no text sits on a coloured fill
+and nothing scales with a viewBox. */
+.probabilityChart {
+  max-width: 36rem;
+}
+
+/* The two club names: the home name on the left, the away name on the right,
+both wrapping instead of being clipped or shortened. */
+.probabilityNames {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 600;
+  line-height: 1.2;
 }
 
-.leaderLine {
-  stroke: currentColor;
-  stroke-width: 0.7;
-  opacity: 0.55;
+.probabilityName {
+  overflow-wrap: anywhere;
 }
 
-.segmentName {
-  fill: currentColor;
-  font-size: 9px;
-  font-weight: 600;
+.probabilityNameAway {
+  margin-left: auto;
+  text-align: right;
 }
 
+/* The bar: one flex item per outcome, each growing in proportion to its share
+of the total, so the widths add up to the whole track. */
+.probabilityTrack {
+  display: flex;
+  height: 2.25rem;
+  margin: 0.35rem 0 0.5rem;
+  overflow: hidden;
+  border-radius: 0.25rem;
+  background: var(--border, #d4d4d8);
+}
+
+.probabilitySegment {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+}
+
+/* The semantic side fills, shared by a bar segment and its swatch. */
+.fillHome {
+  background: var(--side-home, #0b5cad);
+}
+
+.fillDraw {
+  background: var(--side-draw, #9aa3af);
+}
+
+.fillAway {
+  background: var(--side-away, #e07b28);
+}
+
+/* The segment labels: a wrapping row under the bar, never small text on the
+coloured fill. */
+.probabilityLabels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.75rem;
+}
+
+.probabilityLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+.probabilitySwatch {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 0.125rem;
+}
+
+/* The sentence about a total that is not 100 %, printed only when the shares
+had to be normalised. */
+.probabilityTotal {
+  margin-top: 0.4rem;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+/* The end label of a line series: HTML text in the right-hand gutter, at the
+type scale, positioned by its value. A long name wraps onto a second line
+instead of running over the plot or being cut off. */
 .endLabel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  font-size: 0.75rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  transform: translateY(-50%);
+}
+
+/* The H, D and A that head the three calibration panels. */
+.calibrationPanelHeading {
   fill: currentColor;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 600;
 }
 
-.panelHeading {
+/* One model name in the calibration legend. */
+.calibrationLegendText {
   fill: currentColor;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 12px;
 }
 
-.legendText {
-  fill: currentColor;
-  font-size: 9px;
+/* The scroller of a chart drawn at a fixed pixel width: the plot keeps its
+   natural size and the container scrolls, so a wide drawing never widens the
+   page on a phone. */
+.calibrationScroller {
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .heatmapScroller {
@@ -173,16 +490,24 @@
   flex: 0 0 auto;
 }
 
+/* The column numbers above the grid. The heatmap is drawn at its natural size,
+   so this pixel size is what the reader sees. */
+.heatmapHeaderText {
+  fill: currentColor;
+  font-size: 11px;
+  opacity: 0.72;
+}
+
 .heatmapCellText {
   fill: #111827;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .heatmapZoneLabel {
   /* Without an explicit fill an SVG text node is black, which disappears on the
      dark background; currentColor follows the page text in both themes. */
   fill: currentColor;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -190,4 +515,377 @@
   fill: var(--background, #ffffff);
   stroke: currentColor;
   stroke-width: 1.5;
+}
+
+/* Dot plot: one HTML panel per metric. Every label is HTML at the type scale and
+the only drawing is the gridded overlay, so no text scales with the viewBox. */
+.dotChart {
+  --chart-label-width: 6.5rem;
+  --chart-value-width: 3rem;
+  --chart-column-gap: 0.5rem;
+}
+
+.dotPanel + .dotPanel {
+  margin-top: 1rem;
+}
+
+/* The metric name that heads a panel. */
+.panelTitle {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+/* The reference labels of a panel: two rows above the plot, so two references
+with nearly the same value never overwrite each other. */
+.referenceRow {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  column-gap: var(--chart-column-gap);
+  margin-bottom: 0.15rem;
+}
+
+.referenceTrack {
+  position: relative;
+  height: 1.9rem;
+}
+
+.referenceLabel {
+  position: absolute;
+  width: max-content;
+  max-width: 8rem;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  text-align: center;
+  transform: translateX(-50%);
+  /* A long reference name wraps inside its own box instead of being clipped. */
+  overflow-wrap: anywhere;
+}
+
+.dotRows {
+  position: relative;
+}
+
+/* One model row: the wrapping label column, the dot track and the printed
+   value. The row keeps a minimum height instead of a fixed one, so a label that
+   wraps onto a second line grows its row rather than overlapping the next. */
+.dotRow {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  align-items: center;
+  column-gap: var(--chart-column-gap);
+  min-height: 1.75rem;
+}
+
+.dotTrack {
+  position: relative;
+  height: 1rem;
+}
+
+/* The value of one model: an HTML dot at its share of the plot column. It
+   paints above the grid and reference lines of the overlay, so a line never
+   cuts through a mark. */
+.dotMark {
+  position: absolute;
+  top: 50%;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+/* The model palette as a static class map, so the colours stay tokens. */
+.dotCat1 {
+  background: var(--cat-1, #b45309);
+}
+
+.dotCat2 {
+  background: var(--cat-2, #0f766e);
+}
+
+.dotCat3 {
+  background: var(--cat-3, #cc79a7);
+}
+
+.dotCat4 {
+  background: var(--cat-4, #33608c);
+}
+
+.dotMuted {
+  background: var(--muted, #6b7280);
+}
+
+/* The line of a reference value: dashed HTML inside the plot column, at the
+   same percentage as the line the reader sees. */
+.referenceLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--muted, #6b7280);
+  transform: translateX(-0.5px);
+}
+
+/* A reference that sits outside the axis: a marker on the panel edge and its
+   label with its value spelled out, never a mark silently clamped to the end. */
+.offScaleRow {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  column-gap: var(--chart-column-gap);
+  margin-top: 0.3rem;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+}
+
+.offScaleTrack {
+  position: relative;
+}
+
+.offScaleMarkerHigh,
+.offScaleMarkerLow {
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-top: 0.28rem solid transparent;
+  border-bottom: 0.28rem solid transparent;
+  color: var(--muted, #6b7280);
+  transform: translateY(-50%);
+}
+
+.offScaleMarkerHigh {
+  right: 0;
+  border-left: 0.4rem solid currentColor;
+}
+
+.offScaleMarkerLow {
+  left: 0;
+  border-right: 0.4rem solid currentColor;
+}
+
+.offScaleNote {
+  padding: 0 0.75rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.offScaleTag {
+  margin-left: 0.25rem;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* Line chart: a fixed-height plot column, the y labels beside it and a
+   fixed-width gutter for the end labels, all HTML at the type scale. */
+.lineChart {
+  --chart-label-width: 2.25rem;
+  --chart-value-width: 7rem;
+  --chart-column-gap: 0.4rem;
+  --chart-plot-height: 13.5rem;
+  max-width: 42rem;
+}
+
+/* The unit line above the plot: the axis label and the value suffix. */
+.lineUnitRow {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  column-gap: var(--chart-column-gap);
+  margin-bottom: 0.2rem;
+}
+
+.lineUnit {
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+/* The plot row: the y-axis labels, the plot column and the end-label gutter.
+   The plot column keeps a fixed height, so the labels beside it can be placed
+   by percentage of that height. */
+.lineBody {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  column-gap: var(--chart-column-gap);
+  height: var(--chart-plot-height);
+}
+
+.lineAxis {
+  position: relative;
+  height: 100%;
+}
+
+.lineAxisTick {
+  position: absolute;
+  right: 0.3rem;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.linePlotColumn {
+  position: relative;
+  height: 100%;
+}
+
+/* One path per series inside the mark overlay. Every stroke does not scale, so
+   the marks keep their weight whatever the plot's pixel size. */
+.linePath {
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.linePathEmphasis {
+  stroke-width: 2.5;
+}
+
+/* The top-edge marker of a series that is off the axis. */
+.lineOffScaleMarker {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-right: 0.3rem solid transparent;
+  border-bottom: 0.4rem solid currentColor;
+  border-left: 0.3rem solid transparent;
+  transform: translateX(-50%);
+}
+
+.lineGutter {
+  position: relative;
+  height: 100%;
+}
+
+.lineEndSwatch {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.125rem;
+  margin-right: 0.25rem;
+  background: currentColor;
+  vertical-align: middle;
+}
+
+.lineOffScaleRow {
+  display: grid;
+  grid-template-columns:
+    var(--chart-label-width) minmax(0, 1fr)
+    var(--chart-value-width);
+  column-gap: var(--chart-column-gap);
+  margin-bottom: 0.3rem;
+}
+
+.lineOffScaleList {
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.lineOffScaleEntry {
+  overflow-wrap: anywhere;
+}
+
+.lineOffScaleEntryMarker {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.25rem;
+  border-right: 0.24rem solid transparent;
+  border-bottom: 0.32rem solid currentColor;
+  border-left: 0.24rem solid transparent;
+  vertical-align: middle;
+}
+
+/* Sparkline: a fixed-height HTML plot with an aria-hidden SVG mark overlay.
+Every label is HTML at the type scale, so no text scales with the drawing. */
+.sparkline {
+  max-width: 40rem;
+}
+
+/* The band above the plot that carries the label of the highlighted segment. */
+.sparklineHint {
+  position: relative;
+  height: 1.25rem;
+}
+
+.sparklineHintLabel {
+  position: absolute;
+  top: 0;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* The mark area: a fixed height, so the dots and the value labels can be placed
+by percentage of it. */
+.sparklinePlot {
+  position: relative;
+  height: 8.25rem;
+}
+
+/* One season: an HTML dot at its share of the plot, above the mark overlay. */
+.sparklineDot {
+  position: absolute;
+  z-index: 2;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--side-home, #0b5cad);
+  transform: translate(-50%, -50%);
+}
+
+/* The trend runs: stroked in the overlay, without scaling, so every run keeps
+its weight whatever the plot's pixel size. */
+.sparklineTrend {
+  fill: none;
+  stroke: var(--side-home, #0b5cad);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The highlighted decline: the relegation tone, the colour the rest of the app
+uses for a bad movement. */
+.sparklineDrop {
+  stroke: var(--zone-relegation, #b3261e);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+/* The first and last value, positioned beside its dot by percentage. */
+.sparklineValue {
+  position: absolute;
+  z-index: 3;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* The first and last season under the plot. */
+.sparklineSeasons {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+  color: var(--muted, #5f6368);
+  font-size: 0.75rem;
 }

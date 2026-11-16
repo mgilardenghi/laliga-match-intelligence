@@ -153,7 +153,7 @@ def test_the_trend_draws_one_sparkline_per_metric(page: Page, dashboard_url: str
     for index in range(figures.count()):
         figure = figures.nth(index)
         expect(figure.locator("figcaption")).to_have_count(1)
-        sparkline = figure.locator("svg[role='img']")
+        sparkline = figure.locator("[role='img']")
         expect(sparkline).to_have_count(1)
         expect(sparkline).to_have_accessible_name(re.compile(r"\S"))
 
@@ -211,14 +211,13 @@ def test_the_relegation_race_draws_the_survival_threshold(page: Page, dashboard_
 
     # The threshold is drawn inside the projected-points chart, so the line and
     # its label have to arrive together; a label without a line would claim a
-    # comparison the picture does not make.
-    threshold = race.locator("svg").filter(has_text=THRESHOLD_LABEL)
-    expect(threshold).to_have_count(1)
-    expect(threshold.locator("text", has_text=THRESHOLD_LABEL)).to_have_count(1)
-
+    # comparison the picture does not make. The label is drawn as HTML above the
+    # plot and the line is a mark of the drawing, so each is found where it sits.
     projected = _figure(race, PROJECTED_CAPTION)
     expect(projected).to_have_count(1)
-    expect(projected.locator("svg[role='img']")).to_have_count(1)
+    expect(projected.get_by_text(THRESHOLD_LABEL, exact=True).first).to_be_visible()
+    expect(projected.locator("[data-chart-threshold]")).to_have_count(1)
+    expect(projected.locator("[role='img']")).to_have_count(1)
 
     rivals = race.get_by_role("table", name=RIVALS_CAPTION)
     expect(rivals).to_have_count(1)
@@ -351,7 +350,7 @@ def test_the_season_diagnosis_renders_its_charts_and_tables(page: Page, dashboar
     for caption in (CUMULATIVE_CAPTION, ROLLING_CAPTION):
         figure = _figure(points, caption)
         expect(figure).to_have_count(1)
-        expect(figure.locator('svg[role="img"]')).to_have_count(1)
+        expect(figure.locator('[role="img"]')).to_have_count(1)
 
     cumulative_text = _figure(points, CUMULATIVE_CAPTION).inner_text()
     assert ABOVE_THE_LINE in cumulative_text, "the cumulative chart lacks its reading aid"

@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from "react";
 import { ChartFigure } from "./ChartFigure";
 import { chartIds } from "./chart-ids";
 import { formatPoints } from "./format";
-import { linearScale, niceMax } from "./scale";
+import { fittedDomain, linearScale } from "./scale";
 import styles from "./charts.module.css";
 
 export type IntervalBarRow = {
@@ -29,12 +29,18 @@ const DEFAULT_TITLE = "Projected final points";
 const DEFAULT_DESCRIPTION =
   "Projected final points per team: the thin bar spans the 5th to 95th percentile, the thick bar the interquartile range, the tick marks the median and the diamond marks current points.";
 
-const WIDTH = 480;
-const PLOT_LEFT = 104;
-const PLOT_RIGHT = 468;
-const TOP = 26;
-const ROW_HEIGHT = 26;
-const BOTTOM = 24;
+const TICK_COUNT = 5;
+// The mark overlay uses percent horizontally and one hundred units per row
+// vertically, so its coordinates are independent of the rendered pixel size.
+const PLOT_UNITS = 100;
+const MEDIAN_HALF_UNITS = 32;
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, value));
+}
 
 export function IntervalBars(props: IntervalBarsProps): ReactElement {
   const {
@@ -48,17 +54,26 @@ export function IntervalBars(props: IntervalBarsProps): ReactElement {
   } = props;
   const ids = chartIds(id ?? title);
 
-  const height = TOP + Math.max(1, rows.length) * ROW_HEIGHT + BOTTOM;
-  const maximum = rows.reduce((max, row) => {
-    const lowest = Math.min(row.p05, row.current);
-    const highest = Math.max(row.p95, row.current, row.p50, row.p75);
-    return Math.max(max, highest, -lowest, threshold ?? 0);
-  }, 0);
-  const scale = linearScale([0, niceMax(maximum)], [PLOT_LEFT, PLOT_RIGHT]);
-  const ticks = scale.ticks(5);
+  // The axis fits the data, including the threshold when one is drawn, so the
+  // last tick is the axis end and the end is never further than one step from
+  // the largest value.
+  const values: number[] = [];
+  for (const row of rows) {
+    values.push(row.p05, row.p25, row.p50, row.p75, row.p95, row.current);
+  }
+  if (threshold !== undefined) {
+    values.push(threshold);
+  }
+  const { domain, ticks } = fittedDomain(values, TICK_COUNT);
+  const axis = linearScale(domain, [0, 100]);
+  const position = (value: number): number => clampPercent(axis.scale(value));
+
+  const rowCount = Math.max(1, rows.length);
+  const plotHeight = rowCount * PLOT_UNITS;
 
   return (
     <ChartFigure
+      ids={ids}
       title={title}
       description={description}
       table={{
@@ -76,107 +91,123 @@ export function IntervalBars(props: IntervalBarsProps): ReactElement {
       }}
       note={note}
     >
-      <svg
-        role="img"
-        aria-labelledby={ids.labelledBy}
-        viewBox={`0 0 ${WIDTH} ${height}`}
-        className={styles.svg}
-        preserveAspectRatio="xMidYMid meet"
-      >
-        <title id={ids.titleId}>{title}</title>
-        <desc id={ids.descId}>{description}</desc>
-        {ticks.map((tick) => {
-          const x = scale.scale(tick);
-          return (
-            <g key={`tick-${tick}`}>
-              <line x1={x} y1={TOP - 8} x2={x} y2={height - BOTTOM + 4} className={styles.gridLine} />
-              <text x={x} y={height - 8} textAnchor="middle" className={styles.axisText}>
-                {formatPoints(tick)}
-              </text>
-            </g>
-          );
-        })}
-        <line
-          x1={PLOT_LEFT}
-          y1={height - BOTTOM + 4}
-          x2={PLOT_RIGHT}
-          y2={height - BOTTOM + 4}
-          className={styles.axisLine}
-        />
-        {rows.map((row, index) => {
-          const centreY = TOP + index * ROW_HEIGHT + ROW_HEIGHT / 2;
-          const p05 = scale.scale(Math.min(row.p05, row.p95));
-          const p95 = scale.scale(Math.max(row.p05, row.p95));
-          const p25 = scale.scale(Math.min(row.p25, row.p75));
-          const p75 = scale.scale(Math.max(row.p25, row.p75));
-          const median = scale.scale(row.p50);
-          const current = scale.scale(row.current);
-          return (
-            <g key={row.team}>
-              <text
-                x={PLOT_LEFT - 8}
-                y={centreY}
-                textAnchor="end"
-                dominantBaseline="central"
-                className={styles.segmentName}
-              >
-                {row.team}
-              </text>
-              <rect
-                x={p05}
-                y={centreY - 3}
-                width={Math.max(0, p95 - p05)}
-                height={6}
-                rx={3}
-                style={{ fill: "var(--muted, #6b7280)" }}
-              />
-              <rect
-                x={p25}
-                y={centreY - 7}
-                width={Math.max(0, p75 - p25)}
-                height={14}
-                rx={3}
-                style={{ fill: "var(--accent, #0072b2)", opacity: 0.9 }}
-              />
-              <line
-                x1={median}
-                y1={centreY - 9}
-                x2={median}
-                y2={centreY + 9}
-                style={{ stroke: "currentColor", strokeWidth: 2 }}
-              />
-              <polygon
-                points={`${current},${centreY - 5} ${current + 5},${centreY} ${current},${centreY + 5} ${current - 5},${centreY}`}
-                className={styles.currentMarker}
-              />
-            </g>
-          );
-        })}
+      <div className={`${styles.plot} ${styles.intervalChart}`}>
         {threshold !== undefined ? (
-          <g>
-            <line
-              x1={scale.scale(threshold)}
-              y1={TOP - 12}
-              x2={scale.scale(threshold)}
-              y2={height - BOTTOM + 4}
-              style={{
-                stroke: "var(--zone-relegation, #d55e00)",
-                strokeWidth: 1,
-                strokeDasharray: "4 3",
-              }}
-            />
-            <text
-              x={scale.scale(threshold) + (scale.scale(threshold) > PLOT_RIGHT - 90 ? -4 : 4)}
-              y={12}
-              textAnchor={scale.scale(threshold) > PLOT_RIGHT - 90 ? "end" : "start"}
-              className={styles.axisText}
-              style={{ fill: "currentColor", opacity: 1 }}
-            >
-              {thresholdLabel}
-            </text>
-          </g>
+          <div className={styles.thresholdRow}>
+            <span aria-hidden="true" />
+            <div className={styles.thresholdTrack}>
+              <span
+                className={styles.thresholdLabel}
+                style={{ left: `${position(threshold)}%` }}
+              >
+                {thresholdLabel}
+              </span>
+            </div>
+            <span aria-hidden="true" />
+          </div>
         ) : null}
-      </svg>
+        <div className={styles.rows}>
+          {rows.map((row) => {
+            const low = position(Math.min(row.p05, row.p95));
+            const high = position(Math.max(row.p05, row.p95));
+            const lowerQuartile = position(Math.min(row.p25, row.p75));
+            const upperQuartile = position(Math.max(row.p25, row.p75));
+            return (
+              <div key={row.team} className={styles.row}>
+                <span className={styles.chartLabel}>{row.team}</span>
+                <div className={styles.barTrack}>
+                  <span
+                    className={styles.barRange}
+                    style={{ left: `${low}%`, width: `${Math.max(0, high - low)}%` }}
+                  />
+                  <span
+                    className={styles.barMiddle}
+                    style={{
+                      left: `${lowerQuartile}%`,
+                      width: `${Math.max(0, upperQuartile - lowerQuartile)}%`,
+                    }}
+                  />
+                  <span
+                    className={styles.barCurrent}
+                    style={{ left: `${position(row.current)}%` }}
+                  />
+                </div>
+                <span className={styles.chartValue}>{formatPoints(row.p50)}</span>
+              </div>
+            );
+          })}
+          <div className={styles.plotLayer}>
+            <svg
+              role="img"
+              aria-labelledby={ids.labelledBy}
+              viewBox={`0 0 ${PLOT_UNITS} ${plotHeight}`}
+              preserveAspectRatio="none"
+              className={styles.plotOverlay}
+            >
+              {ticks.map((tick) => (
+                <line
+                  key={`grid-${tick}`}
+                  x1={position(tick)}
+                  x2={position(tick)}
+                  y1={0}
+                  y2={plotHeight}
+                  className={styles.plotGridLine}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              <line
+                x1={0}
+                x2={PLOT_UNITS}
+                y1={plotHeight}
+                y2={plotHeight}
+                className={styles.plotAxisLine}
+                vectorEffect="non-scaling-stroke"
+              />
+              {rows.map((row, index) => {
+                const centre = index * PLOT_UNITS + PLOT_UNITS / 2;
+                return (
+                  <line
+                    key={`median-${row.team}`}
+                    x1={position(row.p50)}
+                    x2={position(row.p50)}
+                    y1={centre - MEDIAN_HALF_UNITS}
+                    y2={centre + MEDIAN_HALF_UNITS}
+                    className={styles.medianTick}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              })}
+              {threshold !== undefined ? (
+                <line
+                  data-chart-threshold=""
+                  x1={position(threshold)}
+                  x2={position(threshold)}
+                  y1={0}
+                  y2={plotHeight}
+                  className={styles.thresholdLine}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null}
+            </svg>
+          </div>
+        </div>
+        <div className={styles.tickRow}>
+          <span aria-hidden="true" />
+          <div className={styles.tickTrack}>
+            {ticks.map((tick) => (
+              <span
+                key={`label-${tick}`}
+                data-chart-tick={tick}
+                className={styles.tickLabel}
+                style={{ left: `${position(tick)}%` }}
+              >
+                {formatPoints(tick)}
+              </span>
+            ))}
+          </div>
+          <span aria-hidden="true" />
+        </div>
+      </div>
     </ChartFigure>
   );
 }

@@ -60,17 +60,24 @@ const TITLE = "Per-match averages of the club and of its opponents";
 const DESCRIPTION =
   "One row per metric. The bar to the right is the club's own per-match average, the bar to the left the average of the clubs it faced, and the tick marks the league average. A metric the season did not record has no bar.";
 
-const WIDTH = 480;
+// The drawing is rendered at its natural size: the element is given the pixel
+// width and height of its own `viewBox`, so the rendered scale is exactly 1 and
+// every label keeps the pixel size the stylesheet declares. The scroller around
+// it takes the width a phone cannot fit, so the drawing never widens the page.
+const WIDTH = 520;
 // The metric labels sit left of the plot and are right-aligned against it, so
-// the longest one decides where the plot starts.
-const LABEL_EDGE = 108;
-const PLOT_LEFT = 112;
-const PLOT_RIGHT = 468;
+// the longest one decides where the plot starts: 12 px of "Shots on target"
+// needs about 100 px, and the gutter adds the gap to the plot on top of that.
+const LABEL_EDGE = 128;
+const PLOT_LEFT = 136;
+const PLOT_RIGHT = 508;
 // The zero line is placed so both sides of the plot have the same width; a
 // short right side would make the same average look larger than its mirror.
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const TOP = 34;
-const ROW_HEIGHT = 26;
+// A row is tall enough to hold a 12 px metric label without touching the row
+// above or below it.
+const ROW_HEIGHT = 28;
 const BAR_HEIGHT = 12;
 const TICK_HEIGHT = 8;
 const BOTTOM = 22;
@@ -104,115 +111,118 @@ export function ProfileBars(props: ProfileBarsProps): ReactElement {
   );
 
   return (
-    <svg
-      role="img"
-      aria-labelledby={ids.labelledBy}
-      viewBox={`0 0 ${WIDTH} ${height}`}
-      className={styles.svg}
-      preserveAspectRatio="xMidYMid meet"
-    >
-      <title id={ids.titleId}>{TITLE}</title>
-      <desc id={ids.descId}>{DESCRIPTION}</desc>
-      <text
-        x={(PLOT_LEFT + CENTRE) / 2}
-        y={16}
-        textAnchor="middle"
-        className={styles.axisText}
+    <div className={styles.chartScroller}>
+      <svg
+        role="img"
+        aria-labelledby={ids.labelledBy}
+        viewBox={`0 0 ${WIDTH} ${height}`}
+        className={styles.svg}
+        style={{ width: `${WIDTH}px`, height: `${height}px` }}
+        preserveAspectRatio="xMidYMid meet"
       >
-        Against
-      </text>
-      <text
-        x={(CENTRE + PLOT_RIGHT) / 2}
-        y={16}
-        textAnchor="middle"
-        className={styles.axisText}
-      >
-        For
-      </text>
-      <line
-        x1={CENTRE}
-        y1={TOP - 6}
-        x2={CENTRE}
-        y2={TOP + PROFILE_METRICS.length * ROW_HEIGHT + 4}
-        className={styles.axisLine}
-      />
-      {PROFILE_METRICS.map((metric, index) => {
-        const centreY = TOP + index * ROW_HEIGHT + ROW_HEIGHT / 2;
-        const forValue = forLine[metric.key];
-        const againstValue = againstLine[metric.key];
-        const leagueValue = leagueLine[metric.key];
-        return (
-          <g key={metric.key}>
-            <text
-              x={LABEL_EDGE - 6}
-              y={centreY}
-              textAnchor="end"
-              dominantBaseline="central"
-              className={styles.metricLabel}
-            >
-              {metric.label}
-            </text>
-            {forValue === null ? null : (
-              <rect
-                x={CENTRE}
-                y={centreY - BAR_HEIGHT / 2}
-                width={Math.max(0, scale.scale(forValue) - CENTRE)}
-                height={BAR_HEIGHT}
-                className={styles.forBar}
-              />
-            )}
-            {againstValue === null ? null : (
-              <rect
-                x={Math.min(mirror(scale.scale(againstValue)), CENTRE)}
-                y={centreY - BAR_HEIGHT / 2}
-                width={Math.max(0, CENTRE - mirror(scale.scale(againstValue)))}
-                height={BAR_HEIGHT}
-                className={styles.againstBar}
-              />
-            )}
-            {leagueValue === null ? null : (
-              <g className={styles.leagueTick}>
-                <line
-                  x1={scale.scale(leagueValue)}
-                  y1={centreY - TICK_HEIGHT}
-                  x2={scale.scale(leagueValue)}
-                  y2={centreY + TICK_HEIGHT}
+        <title id={ids.titleId}>{TITLE}</title>
+        <desc id={ids.descId}>{DESCRIPTION}</desc>
+        <text
+          x={(PLOT_LEFT + CENTRE) / 2}
+          y={16}
+          textAnchor="middle"
+          className={styles.axisText}
+        >
+          Against
+        </text>
+        <text
+          x={(CENTRE + PLOT_RIGHT) / 2}
+          y={16}
+          textAnchor="middle"
+          className={styles.axisText}
+        >
+          For
+        </text>
+        <line
+          x1={CENTRE}
+          y1={TOP - 6}
+          x2={CENTRE}
+          y2={TOP + PROFILE_METRICS.length * ROW_HEIGHT + 4}
+          className={styles.axisLine}
+        />
+        {PROFILE_METRICS.map((metric, index) => {
+          const centreY = TOP + index * ROW_HEIGHT + ROW_HEIGHT / 2;
+          const forValue = forLine[metric.key];
+          const againstValue = againstLine[metric.key];
+          const leagueValue = leagueLine[metric.key];
+          return (
+            <g key={metric.key}>
+              <text
+                x={LABEL_EDGE - 6}
+                y={centreY}
+                textAnchor="end"
+                dominantBaseline="central"
+                className={styles.metricLabel}
+              >
+                {metric.label}
+              </text>
+              {forValue === null ? null : (
+                <rect
+                  x={CENTRE}
+                  y={centreY - BAR_HEIGHT / 2}
+                  width={Math.max(0, scale.scale(forValue) - CENTRE)}
+                  height={BAR_HEIGHT}
+                  className={styles.forBar}
                 />
-                <line
-                  x1={mirror(scale.scale(leagueValue))}
-                  y1={centreY - TICK_HEIGHT}
-                  x2={mirror(scale.scale(leagueValue))}
-                  y2={centreY + TICK_HEIGHT}
+              )}
+              {againstValue === null ? null : (
+                <rect
+                  x={Math.min(mirror(scale.scale(againstValue)), CENTRE)}
+                  y={centreY - BAR_HEIGHT / 2}
+                  width={Math.max(0, CENTRE - mirror(scale.scale(againstValue)))}
+                  height={BAR_HEIGHT}
+                  className={styles.againstBar}
                 />
-              </g>
-            )}
-          </g>
-        );
-      })}
-      <text
-        x={CENTRE}
-        y={height - 6}
-        textAnchor="middle"
-        className={styles.axisText}
-      >
-        0
-      </text>
-      <text
-        x={PLOT_LEFT}
-        y={height - 6}
-        textAnchor="start"
-        className={styles.axisText}
-      >
-        higher
-      </text>
-      <text
-        x={PLOT_RIGHT}
-        y={height - 6}
-        textAnchor="end"
-        className={styles.axisText}
-      >
-        higher
-      </text>
-    </svg>
+              )}
+              {leagueValue === null ? null : (
+                <g className={styles.leagueTick}>
+                  <line
+                    x1={scale.scale(leagueValue)}
+                    y1={centreY - TICK_HEIGHT}
+                    x2={scale.scale(leagueValue)}
+                    y2={centreY + TICK_HEIGHT}
+                  />
+                  <line
+                    x1={mirror(scale.scale(leagueValue))}
+                    y1={centreY - TICK_HEIGHT}
+                    x2={mirror(scale.scale(leagueValue))}
+                    y2={centreY + TICK_HEIGHT}
+                  />
+                </g>
+              )}
+            </g>
+          );
+        })}
+        <text
+          x={CENTRE}
+          y={height - 6}
+          textAnchor="middle"
+          className={styles.axisText}
+        >
+          0
+        </text>
+        <text
+          x={PLOT_LEFT}
+          y={height - 6}
+          textAnchor="start"
+          className={styles.axisText}
+        >
+          higher
+        </text>
+        <text
+          x={PLOT_RIGHT}
+          y={height - 6}
+          textAnchor="end"
+          className={styles.axisText}
+        >
+          higher
+        </text>
+      </svg>
+    </div>
   );
 }
