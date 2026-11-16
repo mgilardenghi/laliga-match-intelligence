@@ -11,7 +11,9 @@ what the model must expose, not how it computes it.
 
 import dataclasses
 import datetime
+import logging
 from collections.abc import Sequence
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -20,8 +22,10 @@ from lmi_core.modeling import elo as elo_module
 from lmi_core.modeling.elo import (
     EloModel,
     LogitParams,
+    ModelFitError,
     RatingStep,
     expected_score,
+    fit_params,
     newcomer_value,
     outcome_probabilities,
 )
@@ -382,3 +386,107 @@ def test_describe_reports_the_fixed_hyperparameters() -> None:
             "newcomer_sample": 3,
         },
     }
+
+
+def _patch_minimize(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    x: NDArray[np.float64],
+    success: bool = True,
+    status: int = 2,
+    message: str = "ABNORMAL_TERMINATION_IN_LNSRCH",
+) -> None:
+    """Replace the module's ``minimize`` with a stand that returns ``x`` and this status."""
+    solved = SimpleNamespace(x=x, success=success, status=status, message=message)
+
+    def fake_minimize(*args: object, **kwargs: object) -> SimpleNamespace:
+        return solved
+
+    monkeypatch.setattr(elo_module, "minimize", fake_minimize)
+
+
+def _fit_two_matches() -> LogitParams:
+    """Fit the two-match example the patched optimizer answers for."""
+    return fit_params(
+        np.array([0.15, -0.3], dtype=np.float64),
+        np.array([0, 2], dtype=np.int8),
+    )
+
+
+def test_a_non_finite_solution_is_a_fit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_minimize(monkeypatch, x=np.array([0.25, np.nan, 0.15], dtype=np.float64))
+
+    with pytest.raises(ModelFitError) as failure:
+        _fit_two_matches()
+
+    message = str(failure.value)
+    assert message.startswith("elo: ")
+    assert "ABNORMAL_TERMINATION_IN_LNSRCH" in message
+
+
+def test_a_solution_of_the_wrong_length_is_a_fit_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_minimize(monkeypatch, x=np.array([0.25, 0.15], dtype=np.float64))
+
+    with pytest.raises(ModelFitError) as failure:
+        _fit_two_matches()
+
+    assert str(failure.value).startswith("elo: ")
+
+
+def test_a_log_b_that_overflows_the_logit_is_a_fit_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_minimize(monkeypatch, x=np.array([1000.0, -0.8, 0.64], dtype=np.float64))
+
+    with pytest.raises(ModelFitError) as failure:
+        _fit_two_matches()
+
+    assert str(failure.value).startswith("elo: ")
+
+
+def test_a_non_success_status_with_finite_parameters_is_used_with_one_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    solution = np.array([0.25, -0.6, 0.15], dtype=np.float64)
+    _patch_minimize(monkeypatch, x=solution, success=False)
+
+    with caplog.at_level(logging.WARNING, logger="lmi_core.modeling.elo"):
+        params = _fit_two_matches()
+
+    assert params == LogitParams(log_b=0.25, c1=-0.6, log_gap=0.15)
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].getMessage().startswith("elo: ")
+    assert "ABNORMAL_TERMINATION_IN_LNSRCH" in warnings[0].getMessage()
+
+
+def test_a_normal_fit_logs_no_warning(caplog: pytest.LogCaptureFixture) -> None:
+    data = make_synthetic_league(n_teams=4, n_seasons=2)
+    cutoff = middle_cutoff(data)
+
+    with caplog.at_level(logging.WARNING):
+        EloModel(seed=SEED).fit(history_before(data, cutoff), cutoff)
+
+    assert [record for record in caplog.records if record.levelno >= logging.WARNING] == []
+
+
+def test_no_gaps_returns_the_fixed_start_without_an_optimizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def never_called(*args: object, **kwargs: object) -> SimpleNamespace:
+        raise AssertionError("a fit without gaps must not call the optimizer")
+
+    monkeypatch.setattr(elo_module, "minimize", never_called)
+
+    params = fit_params(np.empty(0, dtype=np.float64), np.empty(0, dtype=np.int8))
+
+    assert (params.log_b, params.c1) == (0.0, -0.8)
+    assert params.b == pytest.approx(1.0, rel=0.0, abs=1e-12)
+    assert params.c2 == pytest.approx(1.1, rel=0.0, abs=1e-12)
+
+
+def test_expected_score_saturates_instead_of_overflowing() -> None:
+    with np.errstate(over="raise"):
+        scores = expected_score(np.array([1e5, -1e5], dtype=np.float64))
+
+    np.testing.assert_array_equal(scores, np.array([1.0, 0.0], dtype=np.float64))

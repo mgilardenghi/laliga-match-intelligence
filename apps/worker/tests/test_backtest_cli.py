@@ -389,6 +389,37 @@ def test_a_failure_after_the_run_starts_marks_it_failed(
     assert "gone" in str(failed[0]["error"])
 
 
+def test_an_interruption_after_the_run_starts_marks_it_failed_then_re_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    data = _synthetic_history([(1, 2007), (2, 2008)])
+    _install_stands(monkeypatch, data=data, season_rows=[(1, "2007-08"), (2, "2008-09")])
+    failed: list[dict[str, object]] = []
+
+    def interrupted_season_codes(session: object) -> dict[int, str]:
+        raise KeyboardInterrupt
+
+    def fail(other: object, run_id: UUID, *, error: str) -> None:
+        failed.append({"run_id": run_id, "error": error})
+
+    # A Ctrl-C is not an Exception, so the ordinary guard would skip it and the
+    # committed run would stay running for ever. The interrupt is recorded and
+    # then re-raised: no exit code and no line, the traceback is the report.
+    monkeypatch.setattr(backtest, "_season_codes", interrupted_season_codes)
+    monkeypatch.setattr(backtest, "fail_run", fail)
+
+    argv = ["backtest", "--models", ",".join(_METRIC_MODELS), "--step-days", "7"]
+    with pytest.raises(KeyboardInterrupt):
+        run_backtest_command(build_parser().parse_args(argv))
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert [entry["run_id"] for entry in failed] == [UUID(int=1)]
+    assert "KeyboardInterrupt" in str(failed[0]["error"])
+
+
 def test_json_output_is_the_only_thing_on_stdout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
