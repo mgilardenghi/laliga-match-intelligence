@@ -15,26 +15,54 @@ function positiveInteger(value: string): number | null {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/** The origin every submitted path is resolved against; it is never visited. */
+const BASE_ORIGIN = "http://dashboard.invalid";
+
 /**
  * The local path to return to, or `null` when the submitted value is not one.
  *
- * A leading-slash test is not enough: browsers normalise `\` to `/` in the
- * authority position, so `/[backslash]evil.example` and `//evil.example` both
- * leave the dashboard even though only one of them starts with `//`. The value is
- * therefore resolved against a fixed origin and kept only when the resolved
- * origin is that same origin, which checks the URL the browser will follow
- * rather than the string it was built from.
+ * A leading-slash test is not a same-origin test. Browsers normalise `\` to `/`
+ * in the authority position, so `/\evil.example` leaves the dashboard; and a
+ * `Location` that begins `//` is read as a network-path reference, so
+ * `//dashboard.invalid//evil.example` resolves to this origin and still ends up
+ * at `//evil.example`. The value is therefore resolved against a fixed origin,
+ * the resolved origin must be that same origin, and the string that is finally
+ * handed to `redirect()` is resolved once more — the browser parses it again, so
+ * the check has to hold for what the browser will read, not for the input.
+ *
+ * A value that cannot be parsed at all (`//[`) is not a local path either, and
+ * falls back like any other rejected value instead of failing the action.
  */
 function localPath(value: string): string | null {
   if (!value.startsWith("/")) {
     return null;
   }
-  const origin = "http://dashboard.invalid";
-  const url = new URL(value, origin);
-  if (url.origin !== origin) {
+
+  let submitted: URL;
+  try {
+    submitted = new URL(value, BASE_ORIGIN);
+  } catch {
     return null;
   }
-  return `${url.pathname}${url.search}`;
+  if (submitted.origin !== BASE_ORIGIN) {
+    return null;
+  }
+
+  const path = `${submitted.pathname}${submitted.search}`;
+  // The pathname of a same-origin URL can still start with `//`, which is exactly
+  // the shape the browser reads as another host.
+  if (!path.startsWith("/") || path.startsWith("//")) {
+    return null;
+  }
+
+  try {
+    if (new URL(path, BASE_ORIGIN).origin !== BASE_ORIGIN) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return path;
 }
 
 /**
