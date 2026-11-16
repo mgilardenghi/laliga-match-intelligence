@@ -31,6 +31,14 @@ pre-closing price reader lives here as well: one statement selects the most
 trusted pre-closing ``1x2`` price of each requested match, and the season
 statistics and the season's relegation view cannot price a match differently.
 
+The team history and the relegation race read the same stored seasons, so their
+readers live here too: the seasons one club played or every stored season, the
+matches of a set of seasons in one statement, the names of those clubs, and the
+table a season's rows rank to. The unfiltered season read serves the relegation
+threshold, the club-filtered one the team history, and both routes build their
+tables from the same :func:`season_table`, so no route ranks a season
+differently.
+
 The simulation history reads one point per as-of date of a season, from the
 latest succeeded run of each date. It lives here because the history endpoint
 and the relegation view serve the same series: one reader decides which run
@@ -41,7 +49,7 @@ import datetime
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Literal, cast
+from typing import Any, Final, Literal, NamedTuple, cast
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -55,7 +63,14 @@ from lmi_core.db.models import Team as TeamModel
 from lmi_core.live.data import ODDS_PRIORITY
 from lmi_core.live.schemas import EvaluatedPrediction, PredictionRow
 from lmi_core.modeling.registry import MODEL_NAMES
-from lmi_core.standings import MatchResult
+from lmi_core.standings import (
+    MatchResult,
+    Result,
+    StandingRow,
+    compute_standings,
+    outcome,
+    points_for,
+)
 from sqlalchemy import ColumnElement, and_, case, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
@@ -84,9 +99,6 @@ _MODEL_ORDER: Final[Mapping[str, int]] = {name: index for index, name in enumera
 
 _RETIRED: Final[frozenset[str]] = frozenset({"superseded", "late"})
 """The outcomes that can never stand for their group: a newer row or the date replaced them."""
-
-_POINTS: Final[Mapping[StandingForm, int]] = {"W": 3, "D": 1, "L": 0}
-"""The points a result earns: three for a win, one for a draw, none for a loss."""
 
 _Side = Literal["home", "away"]
 """The two venues a split record is kept for."""
@@ -482,6 +494,230 @@ def load_season_standings(
     return teams, results
 
 
+class SeasonRow(NamedTuple):
+    """One stored season, the row the history and the race both read.
+
+    The team history selects the seasons one club played and the relegation race
+    every stored season, but both read the same three columns through
+    :func:`load_seasons`, so the shape is shared rather than copied per route.
+    The identifier selects the season, and the code and the start year are what
+    the payloads and the core rules print and order.
+    """
+
+    id: int
+    code: str
+    start_year: int
+
+
+class MatchRow(NamedTuple):
+    """One match of a selected season, before either side is chosen.
+
+    The goals stay optional here, because only a played row carries them, and
+    the status is carried instead of a filtered read: two rules need different
+    subsets of the same rows, and one statement serves both. The team history
+    counts the played ones and the relegation race also serves the ``scheduled``
+    ones as the fixtures still to play.
+
+    ``played`` states the rule the database enforces with the ``played_complete``
+    check constraint: a played row always carries both goal columns.
+    """
+
+    id: int
+    season_id: int
+    home_team_id: int
+    away_team_id: int
+    home_goals: int | None
+    away_goals: int | None
+    kickoff_date: datetime.date
+    status: str
+
+    @property
+    def played(self) -> bool:
+        """Return whether the row is a result a table may count.
+
+        The goal checks state the rule the ``played_complete`` check constraint
+        already enforces, so a status that drifted cannot make a reader count an
+        incomplete result.
+        """
+        return (
+            self.status == "played" and self.home_goals is not None and self.away_goals is not None
+        )
+
+
+def load_seasons(session: Session, *, team_id: int | None = None) -> list[SeasonRow]:
+    """Return the selected stored seasons in one statement, oldest first.
+
+    ``team_id`` selects the seasons one club has played: a season qualifies only
+    through a ``played`` match of the club with both goal columns set, which the
+    ``played_complete`` check constraint already guarantees, and ``DISTINCT``
+    collapses the club's matches of one season into its single season row. The
+    club filter serves the team history, where a season the club only has
+    fixtures in never reaches the payload.
+
+    Without ``team_id`` every stored season is read and no join is issued. That
+    unfiltered read serves the relegation threshold, which samples the whole
+    stored history: whether a season counts is the core rule's decision over the
+    size, the start year and the result count of each row, and a filter written
+    here would be a second copy of it.
+
+    The order is ``(start_year, code)`` in both cases, so the tables and the
+    season lines are built in one fixed sequence.
+
+    Args:
+        session: a session bound to the application database.
+        team_id: restrict the read to the seasons this club played at least one
+            match in; ``None`` reads every stored season.
+
+    Returns:
+        One :class:`SeasonRow` per selected season, in the order above.
+    """
+    statement = select(SeasonModel.id, SeasonModel.code, SeasonModel.start_year)
+    if team_id is not None:
+        statement = (
+            statement.join(MatchModel, MatchModel.season_id == SeasonModel.id)
+            .where(
+                MatchModel.status == "played",
+                MatchModel.home_goals.is_not(None),
+                MatchModel.away_goals.is_not(None),
+                or_(MatchModel.home_team_id == team_id, MatchModel.away_team_id == team_id),
+            )
+            .distinct()
+        )
+    statement = statement.order_by(SeasonModel.start_year, SeasonModel.code)
+    return [
+        SeasonRow(id=int(season_id), code=str(code), start_year=int(start_year))
+        for season_id, code, start_year in session.execute(statement).all()
+    ]
+
+
+def load_season_matches(session: Session, *, season_ids: Sequence[int]) -> list[MatchRow]:
+    """Return every match of the selected seasons in one statement.
+
+    One statement serves every season, never one per season. Every status is
+    read, because two rules need different subsets of the same rows: a table's
+    team set is every club that appears as a side of any match, including a club
+    whose only fixture is scheduled, while the fixtures still to play are the
+    ``scheduled`` rows. The goals stay optional, since only a played row carries
+    them, and the caller reads ``played`` before counting a result.
+
+    The order is ``(season, kickoff date, identifier)``, so a season's rows
+    arrive in one fixed sequence and the remaining fixtures already come in the
+    order the payload serves them.
+
+    Args:
+        session: a session bound to the application database.
+        season_ids: the seasons whose matches are read.
+
+    Returns:
+        One :class:`MatchRow` per stored match of those seasons, in the order
+        above. A season without a match contributes no row.
+    """
+    statement = (
+        select(
+            MatchModel.id,
+            MatchModel.season_id,
+            MatchModel.home_team_id,
+            MatchModel.away_team_id,
+            MatchModel.home_goals,
+            MatchModel.away_goals,
+            MatchModel.kickoff_date,
+            MatchModel.status,
+        )
+        .where(MatchModel.season_id.in_(season_ids))
+        .order_by(MatchModel.season_id, MatchModel.kickoff_date, MatchModel.id)
+    )
+    return [
+        MatchRow(
+            id=int(match_id),
+            season_id=int(season_id),
+            home_team_id=int(home_team_id),
+            away_team_id=int(away_team_id),
+            home_goals=None if home_goals is None else int(home_goals),
+            away_goals=None if away_goals is None else int(away_goals),
+            kickoff_date=kickoff_date,
+            status=str(status),
+        )
+        for (
+            match_id,
+            season_id,
+            home_team_id,
+            away_team_id,
+            home_goals,
+            away_goals,
+            kickoff_date,
+            status,
+        ) in session.execute(statement).all()
+    ]
+
+
+def load_team_names(session: Session, *, team_ids: Sequence[int]) -> dict[int, str]:
+    """Return the names of the requested clubs in one statement.
+
+    The ranking's final tie-break compares names, so no table can be built
+    without them, and both the history and the race read the names of every club
+    of the seasons they read.
+
+    Args:
+        session: a session bound to the application database.
+        team_ids: the clubs to name. An empty sequence returns an empty mapping
+            without issuing a statement, which is the state of a database
+            without a stored match.
+
+    Returns:
+        The ``team id -> name`` mapping of the requested clubs. An identifier
+        that names no stored club is simply absent.
+    """
+    if not team_ids:
+        return {}
+    statement = select(TeamModel.id, TeamModel.name).where(TeamModel.id.in_(team_ids))
+    return {int(stored_id): str(name) for stored_id, name in session.execute(statement).all()}
+
+
+def season_table(rows: Sequence[MatchRow], *, names: Mapping[int, str]) -> list[StandingRow]:
+    """Return the table of one season, ranked from rows a caller already read.
+
+    The team set is every club that appears as a side of any of ``rows``,
+    whatever the status of that match, so a club whose only fixture is still
+    scheduled keeps a row of zeros. The counted results are the rows ``played``
+    marks, which the ``played_complete`` check constraint guarantees carry both
+    goals.
+
+    Nothing is ranked here. The only ranking is
+    :func:`lmi_core.standings.compute_standings`, which this function invokes
+    with those two inputs: the same call the standings endpoint makes. The team
+    history and the relegation race build their tables through it, so no route
+    can rank a season differently. No statement is issued, because the caller
+    already read ``rows`` and ``names``.
+
+    Args:
+        rows: every match of one season, whatever its status.
+        names: the ``team id -> name`` mapping of the season's clubs, normally
+            from :func:`load_team_names`.
+
+    Returns:
+        The ranked table in the core function's order. A season without a match
+        returns an empty list.
+
+    Raises:
+        KeyError: a side of ``rows`` is absent from ``names``, which means the
+            two reads covered different clubs.
+    """
+    teams = {row.home_team_id: names[row.home_team_id] for row in rows}
+    teams.update({row.away_team_id: names[row.away_team_id] for row in rows})
+    results = [
+        MatchResult(
+            home_team_id=row.home_team_id,
+            away_team_id=row.away_team_id,
+            home_goals=cast(int, row.home_goals),
+            away_goals=cast(int, row.away_goals),
+            kickoff_date=row.kickoff_date,
+        )
+        for row in rows
+        if row.played
+    ]
+    return compute_standings(teams, results)
+
+
 def load_pre_closing_prices(
     session: Session, *, match_ids: Sequence[int]
 ) -> dict[int, tuple[float, float, float]]:
@@ -684,13 +920,14 @@ def form_summary(team: Team, played: Sequence[MatchSummary]) -> FormSummary:
             sides. Both mean the caller selected the wrong rows.
     """
     lines = [_goal_line(match, team.id) for match in played]
+    # The payload's StandingForm is the same literal as lmi_core.standings.Result.
     results: list[StandingForm] = [
-        _outcome(goals_for, goals_against) for goals_for, goals_against in lines
+        outcome(goals_for, goals_against) for goals_for, goals_against in lines
     ]
     return FormSummary(
         team=team,
         results=results,
-        points=sum(_POINTS[result] for result in results),
+        points=sum(points_for(result) for result in results),
         goals_for=sum(scored for scored, _ in lines),
         goals_against=sum(conceded for _, conceded in lines),
         matches=list(played),
@@ -725,9 +962,10 @@ def head_to_head_records(
     away_side_wins = 0
     for match in all_matches:
         goals_for, goals_against = _goal_line(match, home_team_id)
-        if goals_for > goals_against:
+        result = outcome(goals_for, goals_against)
+        if result == "W":
             home_side_wins += 1
-        elif goals_for < goals_against:
+        elif result == "L":
             away_side_wins += 1
         else:
             draws += 1
@@ -751,12 +989,15 @@ def split_record(team_id: int, played: Sequence[MatchSummary], *, side: _Side) -
     """
     selected = [match for match in played if _plays(match, side, team_id)]
     lines = [_goal_line(match, team_id) for match in selected]
-    points = sum(_POINTS[_outcome(scored, conceded)] for scored, conceded in lines)
+    results: list[Result] = [
+        outcome(goals_for, goals_against) for goals_for, goals_against in lines
+    ]
+    points = sum(points_for(result) for result in results)
     return SplitRecord(
         played=len(selected),
-        won=sum(1 for goals_for, goals_against in lines if goals_for > goals_against),
-        drawn=sum(1 for goals_for, goals_against in lines if goals_for == goals_against),
-        lost=sum(1 for goals_for, goals_against in lines if goals_for < goals_against),
+        won=sum(1 for result in results if result == "W"),
+        drawn=sum(1 for result in results if result == "D"),
+        lost=sum(1 for result in results if result == "L"),
         goals_for=sum(scored for scored, _ in lines),
         goals_against=sum(conceded for _, conceded in lines),
         points=points,
@@ -969,15 +1210,6 @@ def _goal_line(match: MatchSummary, team_id: int) -> tuple[int, int]:
     if goals_for is None or goals_against is None:
         raise ValueError(f"match {match.id} is {match.status}; only a played match has a score")
     return goals_for, goals_against
-
-
-def _outcome(goals_for: int, goals_against: int) -> StandingForm:
-    """Return ``W``, ``D`` or ``L`` from the side that scored ``goals_for``."""
-    if goals_for > goals_against:
-        return "W"
-    if goals_for < goals_against:
-        return "L"
-    return "D"
 
 
 def _history_team(result: SimulationTeamResultModel, name: str) -> SimulationHistoryTeam:
