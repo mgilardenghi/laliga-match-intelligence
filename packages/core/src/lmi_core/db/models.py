@@ -712,3 +712,76 @@ class SimulationTeamResult(Base):
     p_ucl: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
     p_europe: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
     p_relegation: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+
+
+class SimulationFixture(Base):
+    """One simulated fixture inside one simulation run.
+
+    The worker writes the row once, in the transaction that stores the finished
+    run, and never updates it: a rerun stores a new run id. The
+    ``simulation_fixtures_immutable`` trigger rejects every UPDATE, so the
+    probability triple a published run reports cannot be rewritten afterwards.
+    """
+
+    __tablename__ = "simulation_fixtures"
+    __table_args__ = (
+        CheckConstraint("p_home BETWEEN 0 AND 1", name="p_home_in_range"),
+        CheckConstraint("p_draw BETWEEN 0 AND 1", name="p_draw_in_range"),
+        CheckConstraint("p_away BETWEEN 0 AND 1", name="p_away_in_range"),
+        CheckConstraint(
+            "abs(p_home + p_draw + p_away - 1) < 1e-6",
+            name="probs_sum_to_one",
+        ),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("simulation_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id"), primary_key=True)
+    p_home: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    p_draw: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+    p_away: Mapped[float] = mapped_column(postgresql.DOUBLE_PRECISION, nullable=False)
+
+
+class SimulationNextMatch(Base):
+    """One team and one outcome of its next fixture inside one simulation run.
+
+    The worker writes the row once, in the transaction that stores the finished
+    run, and never updates it: a rerun stores a new run id. ``n_outcome`` counts
+    the simulated seasons in which the next fixture ended that way, and
+    ``n_relegated``, ``n_europe`` and ``n_title`` count the subset of those
+    seasons that also ended in that qualifier, so each count never exceeds
+    ``n_outcome``. The ``simulation_next_match_immutable`` trigger rejects every
+    UPDATE, so a published count cannot be rewritten afterwards.
+    """
+
+    __tablename__ = "simulation_next_match"
+    __table_args__ = (
+        CheckConstraint("outcome IN ('win', 'draw', 'loss')", name="outcome_valid"),
+        CheckConstraint("n_outcome >= 0", name="n_outcome_non_negative"),
+        CheckConstraint(
+            "n_relegated BETWEEN 0 AND n_outcome",
+            name="n_relegated_in_range",
+        ),
+        CheckConstraint(
+            "n_europe BETWEEN 0 AND n_outcome",
+            name="n_europe_in_range",
+        ),
+        CheckConstraint(
+            "n_title BETWEEN 0 AND n_outcome",
+            name="n_title_in_range",
+        ),
+        CheckConstraint("points_sum >= 0", name="points_sum_non_negative"),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("simulation_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id"), nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, primary_key=True)
+    n_outcome: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_relegated: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_europe: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_title: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_sum: Mapped[int] = mapped_column(BigInteger, nullable=False)

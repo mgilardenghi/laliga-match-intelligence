@@ -67,13 +67,15 @@ DOMAIN_TABLES = frozenset(
         "prediction_runs",
         "predictions",
         "seasons",
+        "simulation_fixtures",
+        "simulation_next_match",
         "simulation_runs",
         "simulation_team_results",
         "team_aliases",
         "teams",
     }
 )
-"""The fifteen tables of the schema, excluding ``alembic_version``.
+"""The seventeen tables of the schema, excluding ``alembic_version``.
 
 Also the only names :func:`count_rows` accepts, so no table name is interpolated
 from free input.

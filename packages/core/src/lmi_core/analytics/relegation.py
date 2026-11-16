@@ -1,10 +1,12 @@
-"""The two rules of the relegation race, computed only from the data the caller hands in.
+"""The three rules of the relegation race, computed only from the data the caller hands in.
 
-:func:`survival_threshold` and :func:`nearest_rivals` are pure. The rival
-selection reads a club's run of the season simulation; the threshold reads one
-stored season per row, with its size, its result count and its final points by
-position. The route ``GET /v1/teams/{team_id}/relegation-race`` produces those
-rows with :func:`lmi_core.standings.compute_standings` -- the only ranking in the
+:func:`survival_threshold`, :func:`nearest_rivals` and :func:`next_match_swing`
+are pure. The rival selection reads a club's run of the season simulation; the
+threshold reads one stored season per row, with its size, its result count and
+its final points by position; the swing reads the stored outcome counts of one
+club's next match in that run. The route
+``GET /v1/teams/{team_id}/relegation-race`` produces the season rows with
+:func:`lmi_core.standings.compute_standings` -- the only ranking in the
 repository -- and this module never ranks anything itself. Nothing here reads the
 clock, the database or a file, and nothing here restates a configuration number,
 so the same arguments always produce the same answer.
@@ -65,6 +67,47 @@ It raises :class:`ValueError` when ``team_id`` is not among ``teams`` (the calle
 checks membership and decides what to serve), when two rows share a ``team_id``
 (the race cannot say which of them is the club), and when ``count`` is negative.
 
+:func:`next_match_swing` answers "what does each result of the next match do to
+this club". The simulator stores one row per result of the club's next match, each
+saying how often that result came out of the run and, among those samples, how
+often the club was relegated, reached Europe, won the title, and how many points
+it took. The function returns one :class:`OutcomeSwing` per result, in win, draw
+and loss order:
+
+- ``p_outcome`` is ``n_outcome / n_runs``, the share of the simulated runs that
+  produced this result. ``p_relegation``, ``p_europe`` and ``p_title`` are
+  ``n_relegated / n_outcome`` and its two siblings: what followed *this result*,
+  not what the season holds. ``expected_points`` is ``points_sum / n_outcome``,
+  the mean total the club reached after it.
+- ``p_outcome`` is the sampled frequency, not a model probability. So
+  ``sum_o p_outcome * p_relegation_o`` must equal the club's own stored
+  ``p_relegation`` up to float rounding, and the same for Europe and the title.
+  That identity is what lets the payload show the swing beside the club's
+  probabilities without the two contradicting each other; a smoothed or
+  renormalised ``p_outcome`` would break it.
+- No rows, an outcome set that is not exactly one win, one draw and one loss
+  (including a repeated result), a stored ``match_id`` that differs from the one
+  the caller asks for, and any ``n_outcome`` of zero all return ``None``. The
+  freshness case is a fact rather than a fault: on the as-of day a club whose
+  next match was already played has stored rows for a match that is no longer
+  next, and the answer stays unknown until the next run replaces them. A result
+  the run never sampled has no conditional probability, and dividing by its zero
+  count would invent one, so it is served as unknown too.
+- It raises :class:`ValueError` when the rows name more than one ``match_id`` (a
+  club has one next match), when a conditional count exceeds its ``n_outcome``
+  (a run cannot relegate a club in more samples than produced the result), when
+  the three ``n_outcome`` do not sum to ``n_runs`` (the rows are not one complete
+  run), and when ``n_runs`` is below 1 (the frequency would be undefined, and the
+  database forbids the value). A broken stored invariant is a bug: it is raised,
+  never served as ``None``.
+- The checks run in one fixed order -- no rows, then ``n_runs`` below 1, then the
+  single ``match_id``, then the conditional counts, then the three outcomes, then
+  freshness, then a never-sampled outcome, then the sum, then the three swings --
+  so the same rows always give the same answer or the same error. The
+  never-sampled outcome is decided before the sum is checked, because a run that
+  could not sample a result is a legitimate run, while rows that do not add up
+  are not.
+
 Two deviations from the obvious implementation, and why each is honest:
 
 - Completeness is proved from the result count, never from the clock. This module
@@ -88,6 +131,9 @@ LEAGUE_SIZE: Final = 20
 
 FIRST_START_YEAR: Final = 2005
 """The first season the threshold counts: 2005-06, the start of the stored history."""
+
+OUTCOMES: Final = ("win", "draw", "loss")
+"""The results the next match can have, in the order the swing reports them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +192,46 @@ class RankedTeam:
     points_p95: int
 
 
+@dataclass(frozen=True, slots=True)
+class OutcomeCounts:
+    """One stored result of a club's next match: how often it happened and what followed.
+
+    ``outcome`` is ``"win"``, ``"draw"`` or ``"loss"`` and ``match_id`` the match
+    the row describes, which is what the freshness guard compares.
+    ``n_outcome`` counts the simulated runs that produced the result, and the
+    three other counts say how many of *those* runs ended in relegation, in
+    Europe and in the title. ``points_sum`` is the total points those runs earned,
+    so the mean is that sum over ``n_outcome``.
+    """
+
+    match_id: int
+    outcome: str
+    n_outcome: int
+    n_relegated: int
+    n_europe: int
+    n_title: int
+    points_sum: int
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeSwing:
+    """What one result of the next match does to the club, as the stored run measured it.
+
+    ``p_outcome`` is the share of the simulated runs that produced this result,
+    while ``p_relegation``, ``p_europe`` and ``p_title`` are the shares of those
+    same runs that ended each way: what follows the result, not the season.
+    ``expected_points`` is the mean total the club reached after it. ``outcome``
+    names the result so the caller can put each swing in its own field.
+    """
+
+    outcome: str
+    p_outcome: float
+    p_relegation: float
+    p_europe: float
+    p_title: float
+    expected_points: float
+
+
 def survival_threshold(
     tables: Iterable[SeasonTable], *, relegation_positions: int
 ) -> SurvivalThreshold | None:
@@ -200,6 +286,48 @@ def nearest_rivals(teams: Sequence[RankedTeam], *, team_id: int, count: int = 4)
     return tuple(team.team_id for team in sorted((subject, *rivals), key=_table_order))
 
 
+def next_match_swing(
+    rows: Sequence[OutcomeCounts], *, n_runs: int, match_id: int
+) -> tuple[OutcomeSwing, OutcomeSwing, OutcomeSwing] | None:
+    """Return one swing per result of the club's next match, or ``None`` when unknown.
+
+    ``rows`` is the stored outcome detail of one club in one simulation run:
+    exactly one row per result. ``n_runs`` is that run's sample size and
+    ``match_id`` the next match the caller believes the club plays, so a sample
+    for a match already played is answered with ``None`` instead of with a swing
+    nobody can act on. The three results come back in win, draw and loss order,
+    each carrying its name. Rows that contradict their own counts raise
+    :class:`ValueError`; nothing is invented here, neither a probability nor a
+    null.
+    """
+    if not rows:
+        return None
+    if n_runs < 1:
+        raise ValueError(f"n_runs must be at least 1, got {n_runs}")
+    stored_match_id = _single_match_id(rows)
+    for row in rows:
+        _check_conditional("n_relegated", row.n_relegated, row.n_outcome)
+        _check_conditional("n_europe", row.n_europe, row.n_outcome)
+        _check_conditional("n_title", row.n_title, row.n_outcome)
+    by_outcome = _rows_by_outcome(rows)
+    if by_outcome is None:
+        return None
+    if stored_match_id != match_id:
+        return None
+    if any(row.n_outcome == 0 for row in by_outcome.values()):
+        return None
+    if sum(row.n_outcome for row in by_outcome.values()) != n_runs:
+        raise ValueError(
+            f"the outcomes of match {stored_match_id} do not sum to {n_runs} runs: "
+            + ", ".join(f"{row.outcome} {row.n_outcome}" for row in rows)
+        )
+    return (
+        _swing(by_outcome["win"], n_runs),
+        _swing(by_outcome["draw"], n_runs),
+        _swing(by_outcome["loss"], n_runs),
+    )
+
+
 def _counted_position(relegation_positions: int) -> int:
     """Return the place the sample is read from: the one just above the bottom places.
 
@@ -214,6 +342,18 @@ def _counted_position(relegation_positions: int) -> int:
             f"relegation_positions must be smaller than {LEAGUE_SIZE}, got {relegation_positions}"
         )
     return LEAGUE_SIZE - relegation_positions
+
+
+def _check_conditional(name: str, count: int, n_outcome: int) -> None:
+    """Raise when a conditional count is larger than the samples that produced the result.
+
+    ``n_relegated``, ``n_europe`` and ``n_title`` are counts within one outcome's
+    samples, so any of them above ``n_outcome`` makes the conditional probability
+    exceed one. That row cannot have come from one complete run, and serving a
+    probability above one, or the ``None`` that hides it, would hide the bug.
+    """
+    if count > n_outcome:
+        raise ValueError(f"{name} is {count}, above its {n_outcome} samples")
 
 
 def _check_points_fit(table: SeasonTable) -> None:
@@ -260,6 +400,24 @@ def _median(ordered: Sequence[int]) -> float:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
+def _rows_by_outcome(rows: Sequence[OutcomeCounts]) -> dict[str, OutcomeCounts] | None:
+    """Return the rows keyed by result, or ``None`` when they are not one row per result.
+
+    The derivation needs exactly one ``win``, one ``draw`` and one ``loss``. A
+    missing result leaves a swing no caller can name, and a repeated one leaves
+    two rows claiming the same result, so neither is split into three swings: the
+    answer is unknown until the run stores a complete set.
+    """
+    by_outcome: dict[str, OutcomeCounts] = {}
+    for row in rows:
+        if row.outcome in by_outcome:
+            return None
+        by_outcome[row.outcome] = row
+    if set(by_outcome) != set(OUTCOMES):
+        return None
+    return by_outcome
+
+
 def _subject(teams: Sequence[RankedTeam], team_id: int) -> RankedTeam:
     """Return the row of ``team_id``, rejecting a duplicate identifier or an absent club.
 
@@ -278,6 +436,39 @@ def _subject(teams: Sequence[RankedTeam], team_id: int) -> RankedTeam:
     if subject is None:
         raise ValueError(f"team {team_id} is not among the teams of the run")
     return subject
+
+
+def _single_match_id(rows: Sequence[OutcomeCounts]) -> int:
+    """Return the one match the rows describe, rejecting a set that names several.
+
+    Rows of two matches cannot be one club's next match: the stages of a run are
+    stored per match, and adding them together would report the swings of the
+    wrong fixture. The distinct ``match_id`` values are the whole check, because
+    the count of rows is decided later, by the outcome set and the sum.
+    """
+    match_ids = {row.match_id for row in rows}
+    if len(match_ids) > 1:
+        raise ValueError(f"the rows name more than one match: {sorted(match_ids)}")
+    return match_ids.pop()
+
+
+def _swing(row: OutcomeCounts, n_runs: int) -> OutcomeSwing:
+    """Return one result's swing, dividing the stored counts by their samples.
+
+    ``n_outcome`` is nonzero and no smaller than every conditional count when the
+    caller reaches here, so no division is undefined and no probability exceeds one. The
+    frequency uses ``n_runs`` and the consequences use ``n_outcome``, which is
+    the difference between "how often this result happens" and "what happens when
+    it does".
+    """
+    return OutcomeSwing(
+        outcome=row.outcome,
+        p_outcome=row.n_outcome / n_runs,
+        p_relegation=row.n_relegated / row.n_outcome,
+        p_europe=row.n_europe / row.n_outcome,
+        p_title=row.n_title / row.n_outcome,
+        expected_points=row.points_sum / row.n_outcome,
+    )
 
 
 def _table_order(team: RankedTeam) -> tuple[float, int]:

@@ -273,19 +273,15 @@ def test_the_relegation_race_draws_the_survival_threshold(page: Page, dashboard_
 
 
 @pytest.mark.loaded
-def test_the_remaining_fixtures_table_names_the_missing_probabilities(
+def test_the_remaining_fixtures_table_prices_the_simulated_fixtures(
     page: Page, dashboard_url: str
 ) -> None:
-    """Guard the run-in: the fixtures table stays, and says what it cannot price."""
+    """Guard the run-in: the fixtures table stays, and the next fixture is priced."""
     path = _default_focus_path(page, dashboard_url)
     _open(page, dashboard_url, path)
 
     race = page.locator(RACE_SECTION)
     expect(race).to_have_count(1)
-
-    # The per-fixture simulation is not stored yet, so the cell says so instead
-    # of printing three dashes a reader would take for a priced fixture.
-    expect(race.get_by_text(MISSING_PROBABILITIES).first).to_be_visible()
 
     fixtures = race.get_by_role("table", name=FIXTURES_CAPTION)
     expect(fixtures).to_have_count(1)
@@ -294,16 +290,27 @@ def test_the_remaining_fixtures_table_names_the_missing_probabilities(
         "the remaining fixtures table has no column headers"
     )
 
+    # The loaded tier simulates after the fit, so the next fixture of the default
+    # club carries its stored probabilities; the placeholder is for runs without
+    # per-fixture detail and must not show here.
+    first_row = fixtures.locator("tbody tr").first
+    expect(first_row).to_be_visible()
+    expect(first_row.get_by_text(MISSING_PROBABILITIES)).to_have_count(0)
+
 
 @pytest.mark.loaded
-def test_the_swing_panel_names_the_run_it_waits_for(page: Page, dashboard_url: str) -> None:
-    """Guard the swing panel: it says which run fills it instead of inventing one."""
+def test_the_swing_panel_shows_the_outcomes_of_the_next_match(
+    page: Page, dashboard_url: str
+) -> None:
+    """Guard the swing panel: a run with detail fills it, and the waiting note goes."""
     path = _default_focus_path(page, dashboard_url)
     _open(page, dashboard_url, path)
 
     next_match = page.locator(NEXT_MATCH_SECTION)
     expect(next_match).to_have_count(1)
-    expect(next_match.get_by_text(PENDING_SWING).first).to_be_visible()
+    expect(next_match.get_by_text(PENDING_SWING)).to_have_count(0)
+    for outcome in ("Win", "Draw", "Loss"):
+        expect(next_match.get_by_role("rowheader", name=outcome, exact=True)).to_have_count(1)
 
 
 @pytest.mark.loaded

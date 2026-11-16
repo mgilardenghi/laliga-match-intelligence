@@ -700,12 +700,40 @@ the fixture summary, the venue the club plays it at, and the opponent's position
 in the season's table. A `withdrawn` fixture is not listed: it will not be
 played. `opponent_position` is `null` for an opponent the table does not rank.
 
-**The per-fixture and next-match projections.** `p_win`, `p_draw`, `p_loss` of
-every remaining fixture and the whole of `next_match` are `null` in this
-milestone. They are the simulation's per-fixture and next-match outputs, which
-the simulator does not store yet: the fields are declared nullable so a stored
-simulation can fill them without a change to this contract, and the endpoint
-serves `null` instead of a placeholder model or a number nobody simulated.
+**The per-fixture and next-match projections.** `remaining_fixtures[].p_win`,
+`p_draw` and `p_loss` are the latest succeeded run's stored probabilities of the
+three results, always from the club's side: at home they are the stored
+home/draw/away triple and away the same triple read from the other end, so
+`p_win` means the club wins wherever it plays. `next_match` describes the fixture
+the club plays next: `match_id` is `remaining_fixtures[0].match.id`, and
+`outcomes.win`, `outcomes.draw` and `outcomes.loss` each carry `p_outcome` (the
+share of the simulated runs that produced that result), the conditional
+`p_relegation`, `p_europe` and `p_title` (the shares of those same runs that
+ended each way), and `expected_points` (their mean final total).
+`next_match.current` is the club's own row of the same run: `p_relegation`,
+`p_europe`, `p_title` and `expected_points` for the whole remaining season, so a
+client computes every delta of the block against one baseline instead of mixing
+two runs. For each of relegation, Europe and the title, `sum over outcomes of
+(p_outcome * p_<field>)` equals the matching `next_match.current` field within
+the precision shown, and the three `p_outcome` sum to one.
+
+**When the projections are null.** Both groups stay `null` where the run did not
+store them, and the response is still `200`. A run created before revision 0004
+has no per-fixture or next-match detail, so the fixture triple and `next_match`
+are `null`; a fixture the run did not simulate keeps three `null`
+probabilities; and `next_match` is `null` when the stored match is no longer the
+club's next fixture (a club whose next match was played on the as-of day gets
+`null` until the next run replaces it), when a result was never sampled
+(`n_outcome` zero, so the conditional probabilities have no denominator), and
+when the run holds no row for the club. A `null` is unknown, never zero.
+
+**Two measurements, not a contradiction.** `p_outcome` is the simulated
+frequency of a result, not a model probability, so it may differ slightly --
+about half a percentage point at 10 000 runs -- from the model probability in
+`remaining_fixtures[0].p_win`, `p_draw` and `p_loss` for the same fixture. They
+are two measurements of the same match, not a contradiction: the frequency is
+what the run's samples produced, while the fixture triple is the model's
+probability of the fixture.
 
 One rival, one series point and one fixture are shown.
 
@@ -773,12 +801,43 @@ One rival, one series point and one fixture are shown.
       },
       "venue": "home",
       "opponent_position": 16,
-      "p_win": null,
-      "p_draw": null,
-      "p_loss": null
+      "p_win": 0.455,
+      "p_draw": 0.275,
+      "p_loss": 0.270
     }
   ],
-  "next_match": null
+  "next_match": {
+    "match_id": 1241,
+    "outcomes": {
+      "win": {
+        "p_outcome": 0.46,
+        "p_relegation": 0.08,
+        "p_europe": 0.12,
+        "p_title": 0.002,
+        "expected_points": 44.2
+      },
+      "draw": {
+        "p_outcome": 0.27,
+        "p_relegation": 0.34,
+        "p_europe": 0.02,
+        "p_title": 0.0,
+        "expected_points": 41.0
+      },
+      "loss": {
+        "p_outcome": 0.27,
+        "p_relegation": 0.58,
+        "p_europe": 0.0,
+        "p_title": 0.0,
+        "expected_points": 37.8
+      }
+    },
+    "current": {
+      "p_relegation": 0.285,
+      "p_europe": 0.061,
+      "p_title": 0.001,
+      "expected_points": 41.608
+    }
+  }
 }
 ```
 

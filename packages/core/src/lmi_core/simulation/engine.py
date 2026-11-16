@@ -20,12 +20,19 @@ Two properties explain the shape of the code:
 The scoreline grid is fixed at eleven goals per side: ``score_probs[i, h, a]`` is
 the probability that fixture ``i`` ends ``h``-``a``, with ``h`` and ``a`` in
 ``0..10``.
+
+Two questions sit next to the sampled rows and are answered without touching the
+stream: :func:`fixture_outcome_probs` reads win, draw and loss straight out of a
+scoreline grid, and the ``condition_on`` argument of :func:`simulate_season`
+counts one club's next result against its finished season. Both run after or
+beside the draws, so asking either question cannot move a single sample: a
+conditioned call returns the rows of a plain call bit for bit.
 """
 
 import datetime
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -70,6 +77,47 @@ class SimFixture:
     """The virtual date the fixture is played on; it dates the simulated result."""
 
 
+Outcome = Literal["win", "draw", "loss"]
+"""One fixture's result from the point of view of one of its two sides."""
+
+
+@dataclass(frozen=True, slots=True)
+class FixtureOutcomeProbs:
+    """One fixture's win, draw and loss probabilities, seen from the home side.
+
+    The three come from the scoreline grid alone: they are the model's view of a
+    fixture before it is played, with no simulation and no draw behind them.
+    """
+
+    match_id: int
+    p_home: float
+    p_draw: float
+    p_away: float
+
+
+@dataclass(frozen=True, slots=True)
+class NextMatchCounts:
+    """One outcome of one club's next fixture, counted against its season's end.
+
+    ``n_outcome`` counts the runs in which the club got ``outcome`` in the named
+    fixture. The three finish counters narrow that set to the runs that also
+    ended in a qualification region, and ``points_sum`` adds up the final points
+    of the same runs, so a caller can divide by ``n_outcome`` for a conditional
+    average. A combination that never happened is still reported, with
+    ``n_outcome == 0``, so a reader never has to guess whether a missing row
+    means zero or a gap.
+    """
+
+    team_id: int
+    match_id: int
+    outcome: Outcome
+    n_outcome: int
+    n_relegated: int
+    n_europe: int
+    n_title: int
+    points_sum: int
+
+
 @dataclass(frozen=True, slots=True)
 class TeamSimulation:
     """What the runs say about one team's final points and final position.
@@ -110,6 +158,11 @@ class SeasonSimulation:
     n_fixtures: int
     teams: tuple[TeamSimulation, ...]
     """One entry per team, projected table order first."""
+    next_match: tuple[NextMatchCounts, ...] = ()
+    """Conditioned next-match counts, ordered by team id then win, draw, loss.
+
+    Empty unless the caller passed ``condition_on``.
+    """
 
 
 def simulate_season(
@@ -121,6 +174,7 @@ def simulate_season(
     n_runs: int,
     seed: int,
     qualification: Qualification,
+    condition_on: Mapping[int, int] | None = None,
 ) -> SeasonSimulation:
     """Simulate ``fixtures`` ``n_runs`` times and report each team's totals.
 
@@ -141,11 +195,20 @@ def simulate_season(
     ``mean_position`` ascending, then ``mean_points`` descending, then team name,
     then team id.
 
+    ``condition_on`` maps a club to the match id of its next simulated fixture.
+    When it is given, the result also carries one :class:`NextMatchCounts` per
+    club and outcome. The counting runs once, after the last run is played, and
+    reads only the sampled goals, the final points and the final places through
+    boolean masks, so it costs ``O(teams x n_runs)`` and never touches the
+    generator: the runs of a conditioned call are bit for bit the runs of a plain
+    one with the same arguments.
+
     Raises :class:`ValueError` when ``n_runs`` is below one, ``score_probs`` does
     not have shape ``(len(fixtures), 11, 11)``, a probability row is negative or
     does not sum to one within ``1e-9``, ``teams`` is empty, the qualification
-    thresholds do not fit the league, or a fixture names a team missing from
-    ``teams``.
+    thresholds do not fit the league, a fixture names a team missing from
+    ``teams``, or ``condition_on`` names a match no fixture carries or pairs a
+    club with a match it does not play.
     """
     if n_runs < 1:
         raise ValueError(f"n_runs must be at least 1, got {n_runs}")
@@ -155,6 +218,7 @@ def simulate_season(
     ordered, permutation = _ordered_fixtures(fixtures)
     probs = _validated_probs(score_probs, len(ordered))
     _validate_fixture_teams(ordered, teams)
+    conditioned = _validated_condition_on(fixtures, condition_on)
 
     probs = probs[permutation]
     fixed_results = sorted(fixed, key=_fixed_order_key)
@@ -187,7 +251,58 @@ def simulate_season(
         for column, team_id in enumerate(team_ids)
     )
     projected = tuple(sorted(simulations, key=lambda sim: _projected_order_key(sim, teams)))
-    return SeasonSimulation(n_runs=n_runs, seed=seed, n_fixtures=n_fixtures, teams=projected)
+    next_match = _next_match_counts(
+        conditioned,
+        played=ordered,
+        home_goals=home_goals,
+        away_goals=away_goals,
+        points=points,
+        places=places,
+        column_of=column_of,
+        n_teams=len(team_ids),
+        qualification=qualification,
+    )
+    return SeasonSimulation(
+        n_runs=n_runs,
+        seed=seed,
+        n_fixtures=n_fixtures,
+        teams=projected,
+        next_match=next_match,
+    )
+
+
+def fixture_outcome_probs(
+    fixtures: Sequence[SimFixture], score_probs: NDArray[np.float64]
+) -> tuple[FixtureOutcomeProbs, ...]:
+    """Return each fixture's win, draw and loss probabilities from the home side.
+
+    ``score_probs[i]`` is the grid of ``fixtures[i]``, exactly as
+    :func:`simulate_season` takes it, and one entry comes back per fixture in the
+    caller's own order, carrying ``fixture.match_id``. No fixture ordering, no
+    draw and no :class:`numpy.random.Generator` is involved: the numbers depend
+    on the grids and nothing else.
+
+    The three values are divided by their own sum, never by one. An accepted row
+    may sit up to ``1e-9`` away from a total of one, and dividing by one would
+    then report three numbers that do not add up to one.
+    """
+    probs = _validated_probs(score_probs, len(fixtures))
+    goals = np.arange(_SCORELINE_GOALS)
+    home_wins = goals[:, None] > goals[None, :]
+    away_wins = goals[:, None] < goals[None, :]
+    p_home = probs[:, home_wins].sum(axis=1)
+    p_away = probs[:, away_wins].sum(axis=1)
+    p_draw = np.trace(probs, axis1=1, axis2=2)
+    totals = p_home + p_draw + p_away
+    return tuple(
+        FixtureOutcomeProbs(
+            match_id=fixture.match_id,
+            p_home=float(p_home[index] / totals[index]),
+            p_draw=float(p_draw[index] / totals[index]),
+            p_away=float(p_away[index] / totals[index]),
+        )
+        for index, fixture in enumerate(fixtures)
+    )
 
 
 def _ordered_fixtures(
@@ -285,6 +400,97 @@ def _validate_fixture_teams(fixtures: Sequence[SimFixture], teams: Mapping[int, 
                 raise ValueError(
                     f"fixture {fixture.match_id} names team {team_id}, which is not in teams"
                 )
+
+
+def _validated_condition_on(
+    fixtures: Sequence[SimFixture], condition_on: Mapping[int, int] | None
+) -> tuple[tuple[int, int], ...]:
+    """Check every conditioned next match and return the pairs in team-id order.
+
+    The map names a club's next fixture, so a match id no fixture carries, or a
+    club that is not one of that fixture's two sides, is a caller bug: the counts
+    would describe a match the club never plays. Sorting by team id here is what
+    makes the reported order independent of the caller's mapping order.
+    """
+    if condition_on is None:
+        return ()
+    sides: dict[int, tuple[int, int]] = {}
+    for fixture in fixtures:
+        sides.setdefault(fixture.match_id, (fixture.home_team_id, fixture.away_team_id))
+    conditioned: list[tuple[int, int]] = []
+    for team_id in sorted(condition_on):
+        match_id = condition_on[team_id]
+        if match_id not in sides:
+            raise ValueError(f"condition_on names match {match_id}, which is not among fixtures")
+        home_team_id, away_team_id = sides[match_id]
+        if team_id not in (home_team_id, away_team_id):
+            raise ValueError(
+                f"condition_on maps team {team_id} to match {match_id}, "
+                f"whose sides are {home_team_id} and {away_team_id}"
+            )
+        conditioned.append((team_id, match_id))
+    return tuple(conditioned)
+
+
+def _next_match_counts(
+    conditioned: Sequence[tuple[int, int]],
+    *,
+    played: Sequence[SimFixture],
+    home_goals: NDArray[np.int64],
+    away_goals: NDArray[np.int64],
+    points: NDArray[np.int64],
+    places: NDArray[np.int64],
+    column_of: Mapping[int, int],
+    n_teams: int,
+    qualification: Qualification,
+) -> tuple[NextMatchCounts, ...]:
+    """Count each conditioned club's next result against the runs that produced it.
+
+    Every counter is a boolean mask over the runs of one club, so the whole pass
+    is ``O(teams x n_runs)`` over arrays that already exist and no run is
+    replayed. The finish masks repeat the semantics of :func:`_team_simulation`
+    on purpose, position by position: ``p_title`` is place one, ``p_europe`` is a
+    place at or above ``europe_positions`` and relegation is a place among the
+    bottom ``relegation_positions``. A conditioned row and the team row it comes
+    from therefore always agree on how many runs each region holds.
+    """
+    if not conditioned:
+        return ()
+    index_of = {fixture.match_id: index for index, fixture in enumerate(played)}
+    relegation_from = n_teams - qualification.relegation_positions
+    counted: list[NextMatchCounts] = []
+    for team_id, match_id in conditioned:
+        index = index_of[match_id]
+        fixture = played[index]
+        column = column_of[team_id]
+        home = home_goals[:, index]
+        away = away_goals[:, index]
+        drawn = home == away
+        won = home > away if fixture.home_team_id == team_id else home < away
+        team_points = points[:, column]
+        team_places = places[:, column]
+        relegated = team_places > relegation_from
+        european = team_places <= qualification.europe_positions
+        title = team_places == 1
+        splits: tuple[tuple[Outcome, NDArray[np.bool_]], ...] = (
+            ("win", won),
+            ("draw", drawn),
+            ("loss", ~(won | drawn)),
+        )
+        for outcome, selected in splits:
+            counted.append(
+                NextMatchCounts(
+                    team_id=team_id,
+                    match_id=match_id,
+                    outcome=outcome,
+                    n_outcome=int(selected.sum()),
+                    n_relegated=int((selected & relegated).sum()),
+                    n_europe=int((selected & european).sum()),
+                    n_title=int((selected & title).sum()),
+                    points_sum=int(team_points[selected].sum()),
+                )
+            )
+    return tuple(counted)
 
 
 def _sample(

@@ -269,7 +269,7 @@ def test_upgrade_creates_the_backtest_tables_and_downgrade_restores_0001(
 
 
 def test_the_migration_chain_has_exactly_one_head() -> None:
-    assert ScriptDirectory(str(MIGRATIONS_DIR)).get_heads() == ["0003"]
+    assert ScriptDirectory(str(MIGRATIONS_DIR)).get_heads() == ["0004"]
 
 
 @dataclass(frozen=True)
