@@ -106,7 +106,7 @@ The dashboard reads data only through the API, with a client generated from the 
 
 ## Open items
 
-- Job queue library: ADR-0004 (proposed).
+- Job queue library: Celery, with Redis as the broker and Celery beat for the schedule, decided in ADR-0004 (accepted 2026-11-16).
 - Referee source: none verified. Referee analytics stay deferred until one exists.
 - Absolute kickoff instants: no verified source. The pre-kickoff guard uses the match date until one exists.
 - xG: present only in the 2026/27 football-data files (verified in M1). Earlier seasons report goals, shots, shots on target, corners, fouls and cards. Models do not depend on xG.
