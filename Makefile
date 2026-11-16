@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose
 
-.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler e2e e2e-guard e2e-data e2e-loaded e2e-down lint test test-integration build api-client api-client-check clean
+.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler e2e e2e-guard e2e-data e2e-data-load e2e-loaded e2e-down lint test test-integration build api-client api-client-check clean
 
 # Throwaway database for the integration tests. Same image as Compose, a host
 # port that is unlikely to collide, and placeholder credentials only.
@@ -123,10 +123,16 @@ e2e: e2e-guard ## Build the throwaway browser-test stack and run the tests that 
 	E2E_BASE_URL=$(E2E_BASE_URL) uv run --group e2e pytest -o addopts="" e2e -m empty
 
 e2e-data: e2e-guard ## Load the throwaway browser-test stack with real data (network, idempotent)
+	@# `exit` ends one recipe's shell, not the target, so a skip written as a plain
+	@# `if ... exit 0; fi` falls through to the next line and loads anyway. The
+	@# loading therefore lives in its own target, invoked only when it is needed.
 	@if curl -fsS $(E2E_API_URL)/v1/model-metrics >/dev/null 2>&1; then \
 		echo "the e2e stack already holds data"; \
-		exit 0; \
+	else \
+		$(MAKE) e2e-data-load; \
 	fi
+
+e2e-data-load: e2e-guard
 	# The loaded tier needs the API published, so the data services are started
 	# here in the same shape as in the `e2e` target before anything is loaded.
 	$(E2E_COMPOSE) up -d --build --wait db redis
