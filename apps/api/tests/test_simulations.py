@@ -313,6 +313,7 @@ def test_create_simulation_answers_404_when_no_season_has_a_match(
         pytest.param({"n_runs": 999}, id="n_runs-below-1000"),
         pytest.param({"n_runs": 50001}, id="n_runs-above-50000"),
         pytest.param({"seed": -1}, id="seed-negative"),
+        pytest.param({"seed": 2**63}, id="seed-above-bigint"),
     ],
 )
 def test_create_simulation_rejects_an_out_of_range_body(

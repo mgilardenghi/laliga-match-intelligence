@@ -20,7 +20,7 @@ having counted zero.
 
 import datetime
 import uuid
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, Field
 
@@ -67,6 +67,9 @@ prompt answer, not a batch job.
 DEFAULT_SEED = 0
 """The seed a request uses when the client does not say, so a repeat is reproducible."""
 
+MAX_SEED: Final = 2**63 - 1
+"""The largest seed the ``simulation_runs.seed`` BIGINT column can store."""
+
 
 class SimulationRequest(BaseModel):
     """What a client asks the simulator to run.
@@ -86,7 +89,7 @@ class SimulationRequest(BaseModel):
     season: str | None = None
     as_of_date: datetime.date | None = None
     n_runs: int = Field(default=DEFAULT_N_RUNS, ge=MIN_N_RUNS, le=MAX_N_RUNS)
-    seed: int = Field(default=DEFAULT_SEED, ge=0)
+    seed: int = Field(default=DEFAULT_SEED, ge=0, le=MAX_SEED)
 
 
 class SimulationQualification(BaseModel):

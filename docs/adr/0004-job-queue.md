@@ -1,6 +1,6 @@
 # ADR-0004: Job queue library
 
-Status: Accepted (2026-11-16, manager decision under the standing instruction to proceed without stopping; user confirmation pending)
+Status: Accepted (2026-11-16, approved by the user)
 
 ## Context
 
@@ -34,7 +34,7 @@ M4 fixes how Celery is configured and what the stack guarantees. The decision ab
 
    A rowcount of 0 means skip: another executor owns the run or has already finished it.
 4. **Settings.** `task_acks_late=True`, `task_reject_on_worker_lost=True`, `worker_prefetch_multiplier=1`, `task_ignore_result=True`, `timezone='Europe/Madrid'`, the JSON serializer, and `broker_transport_options={'visibility_timeout': 3600}`. Worker concurrency is 1, because simulations are CPU-bound on one laptop.
-5. **Recovery sweep on `worker_ready`.** The worker re-enqueues `queued` rows older than 1 minute and `running` rows whose `started_at` is older than 30 minutes, so the claim's stale branch picks them up. `create_run` also re-enqueues a stale active row (queued for more than 1 minute, or running for more than 30 minutes) instead of returning a dead run. Real-world recovery after a crash is therefore bounded by the 30-minute stale window, or by the visibility timeout if no worker restarts.
+5. **Recovery sweep on `worker_ready`.** The worker re-enqueues `queued` rows older than 1 minute and `running` rows whose `started_at` is older than 30 minutes, so the claim's stale branch picks them up. `create_run` also re-enqueues a stale active row instead of returning a dead run, with one stale window of 30 minutes for both `queued` and `running` rows (`lmi_core.simulation.service.STALE_AFTER`); only the `worker_ready` sweep uses the shorter 1 minute window for `queued` rows. Real-world recovery after a crash is therefore bounded by the 30-minute stale window, or by the visibility timeout if no worker restarts.
 6. **Beat runs in the Compose profile `scheduler`, off by default.** Its daily cycle downloads data, and the default stack must stay offline.
 
 ## Consequences
