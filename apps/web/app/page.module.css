@@ -23,28 +23,3 @@
   font-size: 1.0625rem;
   line-height: 1.6;
 }
-
-.status {
-  font-size: 0.9375rem;
-  letter-spacing: 0.01em;
-}
-
-.statusOnline,
-.statusOffline {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid currentColor;
-  font-weight: 600;
-  font-variant: small-caps;
-}
-
-.statusOnline {
-  color: var(--online);
-}
-
-.statusOffline {
-  color: var(--offline);
-}
