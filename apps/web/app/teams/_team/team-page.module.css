@@ -1,0 +1,311 @@
+/*
+ * The team page: one club's season, sectioned from the glance tiles down to the
+ * next fixtures.
+ *
+ * Only this page's own layout lives here. The season selector, the empty and
+ * problem states and every chart come from shared modules, so a change to those
+ * is never repeated in this file. Every colour is a token from globals.css: the
+ * bars read `--accent`, `--muted` and `--text`, and no value is invented here.
+ *
+ * The layout is mobile first. A wide table sits in a scroller and keeps its
+ * first column, so a phone reads the row label while the rest of the row moves;
+ * the 640 px and 1024 px breakpoints only add room, they never remove content.
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  /* An explicit width: `margin: auto` on the cross axis would otherwise switch
+     this flex item to shrink-to-fit and size the page by the intrinsic width of
+     a table instead of by the viewport. */
+  width: 100%;
+  max-width: 72rem;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+/* The heading block is not a `header` element: the shell owns the document
+   header, and a second one would read as a duplicate landmark. */
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.title {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.season {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+/* The selector and the focus form keep the width of their own controls instead
+   of stretching across the page column. */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.focusForm {
+  display: flex;
+}
+
+.button {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--control-border);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.button:hover,
+.button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A section is a flex item of `.page`; its automatic minimum width must not be
+   the intrinsic width of its table or chart, or the page grows sideways. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.sectionTitle {
+  font-size: 1.25rem;
+}
+
+/* The glance tiles: one labelled number per row on a phone, two columns from
+   640 px, so the five facts stay scannable without a table. */
+.glance {
+  display: grid;
+  gap: 0.5rem 1.5rem;
+  min-width: 0;
+}
+
+.glanceRow {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.glanceTerm {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.glanceValue {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  max-width: 48rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.code {
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+}
+
+/* The scroller owns the horizontal overflow: without `min-width: 0` the table's
+   intrinsic width would also be its minimum width and push the page wider. */
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 32rem;
+  border-collapse: collapse;
+  color: var(--text);
+}
+
+.caption {
+  padding-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.cell {
+  padding: 0.5rem 0.5rem 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.headCell {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Counters read as a column of digits, so they align on their right edge. */
+.numeric {
+  padding-right: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The row label travels with the reader while the table scrolls sideways, so
+   the date or the venue a column belongs to never leaves the viewport. Its
+   background is opaque because the cells must not show through it. */
+.stickyColumn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--background);
+}
+
+.venueCell {
+  width: 5rem;
+  min-width: 5rem;
+  font-weight: 600;
+}
+
+.dateCell {
+  min-width: 7.5rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.clubCell a {
+  white-space: nowrap;
+}
+
+/* One fixture per card: the date line, the two clubs and the forecast. */
+.fixtures {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+  list-style: none;
+}
+
+.fixture {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.fixtureWhen {
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fixtureTeams {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
+.versus {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* The profile chart scales to the width of its figure; the viewBox keeps the
+   internal coordinates, so the labels stay in proportion on a phone. */
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.axisLine {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.axisText {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.metricLabel {
+  fill: var(--text);
+  font-size: 11px;
+}
+
+.forBar {
+  fill: var(--accent);
+}
+
+.againstBar {
+  fill: var(--muted);
+}
+
+/* The league tick is drawn on both sides of the zero line, and the stroke is
+   inherited from the group by both of its lines. */
+.leagueTick {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+@media (min-width: 640px) {
+  .page {
+    padding: 2rem 1.5rem 3rem;
+  }
+
+  .controls {
+    flex-direction: row;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+  }
+
+  .table {
+    min-width: 46rem;
+  }
+
+  .glance {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .page {
+    padding: 2.5rem 2rem 4rem;
+  }
+
+  .sectionTitle {
+    font-size: 1.5rem;
+  }
+
+  .fixtures {
+    gap: 2rem;
+  }
+}
