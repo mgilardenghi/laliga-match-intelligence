@@ -38,7 +38,9 @@ import datetime
 import logging
 import sys
 import uuid
-from typing import Final
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Final, Literal
 
 from lmi_core.clock import madrid_today
 from lmi_core.config import get_settings
@@ -53,7 +55,7 @@ from lmi_core.live.predict import (
     build_predictions,
 )
 from lmi_core.live.scoring import evaluate, live_metrics
-from lmi_core.live.store import fail_run, start_run, write_batch
+from lmi_core.live.store import WriteResult, fail_run, start_run, write_batch
 from lmi_core.modeling.data import load_match_data
 from lmi_core.modeling.registry import MODEL_NAMES
 from sqlalchemy import func, select
@@ -67,6 +69,21 @@ MAX_ERROR_LENGTH: Final = 1000
 
 _RUNNING: Final = "running"
 """The only run state from which a run can still be failed."""
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPredictions:
+    """What one stored batch wrote, in the form the CLI prints it.
+
+    ``batch.counts`` is one entry per requested model and ``inserted`` counts
+    the rows this run inserted per model; ``written`` carries the totals the
+    closing line reports.
+    """
+
+    run_id: uuid.UUID
+    batch: PredictionBatch
+    inserted: dict[str, int]
+    written: WriteResult
 
 
 def add_predict_parser(
@@ -178,50 +195,88 @@ def _model_names(value: str) -> tuple[str, ...]:
     return names
 
 
-def _store(args: argparse.Namespace, session: Session, as_of: datetime.date) -> int:
-    """Build, store and summarise one batch inside one session.
+def store_predictions(
+    session: Session,
+    *,
+    as_of: datetime.date,
+    horizon_days: int = DEFAULT_HORIZON_DAYS,
+    models: Sequence[str] = MODEL_NAMES,
+    trigger: Literal["cli", "schedule"] = "cli",
+) -> StoredPredictions:
+    """Build, store and return one batch inside ``session``.
 
     The run is opened first, so a failure of anything between it and the stored
-    rows leaves a record instead of a silent gap.
+    rows leaves a record instead of a silent gap. The run is marked ``failed``
+    before the original exception leaves this function, so both the command and
+    the daily cycle can report the same failure without repeating that rule.
+
+    Args:
+        session: the session that writes the run and its rows.
+        as_of: the Madrid date the batch is produced for.
+        horizon_days: how many days past ``as_of`` the batch reaches.
+        models: the model names to run, in report order.
+        trigger: what started the run; the daily cycle passes ``schedule``.
+
+    Returns:
+        The run id, the batch and the insert and total counts of the call.
+
+    Raises:
+        Exception: whatever stopped the batch after the run was opened, re-raised
+            unchanged after the run was marked failed.
     """
     run_id = start_run(
         session,
         as_of=as_of,
-        horizon_days=args.horizon_days,
-        trigger="cli",
+        horizon_days=horizon_days,
+        trigger=trigger,
     )
     logger.info("run %s", run_id)
     try:
         batch = build_predictions(
             session,
             as_of=as_of,
-            horizon_days=args.horizon_days,
-            models=args.models,
+            horizon_days=horizon_days,
+            models=models,
         )
-        result = write_batch(session, run_id, batch)
+        written = write_batch(session, run_id, batch)
         inserted = _inserted_per_model(session, run_id)
     except Exception as error:
         # Everything after start_run sits under this guard: a run left running
         # by an escaping exception would never be transitioned, because nothing
         # else in the system does it.
-        text = _error_text(error)
-        _mark_failed(session, run_id, error=text)
-        print(f"predict: {text}", file=sys.stderr)
-        return 1
+        _mark_failed(session, run_id, error=_error_text(error))
+        raise
     except BaseException as error:
         # An interruption is not an Exception, so it would skip the guard above
         # and leave the committed run ``running`` for ever. Record it, then let
-        # the original exception out unchanged: the process still exits non-zero
-        # and the traceback keeps its frames.
+        # the original exception out unchanged: the caller still sees it and the
+        # traceback keeps its frames.
         _mark_failed(session, run_id, error=_error_text(error))
         raise
 
-    _print_counts(batch, inserted)
+    return StoredPredictions(run_id=run_id, batch=batch, inserted=inserted, written=written)
+
+
+def _store(args: argparse.Namespace, session: Session, as_of: datetime.date) -> int:
+    """Store one batch and print exactly the lines the command has always printed."""
+    try:
+        stored = store_predictions(
+            session,
+            as_of=as_of,
+            horizon_days=args.horizon_days,
+            models=args.models,
+            trigger="cli",
+        )
+    except Exception as error:
+        print(f"predict: {_error_text(error)}", file=sys.stderr)
+        return 1
+
+    _print_counts(stored.batch, stored.inserted)
     print(
-        f"predict: run {run_id} as_of={batch.as_of.isoformat()} "
-        f"horizon={batch.horizon_days} history={batch.n_history} "
-        f"fixtures={batch.n_fixtures} inserted={result.n_inserted} "
-        f"existing={result.n_existing} no_forecast={result.n_no_forecast}"
+        f"predict: run {stored.run_id} as_of={stored.batch.as_of.isoformat()} "
+        f"horizon={stored.batch.horizon_days} history={stored.batch.n_history} "
+        f"fixtures={stored.batch.n_fixtures} inserted={stored.written.n_inserted} "
+        f"existing={stored.written.n_existing} no_forecast={stored.written.n_no_forecast}"
     )
     return 0
 
