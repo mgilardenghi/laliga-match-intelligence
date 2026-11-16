@@ -918,3 +918,55 @@ def test_detail_rows_stay_within_the_storage_bound(database: Database) -> None:
     assert len(fixtures) == run.n_simulated
     assert len(next_matches) == 3 * len(teams)
     assert len(fixtures) + len(next_matches) <= 440
+
+
+def test_the_next_match_follows_the_kickoff_not_the_score_date(
+    database: Database,
+) -> None:
+    """A postponed pile-up keeps the kickoff order, not the collapsed ``sim_date`` order.
+
+    The season rows are stored with the last matchday first, the way a backfill
+    that ingested a rescheduled fixture late would, so the match id runs opposite
+    to the kickoff order. Every remaining fixture is dated before the as-of date
+    and still scheduled, so all of them are simulated and every one collapses
+    onto the as-of date in ``sim_date`` order. The two candidate orders therefore
+    disagree on purpose: following the kickoff names each club's earliest
+    fixture, while following ``sim_date`` would break the tie by match id and
+    name its latest one.
+    """
+    season_id = _create_season(database.sessions)
+    teams = _create_teams(database.sessions)
+    start = datetime.date(2099, 1, 1)
+    specs = _season_specs(start, played_through=3)
+    _store_matches(
+        database.sessions,
+        season_id=season_id,
+        teams=teams,
+        specs=list(reversed(specs)),
+    )
+    as_of = start + datetime.timedelta(days=40)
+
+    run_id, _ = _request_run(database, as_of)
+    simulation_service.execute_run(database.sessions, run_id)
+
+    match_ids = _match_ids_by_fixture(database, season_id)
+    expected = _next_match_ids(specs, match_ids, teams, as_of)
+    stored_ids_by_team: dict[int, set[int]] = {}
+    for row in _next_match_rows(database, run_id):
+        stored_ids_by_team.setdefault(row.team_id, set()).add(row.match_id)
+    assert {team_id: min(ids) for team_id, ids in stored_ids_by_team.items()} == expected
+    assert all(len(ids) == 1 for ids in stored_ids_by_team.values())
+
+    # The guard has teeth only while the two orders really disagree: the first
+    # club's earliest remaining kickoff carries the highest of its match ids.
+    early = match_ids[
+        (start + datetime.timedelta(days=21), teams[TEAM_NAMES[1]], teams[TEAM_NAMES[0]])
+    ]
+    middle = match_ids[
+        (start + datetime.timedelta(days=28), teams[TEAM_NAMES[2]], teams[TEAM_NAMES[0]])
+    ]
+    late = match_ids[
+        (start + datetime.timedelta(days=35), teams[TEAM_NAMES[3]], teams[TEAM_NAMES[0]])
+    ]
+    assert late < middle < early
+    assert expected[teams[TEAM_NAMES[0]]] == early
