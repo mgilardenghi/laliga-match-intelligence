@@ -3,7 +3,7 @@
 
 COMPOSE := docker compose
 
-.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler e2e e2e-data e2e-loaded e2e-down lint test test-integration build api-client api-client-check clean
+.PHONY: help setup up down logs ps ingest ingest-deps ingest-backfill backtest predict simulate scheduler e2e e2e-guard e2e-data e2e-loaded e2e-down lint test test-integration build api-client api-client-check clean
 
 # Throwaway database for the integration tests. Same image as Compose, a host
 # port that is unlikely to collide, and placeholder credentials only.
@@ -79,36 +79,91 @@ simulate: ingest-deps ## Run a Monte Carlo season simulation and store its resul
 scheduler: ## Start the Celery beat scheduler (profile "scheduler"; its daily cycle downloads data)
 	$(COMPOSE) --profile scheduler up -d --build scheduler
 
-e2e: ## Build the throwaway browser-test stack and run the tests that need no data
+e2e-guard:
+	@# A wrong value here addresses real data: `down -v` on the developer's own
+	@# `lmi` project would delete their volumes, and a reserved port collides with
+	@# the local stack. So every override is validated before any Docker command.
+	@if [ -z "$(E2E_PROJECT)" ] || [ "$(E2E_PROJECT)" = "lmi" ]; then \
+		echo "e2e-guard: E2E_PROJECT must not be empty or 'lmi' (got '$(E2E_PROJECT)')" >&2; \
+		exit 1; \
+	fi
+	@for port in "$(E2E_API_PORT)" "$(E2E_WEB_PORT)"; do \
+		case "$$port" in \
+			''|*[!0-9]*) echo "e2e-guard: port '$$port' must be numeric" >&2; exit 1 ;; \
+		esac; \
+		if [ "$$port" -lt 1024 ] || [ "$$port" -gt 65535 ]; then \
+			echo "e2e-guard: port '$$port' must be between 1024 and 65535" >&2; \
+			exit 1; \
+		fi; \
+		for reserved in 8000 3000 8156 18004 18005 18006 $$(seq 55432 55463); do \
+			if [ "$$port" -eq "$$reserved" ]; then \
+				echo "e2e-guard: port '$$port' is reserved" >&2; \
+				exit 1; \
+			fi; \
+		done; \
+	done
+	@if [ "$(E2E_API_PORT)" -eq "$(E2E_WEB_PORT)" ]; then \
+		echo "e2e-guard: E2E_API_PORT and E2E_WEB_PORT must differ" >&2; \
+		exit 1; \
+	fi
+
+e2e: e2e-guard ## Build the throwaway browser-test stack and run the tests that need no data
 	$(E2E_COMPOSE) up -d --build --wait db redis
 	$(E2E_COMPOSE) up -d --build migrate
 	$(E2E_COMPOSE) wait migrate
 	$(E2E_COMPOSE) up -d --build --wait --no-deps api web
 	E2E_BASE_URL=$(E2E_BASE_URL) uv run --group e2e pytest -o addopts="" e2e -m empty
 
-e2e-data: ## Load the throwaway browser-test stack with real data (network, idempotent)
+e2e-data: e2e-guard ## Load the throwaway browser-test stack with real data (network, idempotent)
 	@if curl -fsS $(E2E_API_URL)/v1/model-metrics >/dev/null 2>&1; then \
 		echo "the e2e stack already holds data"; \
-	else \
-		$(MAKE) ingest-backfill backtest predict simulate COMPOSE="$(E2E_COMPOSE)"; \
+		exit 0; \
 	fi
+	# The loaded tier needs the API published, so the data services are started
+	# here in the same shape as in the `e2e` target before anything is loaded.
+	$(E2E_COMPOSE) up -d --build --wait db redis
+	$(E2E_COMPOSE) up -d --build migrate
+	$(E2E_COMPOSE) wait migrate
+	$(E2E_COMPOSE) up -d --build --wait --no-deps api
+	$(MAKE) ingest-backfill backtest predict simulate COMPOSE="$(E2E_COMPOSE)"
 
-e2e-loaded: ## Run the tests that need data against a standalone dashboard server
+e2e-loaded: e2e-guard ## Run the tests that need data against a standalone dashboard server
 	pnpm --filter web build
 	@rm -rf apps/web/.next/standalone/apps/web/public apps/web/.next/standalone/apps/web/.next/static
 	@mkdir -p apps/web/.next/standalone/apps/web/.next
 	@cp -R apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
 	@cp -R apps/web/public apps/web/.next/standalone/apps/web/public
-	@PORT=$(E2E_WEB_PORT) HOSTNAME=127.0.0.1 API_URL=$(E2E_API_URL) node apps/web/.next/standalone/apps/web/server.js & \
+	# Address only the throwaway project: the loaded tier serves the build from
+	# this worktree, so the Compose `web` service must not answer on the port. A
+	# silent stop failure would leave that service answering for the build, so the
+	# port is probed before the server starts.
+	@$(E2E_COMPOSE) stop web
+	@if curl -fsS $(E2E_BASE_URL) >/dev/null 2>&1; then \
+		echo "something still answers on $(E2E_BASE_URL) after stopping the throwaway web service" >&2; \
+		exit 1; \
+	fi
+	@log=$$(mktemp); \
+	PORT=$(E2E_WEB_PORT) HOSTNAME=127.0.0.1 API_URL=$(E2E_API_URL) node apps/web/.next/standalone/apps/web/server.js >$$log 2>&1 & \
 	server=$$!; \
-	trap 'kill $$server 2>/dev/null || true' EXIT INT TERM; \
+	trap 'kill $$server 2>/dev/null || true; rm -f "$$log"' EXIT INT TERM; \
+	ready=0; \
 	for attempt in $$(seq 1 60); do \
-		if curl -fsS $(E2E_BASE_URL) >/dev/null 2>&1; then break; fi; \
+		if ! kill -0 $$server 2>/dev/null; then \
+			echo "the standalone server exited before it answered on $(E2E_WEB_PORT)" >&2; \
+			cat $$log >&2; \
+			exit 1; \
+		fi; \
+		if curl -fsS $(E2E_BASE_URL) >/dev/null 2>&1; then ready=1; break; fi; \
 		sleep 1; \
 	done; \
+	if [ $$ready -eq 0 ]; then \
+		echo "the standalone server did not answer on $(E2E_WEB_PORT)" >&2; \
+		cat $$log >&2; \
+		exit 1; \
+	fi; \
 	E2E_BASE_URL=$(E2E_BASE_URL) uv run --group e2e pytest -o addopts="" e2e -m loaded
 
-e2e-down: ## Stop the throwaway browser-test stack and delete its volumes
+e2e-down: e2e-guard ## Stop the throwaway browser-test stack and delete its volumes
 	$(E2E_COMPOSE) down -v --remove-orphans
 
 lint: ## Run Python and web linters, formatters and type checks

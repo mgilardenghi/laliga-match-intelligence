@@ -30,8 +30,8 @@ surfaces as a type error in the dashboard instead of as a runtime surprise.
 | `pnpm --filter web build` | Build the dashboard, including its server-side type checking. |
 | `make up` | Build and start the local Docker Compose stack and wait for it to be healthy. |
 | `make e2e` | Build and start the throwaway stack and run the browser tests marked `empty`. It leaves the stack up for inspection. |
-| `make e2e-data` | Load the throwaway stack once. It is idempotent: it skips loading when `GET /v1/model-metrics` already answers `200`. |
-| `make e2e-loaded` | Build the dashboard, start its standalone server on `E2E_WEB_PORT` and run the browser tests marked `loaded`. |
+| `make e2e-data` | Build and start the throwaway data services (db, redis, the migration job and the API), then load them once. It is idempotent: it skips loading when `GET /v1/model-metrics` already answers `200`. |
+| `make e2e-loaded` | Build the dashboard, stop the throwaway stack's `web` service so it cannot answer on the port, then start the standalone server on `E2E_WEB_PORT` and run the browser tests marked `loaded`. |
 | `make e2e-down` | Stop the throwaway stack and delete its volumes. |
 
 ## Environment variables
@@ -58,6 +58,11 @@ tier CI runs. `loaded` runs against real ingested data and is local only.
 
 The throwaway stack is its own Compose project on its own ports, so it never
 touches the user's `lmi` stack.
+
+The three `E2E_*` values are validated before any Docker command runs: the
+project must differ from `lmi`, and the ports must be numeric, distinct and
+outside the reserved ranges. An invalid value fails before a container is
+touched.
 
 Two rules hold for every test. A test asserts structure, never values: it
 checks that a page renders the region, the column or the state it should, not
