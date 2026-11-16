@@ -37,10 +37,10 @@ from lmi_core.db.models import Team as TeamModel
 from lmi_core.simulation import Qualification
 from lmi_core.simulation.service import create_run
 from sqlalchemy import ColumnElement, func, select, update
-from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from lmi_api import views
 from lmi_api.db import SessionDep
 from lmi_api.errors import PROBLEM_MEDIA_TYPE, PROBLEM_RESPONSES
 from lmi_api.queue import QueueDep
@@ -49,8 +49,6 @@ from lmi_api.schemas.simulations import (
     SimulationCurrent,
     SimulationDetail,
     SimulationHistory,
-    SimulationHistoryPoint,
-    SimulationHistoryTeam,
     SimulationKind,
     SimulationModel,
     SimulationPointsDistribution,
@@ -359,61 +357,12 @@ def get_simulation_history(
     if team_id is not None:
         _raise_if_team_is_unknown(session, team_id)
 
-    latest_succeeded = (
-        select(SimulationRunModel.id, SimulationRunModel.as_of_date)
-        .where(
-            SimulationRunModel.season_id == resolved.id,
-            SimulationRunModel.status == "succeeded",
-        )
-        .ext(distinct_on(SimulationRunModel.as_of_date))
-        .order_by(
-            SimulationRunModel.as_of_date,
-            SimulationRunModel.finished_at.desc().nulls_last(),
-            SimulationRunModel.requested_at.desc(),
-            SimulationRunModel.id.desc(),
-        )
-        .subquery()
+    points = views.load_simulation_history_points(
+        session,
+        season_id=resolved.id,
+        team_ids=[team_id] if team_id is not None else None,
     )
-    runs = list(
-        session.scalars(
-            select(SimulationRunModel)
-            .join(latest_succeeded, latest_succeeded.c.id == SimulationRunModel.id)
-            .order_by(SimulationRunModel.as_of_date)
-        )
-    )
-
-    teams_by_run: dict[uuid.UUID, list[SimulationHistoryTeam]] = {run.id: [] for run in runs}
-    if teams_by_run:
-        team_statement = (
-            select(SimulationTeamResultModel, TeamModel.name)
-            .join(TeamModel, TeamModel.id == SimulationTeamResultModel.team_id)
-            .where(SimulationTeamResultModel.run_id.in_(list(teams_by_run)))
-        )
-        if team_id is not None:
-            team_statement = team_statement.where(SimulationTeamResultModel.team_id == team_id)
-        team_statement = team_statement.order_by(
-            SimulationTeamResultModel.run_id,
-            SimulationTeamResultModel.mean_position,
-            SimulationTeamResultModel.mean_points.desc(),
-            TeamModel.name,
-            TeamModel.id,
-        )
-        for result, name in session.execute(team_statement).all():
-            teams_by_run[result.run_id].append(_history_team(result, name))
-
-    return SimulationHistory(
-        season=resolved.code,
-        points=[
-            SimulationHistoryPoint(
-                run_id=run.id,
-                as_of_date=run.as_of_date,
-                kind=cast(SimulationKind, run.kind),
-                last_complete_matchday=run.last_complete_matchday,
-                teams=teams_by_run[run.id],
-            )
-            for run in runs
-        ],
-    )
+    return SimulationHistory(season=resolved.code, points=points)
 
 
 @router.get("/{run_id}", responses=PROBLEM_RESPONSES)
@@ -673,21 +622,4 @@ def _team_row(result: SimulationTeamResultModel, name: str) -> SimulationTeamRow
         p_ucl=result.p_ucl,
         p_europe=result.p_europe,
         p_relegation=result.p_relegation,
-    )
-
-
-def _history_team(result: SimulationTeamResultModel, name: str) -> SimulationHistoryTeam:
-    """Return the payload of one team row inside one point of the history.
-
-    Only the columns the history compares across as-of dates are carried, so a
-    point stays small whatever the number of teams and dates.
-    """
-    return SimulationHistoryTeam(
-        team=Team(id=result.team_id, name=name),
-        p_title=result.p_title,
-        p_ucl=result.p_ucl,
-        p_europe=result.p_europe,
-        p_relegation=result.p_relegation,
-        expected_points=result.mean_points,
-        expected_position=result.mean_position,
     )
