@@ -36,19 +36,21 @@ export type MirroredBarsProps = {
   readonly note?: ReactNode;
 };
 
-const WIDTH = 620;
-// The value of a bar prints at its outer end, outside the plot, so both sides
-// keep a lane of their own: it holds a formatted value such as "12.34" at 12 px
-// without reaching the metric labels or running past the drawing. The labels and
-// the plot therefore have separate edges; a single shared edge would leave the
-// value a few pixels wide and let it print over the label.
-const LABEL_EDGE = 150;
-const PLOT_LEFT = 206;
-const PLOT_RIGHT = 542;
+// The drawing is narrow enough for a phone: the metric label sits above its
+// row instead of beside it, so the mirrored pair fits in 300 px and nothing hides
+// behind a sideways scroll. The values print at the outer end of each bar, so
+// both sides keep a lane of their own that holds a value such as "12.34" at
+// 12 px without running past the drawing.
+const WIDTH = 300;
+const PLOT_LEFT = 46;
+const PLOT_RIGHT = 254;
 const VALUE_GAP = 5;
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const HALF_WIDTH = CENTRE - PLOT_LEFT;
-const ROW_HEIGHT = 30;
+// A row holds its 12 px label on top and the bar pair below it.
+const ROW_HEIGHT = 40;
+const LABEL_OFFSET = 8;
+const BAR_OFFSET = 18;
 const BAR_HEIGHT = 14;
 const TOP = 26;
 const BOTTOM = 10;
@@ -98,25 +100,19 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
             <title id={ids.titleId}>{title}</title>
             <desc id={ids.descId}>{description}</desc>
             <text
-              x={PLOT_LEFT}
+              x={0}
               y={14}
               textAnchor="start"
               className={styles.chartAxis}
             >
               {againstLabel}
             </text>
-            <text x={PLOT_RIGHT} y={14} textAnchor="end" className={styles.chartAxis}>
+            <text x={WIDTH} y={14} textAnchor="end" className={styles.chartAxis}>
               {ownLabel}
             </text>
-            <line
-              x1={CENTRE}
-              y1={TOP - 4}
-              x2={CENTRE}
-              y2={height - BOTTOM}
-              className={styles.chartAxisLine}
-            />
             {rows.map((row, index) => {
-              const y = TOP + index * ROW_HEIGHT;
+              const rowTop = TOP + index * ROW_HEIGHT;
+              const y = rowTop + BAR_OFFSET;
               const centreY = y + BAR_HEIGHT / 2;
               // Each row is scaled to its own largest value, so a row of goals and
               // a row of shots both use the width they need.
@@ -127,14 +123,21 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
               return (
                 <g key={row.label}>
                   <text
-                    x={LABEL_EDGE}
-                    y={centreY}
-                    textAnchor="end"
+                    x={CENTRE}
+                    y={rowTop + LABEL_OFFSET}
+                    textAnchor="middle"
                     dominantBaseline="central"
                     className={styles.chartLabel}
                   >
                     {row.label}
                   </text>
+                  <line
+                    x1={CENTRE}
+                    y1={y - 3}
+                    x2={CENTRE}
+                    y2={y + BAR_HEIGHT + 3}
+                    className={styles.chartAxisLine}
+                  />
                   {againstWidth > 0 ? (
                     <rect
                       x={CENTRE - againstWidth}

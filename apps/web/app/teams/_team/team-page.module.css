@@ -290,6 +290,12 @@
   fill: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  /* A halo in the page colour keeps a value legible where a league tick or the
+     zero line passes behind it. */
+  paint-order: stroke;
+  stroke: var(--background);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 /* The league tick is drawn on both sides of the zero line, and the stroke is

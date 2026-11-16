@@ -90,9 +90,13 @@ fixed height. Five drawings still hold their labels in an SVG — the projected
 positions heatmap, the calibration panels, the form squares, and the two
 per-match profiles on the club and match pages — and each of them renders at its
 natural size (its CSS size equals its `viewBox`, with a scroll container where
-that is wider than a phone), so nothing in them scales either. An assertion on
-the gallery and one on the real pages measure the size a reader sees and fail if
-any chart text leaves the 11–18 px band.
+that is wider than a phone), so nothing in them scales either. The two profiles
+put each metric label above its pair of bars and are 300 px wide, so both sides
+of the mirror fit a phone with nothing behind a sideways scroll, and each row has
+its own scale because the metrics count different things. An assertion on the
+gallery and one on the real pages measure the size a reader sees and fail if any
+chart text leaves the 11–18 px band, and one more fails if a profile chart has
+anything to scroll at 390 px.
 
 Axes fit their data. `IntervalBars` rounds its domain out to the next nice step
 of the rows it draws, so the axis ends within one step of the largest value

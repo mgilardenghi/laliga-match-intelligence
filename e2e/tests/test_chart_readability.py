@@ -491,3 +491,48 @@ def test_real_pages_never_scale_chart_text(page: Page, dashboard_url: str) -> No
     ):
         detail_path = _follow_first_link(page, dashboard_url, index_path, selector)
         _assert_no_scaled_text(page, detail_path)
+
+
+PROFILE_CAPTION_WORDS = ("per-match averages", "per-match profile")
+
+PROFILE_FIT_SCRIPT = """
+(figure) => {
+  const svg = figure.querySelector("svg[role='img']");
+  const holder = svg ? svg.parentElement : null;
+  if (!holder) { return null; }
+  return { scrollWidth: holder.scrollWidth, clientWidth: holder.clientWidth };
+}
+"""
+
+
+@pytest.mark.loaded
+def test_profile_charts_fit_a_phone_without_hidden_data(page: Page, dashboard_url: str) -> None:
+    """The mirrored profile charts show both of their sides on a phone.
+
+    Both sides of the chart carry data: the bar on one side is the club and the
+    bar on the other its opponents. A drawing wider than its container would put
+    one side behind a sideways scroll with no hint that it exists, and the text
+    rule above would not notice, because every label in it is still 12 px. The
+    drawing's own container must therefore have nothing to scroll.
+    """
+    page.set_viewport_size({"width": PHONE_WIDTH, "height": PHONE_HEIGHT})
+    checked = 0
+    for index_path, selector in (
+        (TEAMS_INDEX_PATH, CLUB_LINK_SELECTOR),
+        (MATCHDAY_INDEX_PATH, MATCH_LINK_SELECTOR),
+    ):
+        detail_path = _follow_first_link(page, dashboard_url, index_path, selector)
+        figures = page.locator("figure")
+        for position in range(figures.count()):
+            figure = figures.nth(position)
+            if not any(word in _caption(figure).lower() for word in PROFILE_CAPTION_WORDS):
+                continue
+            box = figure.evaluate(PROFILE_FIT_SCRIPT)
+            assert box is not None, f"{detail_path}: a profile figure draws no SVG"
+            assert box["scrollWidth"] <= box["clientWidth"] + 1, (
+                f"{detail_path}: figure {_caption(figure)!r} is {box['scrollWidth']}px wide in a "
+                f"{box['clientWidth']}px container, so a phone hides part of its data behind a "
+                "sideways scroll"
+            )
+            checked += 1
+    assert checked >= 2, f"only {checked} profile figures were measured; the pages changed"

@@ -425,7 +425,7 @@ export async function TeamPage(props: TeamPageProps): Promise<ReactElement> {
             title="Per-match averages against the league average"
             description="Mirrored bars: the club's per-match average extends to the right, the average of the clubs it faced to the left, and the tick on both sides marks the league average."
             table={profileTable}
-            note={`Averages cover ${formatCount(
+            note={`Each row has its own scale, because the metrics count different things. The tick on a row is the league average. Averages cover ${formatCount(
               stats.stat_coverage,
             )} of ${formatCount(stats.played)} matches; expected goals cover ${formatCount(
               stats.xg_coverage,

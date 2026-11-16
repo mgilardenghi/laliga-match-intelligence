@@ -8,6 +8,8 @@
  * on both sides of the same row, because it is one number and the two bars are
  * measured from the same zero.
  *
+ * Each row carries its own scale, because the metrics count different things.
+ *
  * The component draws only the SVG. The heading, the description, the data
  * table and the coverage note belong to the `ChartFigure` the page wraps around
  * it, so the chart never states a number the table below cannot back up. A
@@ -59,30 +61,30 @@ export type ProfileBarsProps = {
 
 const TITLE = "Per-match averages of the club and of its opponents";
 const DESCRIPTION =
-  "One row per metric. The bar to the right is the club's own per-match average, the bar to the left the average of the clubs it faced, and the tick marks the league average. A metric the season did not record has no bar.";
+  "One row per metric, each on its own scale. The bar to the right is the club's own per-match average, the bar to the left the average of the clubs it faced, and the tick marks the league average. A metric the season did not record has no bar.";
 
 // The drawing is rendered at its natural size: the element is given the pixel
 // width and height of its own `viewBox`, so the rendered scale is exactly 1 and
-// every label keeps the pixel size the stylesheet declares. The scroller around
-// it takes the width a phone cannot fit, so the drawing never widens the page.
-const WIDTH = 636;
-// The metric labels sit left of the plot and are right-aligned against it, so
-// the longest one decides where the plot starts: 12 px of "Shots on target"
-// needs about 100 px, and the gutter adds the gap to the plot on top of that.
-const LABEL_EDGE = 128;
+// every label keeps the pixel size the stylesheet declares. It is also narrow
+// enough for a phone: the metric label sits above its row instead of beside it,
+// so the whole mirrored pair fits in 300 px and nothing hides behind a sideways
+// scroll. The scroller stays only as a safety net for a narrower window.
+const WIDTH = 300;
 // The value of a bar prints at its outer end, outside the plot, so both sides
 // keep a gutter of their own: it holds a formatted value such as "12.34" at
-// 12 px without reaching the metric labels or running past the drawing.
-const PLOT_LEFT = 184;
-const PLOT_RIGHT = 584;
+// 12 px without running past the drawing.
+const PLOT_LEFT = 46;
+const PLOT_RIGHT = 254;
 const VALUE_GAP = 5;
 // The zero line is placed so both sides of the plot have the same width; a
 // short right side would make the same average look larger than its mirror.
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const TOP = 34;
-// A row is tall enough to hold a 12 px metric label without touching the row
-// above or below it.
-const ROW_HEIGHT = 28;
+// A row holds its 12 px label on top and the bar pair below it, so the label
+// never sits on the zero line and the rows do not touch.
+const ROW_HEIGHT = 42;
+const LABEL_OFFSET = 8;
+const BAR_OFFSET = 24;
 const BAR_HEIGHT = 12;
 const TICK_HEIGHT = 8;
 const BOTTOM = 22;
@@ -97,23 +99,6 @@ export function ProfileBars(props: ProfileBarsProps): ReactElement {
   const ids = chartIds(TITLE, id);
 
   const height = TOP + PROFILE_METRICS.length * ROW_HEIGHT + BOTTOM;
-
-  // One shared scale for every row, so the bars of two metrics are comparable.
-  // It spans zero and the largest value of any of the three lines, which is why
-  // a month of red cards still fits beside a month of shots.
-  const observed: number[] = [];
-  for (const metric of PROFILE_METRICS) {
-    for (const line of [forLine, againstLine, leagueLine]) {
-      const value = line[metric.key];
-      if (value !== null) {
-        observed.push(value);
-      }
-    }
-  }
-  const scale = linearScale(
-    [0, niceMax(observed.reduce((max, value) => Math.max(max, value), 0))],
-    [CENTRE, PLOT_RIGHT],
-  );
 
   return (
     <div className={styles.chartScroller}>
@@ -143,29 +128,39 @@ export function ProfileBars(props: ProfileBarsProps): ReactElement {
         >
           For
         </text>
-        <line
-          x1={CENTRE}
-          y1={TOP - 6}
-          x2={CENTRE}
-          y2={TOP + PROFILE_METRICS.length * ROW_HEIGHT + 4}
-          className={styles.axisLine}
-        />
         {PROFILE_METRICS.map((metric, index) => {
-          const centreY = TOP + index * ROW_HEIGHT + ROW_HEIGHT / 2;
+          const rowTop = TOP + index * ROW_HEIGHT;
+          const centreY = rowTop + BAR_OFFSET + BAR_HEIGHT / 2;
           const forValue = forLine[metric.key];
           const againstValue = againstLine[metric.key];
           const leagueValue = leagueLine[metric.key];
+          // Each row is scaled to its own largest value, so goals and shots both
+          // use the width they need and a short bar never reads as "nothing".
+          const observed = [forValue, againstValue, leagueValue].filter(
+            (value): value is number => value !== null,
+          );
+          const scale = linearScale(
+            [0, niceMax(observed.reduce((max, value) => Math.max(max, value), 0))],
+            [CENTRE, PLOT_RIGHT],
+          );
           return (
             <g key={metric.key}>
               <text
-                x={LABEL_EDGE - 6}
-                y={centreY}
-                textAnchor="end"
+                x={CENTRE}
+                y={rowTop + LABEL_OFFSET}
+                textAnchor="middle"
                 dominantBaseline="central"
                 className={styles.metricLabel}
               >
                 {metric.label}
               </text>
+              <line
+                x1={CENTRE}
+                y1={centreY - BAR_HEIGHT / 2 - 3}
+                x2={CENTRE}
+                y2={centreY + BAR_HEIGHT / 2 + 3}
+                className={styles.axisLine}
+              />
               {forValue === null ? null : (
                 <rect
                   x={CENTRE}
@@ -232,22 +227,6 @@ export function ProfileBars(props: ProfileBarsProps): ReactElement {
           className={styles.axisText}
         >
           0
-        </text>
-        <text
-          x={PLOT_LEFT}
-          y={height - 6}
-          textAnchor="start"
-          className={styles.axisText}
-        >
-          higher
-        </text>
-        <text
-          x={PLOT_RIGHT}
-          y={height - 6}
-          textAnchor="end"
-          className={styles.axisText}
-        >
-          higher
         </text>
       </svg>
     </div>
