@@ -32,6 +32,10 @@ CLUB_COUNT = 20
 
 HEATMAP_CAPTION = "Projected finishing positions"
 INTERVALS_CAPTION = "Projected final points"
+RUN_NOTE = re.compile(
+    r"^Monte Carlo run as of \d{4}-\d{2}-\d{2}: \d+ simulated seasons, "
+    r"last complete matchday (?:\d+|—)\."
+)
 
 
 def _main_table(page: Page) -> Locator:
@@ -132,6 +136,8 @@ def test_the_projected_columns_and_figures_render(page: Page, dashboard_url: str
         expect(figure.locator("figcaption")).to_have_count(1)
         expect(figure.locator('svg[role="img"]')).to_have_count(1)
         expect(figure.locator("details summary")).to_have_text("Data table")
+        # The run behind the figure is named in the visible note under the chart.
+        expect(figure.locator(":scope > p")).to_contain_text(RUN_NOTE)
 
 
 @pytest.mark.loaded
