@@ -157,7 +157,7 @@ def test_help_exits_with_zero() -> None:
     assert excinfo.value.code == 0
 
 
-def test_help_lists_the_three_m4_stub_commands(capsys: pytest.CaptureFixture[str]) -> None:
+def test_help_lists_the_three_m4_commands(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["--help"])
 
@@ -170,13 +170,6 @@ def test_help_lists_the_three_m4_stub_commands(capsys: pytest.CaptureFixture[str
 
 # `predict` is implemented, so its stub assertion is gone: `tests/test_predict_cli.py`
 # covers the command's flags, exit codes and stored rows.
-
-
-def test_simulate_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
-    code = main(["simulate"])
-
-    assert code == 2
-    assert capsys.readouterr().err.strip() == "simulate: not implemented"
 
 
 def test_daily_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
