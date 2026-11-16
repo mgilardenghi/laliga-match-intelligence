@@ -1053,25 +1053,43 @@ export interface paths {
          *     uses, so the two cannot rank the season differently. ``None`` is kept for an
          *     opponent the table does not rank.
          *
-         *     ``p_win``, ``p_draw`` and ``p_loss`` are always ``null`` today, and so is
-         *     ``next_match``. Those are the R5 per-fixture and next-match simulation
-         *     outputs, which this milestone does not store: the fields are declared
-         *     nullable so a stored simulation can fill them without a contract change, and
-         *     the read serves them as null instead of inventing a number or a placeholder
-         *     model.
+         *     ``p_win``, ``p_draw`` and ``p_loss`` are the latest succeeded run's
+         *     probability of the fixture's three results from the club's side: at home the
+         *     stored ``p_home``, ``p_draw`` and ``p_away``, away the same triple read from
+         *     the other end, so ``p_win`` means the club wins wherever it plays. They are
+         *     null when that run stored no probability for the fixture, which is the case
+         *     for a run created before revision 0004 and for a fixture the run did not
+         *     simulate.
          *
-         *     The request issues at most nine statements whatever the number of seasons and
-         *     fixtures: the club, the season resolution, every stored season, every match
-         *     of every season, the names of those clubs, the latest succeeded run with its
-         *     team rows and their club names, the history runs, the history team rows and
-         *     the fixture summaries. The club's own fixtures and the resolved season's
-         *     table are picked out of the all-matches statement in Python, so no read here
-         *     is one statement per season or per fixture. Three of the nine are conditional:
-         *     the names read is skipped when no match is stored at all, the two history
-         *     statements are issued only when the race has rivals, and the summary
-         *     statement only when the club has a remaining fixture. A race over a season
-         *     with a match, without a succeeded run and without a remaining fixture stops
-         *     after six.
+         *     ``next_match`` is the first of those fixtures and what each of its three
+         *     results does to the club, read from the same run's stored outcome counts
+         *     through :func:`lmi_core.analytics.relegation.next_match_swing`. Each outcome
+         *     carries the simulated frequency of the result, so ``p_outcome`` may differ
+         *     slightly -- about half a percentage point at 10 000 runs -- from the model
+         *     probability of that same fixture in ``remaining_fixtures``: the swing is a
+         *     frequency of the run's samples, the fixture triple is the model's
+         *     probability. Its ``current`` is the club's own row of that same run, so a
+         *     client computes every delta of the block against one consistent baseline.
+         *     The block is null when the core rule answers unknown -- a run created before
+         *     revision 0004, a stored match that is no longer the club's next fixture, or a
+         *     result the run never sampled -- and it is null as well when the run holds no
+         *     row for the club, because ``current`` is that row and a swing without its
+         *     baseline would misstate every delta.
+         *
+         *     The request issues at most eleven statements whatever the number of seasons
+         *     and fixtures: the club, the season resolution, every stored season, every
+         *     match of every season, the names of those clubs, the latest succeeded run
+         *     with its team rows and their club names, the run's fixture probabilities, its
+         *     next-match counts, the history runs, the history team rows and the fixture
+         *     summaries. The club's own fixtures and the resolved season's table are picked
+         *     out of the all-matches statement in Python, so no read here is one statement
+         *     per season or per fixture. Six of the eleven are conditional: the names read
+         *     is skipped when no match is stored at all, the fixture probabilities and the
+         *     next-match counts are issued only when the season has a succeeded run and the
+         *     club a remaining fixture, the two history statements only when the race has
+         *     rivals, and the summary statement only when the club has a remaining fixture.
+         *     A race over a season with a match, without a succeeded run and without a
+         *     remaining fixture stops after six.
          *
          *     The return annotation is the response model, so no ``response_model`` is
          *     passed.
@@ -1956,20 +1974,58 @@ export interface components {
          *
          *     ``match_id`` names the fixture the outcomes belong to, so a client links to
          *     the match endpoint without matching on a date, and the outcomes nest under
-         *     it so one response carries both.
+         *     it so one response carries both. ``current`` is the club's row of the same
+         *     run, so every outcome is compared against the baseline the run measured
+         *     rather than against a second simulation.
+         *
+         *     The block comes from the latest succeeded run of the season and is null when
+         *     that run did not store it: a run created before revision 0004 has no
+         *     next-match detail, a stored match that is no longer the club's next fixture
+         *     is answered as unknown by
+         *     :func:`lmi_core.analytics.relegation.next_match_swing`, a result the run never
+         *     sampled has no conditional probability, and a run without a row for the club
+         *     has no ``current`` to compare against.
          */
         NextMatch: {
+            current: components["schemas"]["NextMatchCurrent"];
             /** Match Id */
             match_id: number;
             outcomes: components["schemas"]["NextMatchOutcomes"];
         };
         /**
+         * NextMatchCurrent
+         * @description The club's own row of the same run the next-match swing comes from.
+         *
+         *     ``p_relegation``, ``p_europe`` and ``p_title`` are the run's probabilities for
+         *     the club over the whole remaining season, and ``expected_points`` is its
+         *     expected final total -- the value ``rivals[].expected_points`` already
+         *     carries. Reading these four numbers and the swing from one run is what lets a
+         *     client compute every delta of the block against one consistent baseline
+         *     instead of mixing two runs' projections.
+         */
+        NextMatchCurrent: {
+            /** Expected Points */
+            expected_points: number;
+            /** P Europe */
+            p_europe: number;
+            /** P Relegation */
+            p_relegation: number;
+            /** P Title */
+            p_title: number;
+        };
+        /**
          * NextMatchOutcome
          * @description What one outcome of the next match would do to the club's projected season.
          *
-         *     The four probabilities and the expected total are what the next-match
-         *     simulation of the run reports for that outcome, so a client compares a win,
-         *     a draw and a loss on one scale instead of reading one projected table.
+         *     The four probabilities and the expected total are what the latest succeeded
+         *     run of the season measured for that outcome, so a client compares a win, a
+         *     draw and a loss on one scale instead of reading one projected table.
+         *     ``p_outcome`` is the share of the simulated runs that produced the outcome,
+         *     while ``p_relegation``, ``p_europe`` and ``p_title`` are the shares of those
+         *     same runs that ended each way; ``expected_points`` is their mean final total.
+         *     Because ``p_outcome`` is a sampled frequency, it may differ slightly -- about
+         *     half a percentage point at 10 000 runs -- from the model probability the same
+         *     run stores for the fixture.
          */
         NextMatchOutcome: {
             /** Expected Points */
@@ -2273,9 +2329,11 @@ export interface components {
          *     ``as_of_date`` name the simulation the rivals and the series come from and
          *     are null when the season has none.
          *
-         *     ``next_match`` is null in this milestone. Its shape is already here, so the
-         *     day the run stores the per-outcome projections they are served in this
-         *     payload instead of in a new resource.
+         *     ``next_match`` is the club's next fixture with what each of its results does
+         *     to the race, read from the same run as the rivals and the series. It is null
+         *     when that run stored no next-match detail for the club, or answered unknown
+         *     for it: an absent block says the run did not measure it, not that the club
+         *     has no fixture left.
          */
         RelegationRace: {
             /** As Of Date */
@@ -2322,10 +2380,13 @@ export interface components {
          *
          *     ``venue`` is where the club plays it, and ``opponent_position`` the
          *     opponent's place in the season's table, or null for a club the table does
-         *     not rank. ``p_win``, ``p_draw`` and ``p_loss`` are the per-fixture
-         *     simulation outputs the run will store, and are null today: the fields exist
-         *     so a stored simulation fills them without a contract change, not because the
-         *     numbers are currently computed and withheld.
+         *     not rank. ``p_win``, ``p_draw`` and ``p_loss`` are the run's probabilities of
+         *     the three results from the club's side: at home the stored ``p_home``,
+         *     ``p_draw`` and ``p_away``, away the same triple read from the other end, so
+         *     ``p_win`` always describes the club and not the venue. They come from the
+         *     latest succeeded run of the season and are null when that run did not store
+         *     the fixture, which is the case for a run created before revision 0004 and for
+         *     a fixture the run did not simulate.
          */
         RemainingFixture: {
             match: components["schemas"]["MatchSummary"];
