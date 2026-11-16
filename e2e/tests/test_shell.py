@@ -48,9 +48,7 @@ def _active_text(page: Page) -> str:
 
 
 @pytest.mark.empty
-def test_shell_renders_landmarks_navigation_and_footer(
-    page: Page, dashboard_url: str
-) -> None:
+def test_shell_renders_landmarks_navigation_and_footer(page: Page, dashboard_url: str) -> None:
     page.goto(dashboard_url)
 
     expect(page.locator("header")).to_have_count(1)
@@ -66,20 +64,16 @@ def test_shell_renders_landmarks_navigation_and_footer(
     links = nav.get_by_role("link")
     expect(links).to_have_count(len(NAV_ITEMS))
     hrefs = [links.nth(index).get_attribute("href") for index in range(len(NAV_ITEMS))]
-    assert hrefs == [href for href, _label in NAV_ITEMS], (
-        f"navigation targets are {hrefs}"
-    )
+    assert hrefs == [href for href, _label in NAV_ITEMS], f"navigation targets are {hrefs}"
     for index, (_href, label) in enumerate(NAV_ITEMS):
         expect(links.nth(index)).to_contain_text(label)
 
     footer = page.locator("footer")
     expect(footer.locator("p", has_text="API status:")).to_have_count(1)
-    expect(
-        footer.get_by_role("link", name="football-data.co.uk")
-    ).to_have_attribute("href", "https://www.football-data.co.uk/")
-    expect(
-        footer.get_by_role("link", name="openfootball/football.json")
-    ).to_have_attribute(
+    expect(footer.get_by_role("link", name="football-data.co.uk")).to_have_attribute(
+        "href", "https://www.football-data.co.uk/"
+    )
+    expect(footer.get_by_role("link", name="openfootball/football.json")).to_have_attribute(
         "href", "https://github.com/openfootball/football.json"
     )
 
@@ -113,9 +107,7 @@ def test_navigation_is_reachable_by_keyboard(page: Page, dashboard_url: str) -> 
 
 
 @pytest.mark.empty
-def test_unknown_route_renders_the_not_found_page(
-    page: Page, dashboard_url: str
-) -> None:
+def test_unknown_route_renders_the_not_found_page(page: Page, dashboard_url: str) -> None:
     url = f"{dashboard_url}/matches/999999999"
     response = page.goto(url)
 
@@ -126,9 +118,7 @@ def test_unknown_route_renders_the_not_found_page(
 
 
 @pytest.mark.empty
-def test_theme_cookie_round_trips_without_a_flash(
-    page: Page, dashboard_url: str
-) -> None:
+def test_theme_cookie_round_trips_without_a_flash(page: Page, dashboard_url: str) -> None:
     page.goto(dashboard_url)
 
     # With no cookie the document follows the system: no attribute at all, so
@@ -145,9 +135,9 @@ def test_theme_cookie_round_trips_without_a_flash(
             break
         toggle.click()
 
-    assert (
-        page.evaluate("() => document.documentElement.dataset.theme") == "dark"
-    ), "the toggle must reach the dark theme"
+    assert page.evaluate("() => document.documentElement.dataset.theme") == "dark", (
+        "the toggle must reach the dark theme"
+    )
 
     cookies = {cookie["name"]: cookie["value"] for cookie in page.context.cookies()}
     assert cookies.get(THEME_COOKIE) == "dark", (
@@ -197,9 +187,11 @@ def test_picking_a_focus_team_stores_it_and_returns_to_the_table(
 
     # The form renders only on a row that is not the focus team, so a row that
     # carries the button is a change of choice by construction.
-    row = page.locator("tbody tr").filter(
-        has=page.get_by_role("button", name="Make this my focus team")
-    ).first
+    row = (
+        page.locator("tbody tr")
+        .filter(has=page.get_by_role("button", name="Make this my focus team"))
+        .first
+    )
     team_id = row.locator('input[name="teamId"]').get_attribute("value")
     club = row.locator("th").inner_text().strip()
     assert team_id is not None, "the picker must submit the club's identifier"
