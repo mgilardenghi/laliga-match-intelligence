@@ -17,10 +17,13 @@ byte-identical team rows, and a second ``--backfill`` adds no run.
 """
 
 import datetime
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
 from lmi_core.db.models import Match, Season, SimulationRun, SimulationTeamResult, Team
+from lmi_core.simulation import Qualification
+from lmi_core.simulation.service import create_run
 from lmi_worker.cli import main
 from sqlalchemy import insert, select, text
 
@@ -322,16 +325,39 @@ def test_the_same_arguments_twice_store_identical_team_rows(
 
 
 @pytest.mark.integration
+def _expected_backfill_dates() -> list[datetime.date]:
+    """Return the leakage-free as-of dates of the fully played invented season."""
+    dates = {FIRST_MATCHDAY - datetime.timedelta(days=1)}
+    dates.update(
+        _matchday_date(matchday) + datetime.timedelta(days=1)
+        for matchday in range(1, N_MATCHDAYS + 1)
+    )
+    return sorted(dates)
+
+
+def _queued_live_run(db: MigratedDatabase, as_of: datetime.date) -> uuid.UUID:
+    """Store one queued live run for ``as_of``, as another caller would."""
+    with db.factories() as session:
+        run, _ = create_run(
+            session,
+            season_code=SEASON_CODE,
+            as_of_date=as_of,
+            n_runs=N_RUNS,
+            seed=SEED,
+            trigger="cli",
+            qualification=Qualification(),
+            kind="live",
+        )
+        return run.id
+
+
+@pytest.mark.integration
 def test_a_second_backfill_adds_no_run(
     migrated_engine: MigratedDatabase, capsys: pytest.CaptureFixture[str]
 ) -> None:
     team_ids = _team_ids(migrated_engine)
     _store_season(migrated_engine, team_ids)
-    expected = {FIRST_MATCHDAY - datetime.timedelta(days=1)}
-    expected.update(
-        _matchday_date(matchday) + datetime.timedelta(days=1) for matchday in range(1, 15)
-    )
-    expected_dates = sorted(expected)
+    expected_dates = _expected_backfill_dates()
 
     arguments = ["simulate", "--season", SEASON_CODE, "--runs", str(N_RUNS)]
     arguments += ["--seed", str(SEED), "--backfill"]
@@ -364,6 +390,50 @@ def test_a_second_backfill_adds_no_run(
     second_lines = second_print.splitlines()
     assert len(second_lines) == len(expected_dates)
     assert all(line.endswith("skipped") for line in second_lines)
+    assert [run.id for run in _stored_runs(migrated_engine, kind="backfill")] == [
+        run.id for run in stored
+    ]
+
+
+@pytest.mark.integration
+def test_a_backfill_date_held_by_an_active_live_run_is_reported_not_taken(
+    migrated_engine: MigratedDatabase, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The natural key has no kind, so a live row can hold a backfill date.
+
+    Executing that row here would print a live run as a backfilled date while no
+    ``backfill`` row exists, and the next invocation would try again. The date is
+    reported and nothing is executed, so a repeat adds no run either.
+    """
+    team_ids = _team_ids(migrated_engine)
+    _store_season(migrated_engine, team_ids)
+    expected_dates = _expected_backfill_dates()
+    blocked_day = expected_dates[0]
+    live_run_id = _queued_live_run(migrated_engine, blocked_day)
+
+    arguments = ["simulate", "--season", SEASON_CODE, "--runs", str(N_RUNS)]
+    arguments += ["--seed", str(SEED), "--backfill"]
+
+    first = main(arguments)
+    captured = capsys.readouterr()
+    assert first == 1
+    lines = captured.out.splitlines()
+    assert len(lines) == len(expected_dates)
+    assert lines[0] == f"{blocked_day.isoformat()} {live_run_id} blocked by live run"
+    assert all(line.endswith("succeeded") for line in lines[1:])
+    assert f"is held by the active live run {live_run_id}" in captured.err
+
+    stored = _stored_runs(migrated_engine, kind="backfill")
+    assert [run.as_of_date for run in stored] == expected_dates[1:]
+    with migrated_engine.factories() as session:
+        live = session.get(SimulationRun, live_run_id)
+    assert live is not None
+    assert live.status == "queued"
+
+    second = main(arguments)
+    captured = capsys.readouterr()
+    assert second == 1
+    assert captured.out.splitlines()[0] == lines[0]
     assert [run.id for run in _stored_runs(migrated_engine, kind="backfill")] == [
         run.id for run in stored
     ]

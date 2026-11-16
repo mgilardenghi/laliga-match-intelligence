@@ -226,6 +226,16 @@ def _validated_probs(score_probs: NDArray[np.float64], n_fixtures: int) -> NDArr
     if probs.shape != expected_shape:
         raise ValueError(f"score_probs must have shape {expected_shape}, got {probs.shape}")
     rows = probs.reshape(n_fixtures, _SCORELINE_CELLS)
+    # A non-finite cell is rejected first: the comparisons below are all false
+    # against NaN, so a NaN row would pass them and reach the sampler.
+    non_finite = np.argwhere(~np.isfinite(rows))
+    if non_finite.size:
+        index = int(non_finite[0][0])
+        cell = int(non_finite[0][1])
+        raise ValueError(
+            f"score_probs row {index} has a non-finite probability {float(rows[index, cell])} "
+            f"at scoreline {cell // _SCORELINE_GOALS}-{cell % _SCORELINE_GOALS}"
+        )
     negative = np.argwhere(rows < 0)
     if negative.size:
         index = int(negative[0][0])

@@ -28,7 +28,7 @@ from lmi_core.db.testing import require_disposable_database
 from lmi_core.simulation import service as simulation_service
 from lmi_core.simulation.engine import Qualification, simulate_season
 from lmi_core.standings import MatchResult, compute_standings
-from sqlalchemy import func, select, text
+from sqlalchemy import Select, false, func, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -591,6 +591,56 @@ def test_create_run_reuses_active_rows_and_inserts_after_success(
     assert new_id != run_id
     assert new_enqueue is True
 
+    with database.sessions() as session:
+        count = session.scalar(select(func.count()).select_from(SimulationRun))
+    assert count == 2
+
+
+def test_a_conflict_whose_winner_finished_inserts_a_new_run(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A conflict whose winner became terminal still serves the request.
+
+    A concurrent caller can take the natural key between the read that finds
+    nothing and the insert, and can then finish before the read that follows the
+    rejected insert. Nothing holds the key at that point, so the request has to
+    be served instead of failing. The race is staged through the statement seam:
+    the first read reports a free key while the winner row already exists, and
+    the read after the conflict finishes the winner before it answers.
+    """
+    season_id = _create_season(database.sessions)
+    teams = _create_teams(database.sessions)
+    start = datetime.date(2099, 1, 1)
+    specs = _season_specs(start, played_through=6)
+    _store_matches(database.sessions, season_id=season_id, teams=teams, specs=specs)
+    as_of = start + datetime.timedelta(days=60)
+    winner_id, _ = _request_run(database, as_of)
+
+    reads: list[int] = []
+    real_statement = simulation_service._active_run_statement
+
+    def racing_statement(
+        season: int, as_of_date: datetime.date, n_runs: int, seed: int
+    ) -> Select[SimulationRun]:
+        reads.append(1)
+        if len(reads) == 1:
+            return select(SimulationRun).where(false())
+        with database.sessions.begin() as session:
+            session.execute(
+                update(SimulationRun)
+                .where(SimulationRun.id == winner_id)
+                .values(status="succeeded", started_at=func.now(), finished_at=func.now())
+            )
+        return real_statement(season, as_of_date, n_runs, seed)
+
+    monkeypatch.setattr(simulation_service, "_active_run_statement", racing_statement)
+
+    run_id, enqueue = _request_run(database, as_of)
+
+    assert enqueue is True
+    assert run_id != winner_id
+    assert _load_run(database, winner_id).status == "succeeded"
+    assert _load_run(database, run_id).status == "queued"
     with database.sessions() as session:
         count = session.scalar(select(func.count()).select_from(SimulationRun))
     assert count == 2

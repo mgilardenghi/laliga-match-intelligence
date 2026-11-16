@@ -462,6 +462,18 @@ def test_the_draw_count_and_the_score_matrix_are_validated() -> None:
     with pytest.raises(ValueError, match="score_probs row 3 has a negative probability"):
         run_engine(score_probs=negative)
 
+    # A NaN row passes the negativity and row-total checks, because every
+    # comparison against NaN is false, so it must be rejected on its own.
+    nan_cell = flat_scorelines(len(ROUND_ROBIN))
+    nan_cell[7, 2, 3] = np.nan
+    with pytest.raises(ValueError, match="score_probs row 7 has a non-finite probability"):
+        run_engine(score_probs=nan_cell)
+
+    infinite_cell = flat_scorelines(len(ROUND_ROBIN))
+    infinite_cell[6, 1, 1] = np.inf
+    with pytest.raises(ValueError, match="score_probs row 6 has a non-finite probability"):
+        run_engine(score_probs=infinite_cell)
+
     off_total = flat_scorelines(len(ROUND_ROBIN))
     off_total[5, 4, 4] += 0.5
     with pytest.raises(ValueError, match="score_probs row 5 sums to"):

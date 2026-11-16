@@ -73,6 +73,9 @@ written here because one statement must compare against the database clock.
 _ACTIVE_STATUSES: Final = ("queued", "running")
 """The states the partial unique index ``ux_simulation_runs_active`` covers."""
 
+_INSERT_ATTEMPTS: Final = 3
+"""How many times ``create_run`` retries an insert whose key was taken."""
+
 
 class _SeasonInputs:
     """The stored match rows of one season, split for the engine."""
@@ -113,7 +116,11 @@ def create_run(
     every other active row is ``False``.
 
     A concurrent insert that wins the natural key is not an error: the
-    ``IntegrityError`` is rolled back and the row that won is returned.
+    ``IntegrityError`` is rolled back and the row that won is returned. When that
+    winner finished between the rejected insert and the read that follows it,
+    nothing holds the key any more, so the insert is retried up to
+    :data:`_INSERT_ATTEMPTS` times instead of failing a request the database can
+    serve.
 
     Args:
         session: the session that inserts or reads the run.
@@ -137,38 +144,49 @@ def create_run(
         raise ValueError(f"unknown season code {season_code!r}")
 
     now = _database_now(session)
-    active = session.scalars(
-        _active_run_statement(season.id, as_of_date, n_runs, seed)
-    ).one_or_none()
-    if active is not None:
-        return active, _is_stale(active, now)
-
-    run = SimulationRun(
-        season_id=season.id,
-        as_of_date=as_of_date,
-        n_runs=n_runs,
-        seed=seed,
-        model=MODEL_NAME,
-        ucl_positions=qualification.ucl_positions,
-        europe_positions=qualification.europe_positions,
-        relegation_positions=qualification.relegation_positions,
-        kind=kind,
-        trigger=trigger,
-        status="queued",
-        code_version=installed_code_version(),
-    )
-    session.add(run)
-    try:
-        session.commit()
-    except IntegrityError:
-        session.rollback()
-        winner = session.scalars(
+    last_conflict: IntegrityError | None = None
+    for _ in range(_INSERT_ATTEMPTS):
+        active = session.scalars(
             _active_run_statement(season.id, as_of_date, n_runs, seed)
         ).one_or_none()
-        if winner is None:
-            raise
+        if active is not None:
+            return active, _is_stale(active, now)
+
+        run = SimulationRun(
+            season_id=season.id,
+            as_of_date=as_of_date,
+            n_runs=n_runs,
+            seed=seed,
+            model=MODEL_NAME,
+            ucl_positions=qualification.ucl_positions,
+            europe_positions=qualification.europe_positions,
+            relegation_positions=qualification.relegation_positions,
+            kind=kind,
+            trigger=trigger,
+            status="queued",
+            code_version=installed_code_version(),
+        )
+        session.add(run)
+        try:
+            session.commit()
+        except IntegrityError as conflict:
+            # Another writer won the natural key between the read above and this
+            # insert. The next turn of the loop returns that winner; when it
+            # finished in the same window nothing holds the key any more and the
+            # insert is retried, so a served request never becomes an error.
+            session.rollback()
+            last_conflict = conflict
+            continue
+        return run, True
+
+    winner = session.scalars(
+        _active_run_statement(season.id, as_of_date, n_runs, seed)
+    ).one_or_none()
+    if winner is not None:
         return winner, _is_stale(winner, _database_now(session))
-    return run, True
+    if last_conflict is None:  # pragma: no cover - the loop only continues on a conflict
+        raise RuntimeError("no run was inserted and no conflict was recorded")
+    raise last_conflict
 
 
 def execute_run(session_factory: sessionmaker[Session], run_id: uuid.UUID) -> None:

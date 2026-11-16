@@ -314,6 +314,20 @@ def _backfill(
             print(f"simulate: {error}", file=sys.stderr)
             return 2
 
+        if run.kind != "backfill":
+            # The natural key of an active run does not include its kind, so an
+            # active live run requested for this date holds it. Executing it
+            # here would print a live run as a backfilled date, and the next
+            # invocation would still find no backfill run for that date and try
+            # again; the date is therefore reported and left alone.
+            print(f"{day.isoformat()} {run.id} blocked by {run.kind} run")
+            print(
+                f"simulate: {day.isoformat()} is held by the active {run.kind} run {run.id}",
+                file=sys.stderr,
+            )
+            all_succeeded = False
+            continue
+
         logger.info("backfill run %s for %s as of %s", run.id, season_code, day)
         execute_run(factory, run.id)
         stored = _reload(session, run.id)
