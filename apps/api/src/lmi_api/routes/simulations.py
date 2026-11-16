@@ -38,6 +38,7 @@ from lmi_core.simulation import Qualification
 from lmi_core.simulation.service import create_run
 from sqlalchemy import ColumnElement, func, select, update
 from sqlalchemy.dialects.postgresql import distinct_on
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from lmi_api.db import SessionDep
@@ -125,13 +126,18 @@ def create_simulation(
 
     The row is committed before the message is sent, so the worker that receives
     the identifier always finds the row it names. When the queue refuses the
-    message the run cannot execute, so it is marked ``failed`` with the enqueue
-    instant as its start and finish, and the request answers 503: a run left
-    ``queued`` would look alive to a client that polls it and to every later
-    identical request, which would then be told to wait for work nobody is
-    doing. A queued row that is merely stale is instead re-enqueued by the next
-    identical request, which is why the failure is recorded rather than retried
-    here.
+    message and the run is still ``queued``, the run cannot execute, so it is
+    marked ``failed`` with the enqueue instant as its start and finish, and the
+    request answers 503: a run left ``queued`` would look alive to a client that
+    polls it and to every later identical request, which would then be told to
+    wait for work nobody is doing. A queued row that is merely stale is instead
+    re-enqueued by the next identical request, which is why the failure is
+    recorded rather than retried here.
+
+    A message that did reach the broker can be claimed before the enqueue call
+    reports its error. Such a claim is not overwritten: the worker owns the run
+    and is executing it, so the answer is the ordinary 202 that describes the
+    stored row instead of a failure, and the client polls the real state.
 
     Args:
         body: the season, as-of date, size and seed the client asked for.
@@ -183,8 +189,8 @@ def create_simulation(
             queue.enqueue(run.id)
         except Exception:
             logger.exception("the queue refused simulation run %s", run.id)
-            _mark_enqueue_failed(session, run.id)
-            raise HTTPException(status_code=503, detail=ENQUEUE_FAILED_DETAIL) from None
+            if _mark_enqueue_failed(session, run.id):
+                raise HTTPException(status_code=503, detail=ENQUEUE_FAILED_DETAIL) from None
 
     # The row was committed before the message was sent, so a reload is what
     # describes what is stored, whatever the session still holds in memory.
@@ -530,27 +536,46 @@ def _raise_if_team_is_unknown(session: Session, team_id: int) -> None:
         raise HTTPException(status_code=404, detail="Team not found")
 
 
-def _mark_enqueue_failed(session: Session, run_id: uuid.UUID) -> None:
-    """Record on the run that the queue refused it, and commit that state.
+def _mark_enqueue_failed(session: Session, run_id: uuid.UUID) -> bool:
+    """Record on a still-queued run that the queue refused it, and commit.
+
+    The update is conditional on the row still being ``queued``. A message that
+    did reach the broker can be claimed before the enqueue call reports its
+    error, and a claim that won that race is not overwritten: the worker owns the
+    run, so a terminal failure would describe work that is still executing and
+    would let the next identical request insert a second run for the same natural
+    key.
 
     The status is terminal, so the row also needs the timestamps the schema ties
     to it: the enqueue instant is both its start and its finish, because the row
     never executed a single run and the schema has no terminal state that carries
     no start. The statement bypasses the session's copies of the row on purpose;
     the commit that follows expires them, so a later read sees the stored state.
+
+    Returns:
+        Whether exactly one ``queued`` row was updated. ``False`` means a worker
+        claimed the row first, so the caller must describe the stored run instead
+        of reporting a failure.
     """
-    session.execute(
-        update(SimulationRunModel)
-        .where(SimulationRunModel.id == run_id)
-        .values(
-            status="failed",
-            started_at=func.now(),
-            finished_at=func.now(),
-            error=ENQUEUE_FAILED_ERROR,
-        )
-        .execution_options(synchronize_session=False)
+    result = cast(
+        CursorResult[Any],
+        session.execute(
+            update(SimulationRunModel)
+            .where(
+                SimulationRunModel.id == run_id,
+                SimulationRunModel.status == "queued",
+            )
+            .values(
+                status="failed",
+                started_at=func.now(),
+                finished_at=func.now(),
+                error=ENQUEUE_FAILED_ERROR,
+            )
+            .execution_options(synchronize_session=False)
+        ),
     )
     session.commit()
+    return result.rowcount == 1
 
 
 def _detail(session: Session, run: SimulationRunModel, season_code: str) -> SimulationDetail:

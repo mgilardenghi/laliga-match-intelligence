@@ -24,7 +24,6 @@ connection: Celery connects lazily when a task is sent or consumed.
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import timedelta
 from typing import Final
 
 from celery import Celery
@@ -33,7 +32,7 @@ from celery.signals import worker_ready
 from lmi_core.config import get_settings
 from lmi_core.db.models import SimulationRun
 from lmi_core.db.session import make_engine, session_factory
-from lmi_core.simulation.service import STALE_AFTER, execute_run
+from lmi_core.simulation.service import QUEUED_STALE_AFTER, STALE_AFTER, execute_run
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
@@ -47,9 +46,6 @@ QUEUE_NAME: Final = "lmi"
 
 SIMULATE_TASK: Final = "lmi.simulate"
 DAILY_TASK: Final = "lmi.daily"
-
-_QUEUED_STALE_AFTER: Final = timedelta(minutes=1)
-"""How long a queued message may wait before the sweep sends it again."""
 
 _WORKER_READY_UID: Final = "lmi_worker.requeue_stale"
 """The dispatch id that makes connecting the signal receiver idempotent."""
@@ -117,15 +113,15 @@ def requeue_stale(
     session_factory: sessionmaker[Session],
     enqueue: Callable[[uuid.UUID], None],
 ) -> list[uuid.UUID]:
-    """Send every abandoned active run to ``enqueue`` and return the ids in order.
+    """Send every abandoned active run to ``enqueue`` and return the ids sent.
 
     One read-only query selects two kinds of row: a ``queued`` run whose
-    ``requested_at`` is older than one minute, and a ``running`` run with no
-    ``started_at`` or one older than the claim's own :data:`STALE_AFTER` window.
-    Both cutoffs are compared with ``now()`` in PostgreSQL, never with the
-    process clock, so the decision cannot disagree with the row the claim reads.
-    The order is ``requested_at`` then id, which makes the sweep deterministic
-    even when two rows share a timestamp.
+    ``requested_at`` is older than :data:`QUEUED_STALE_AFTER` (one minute), and a
+    ``running`` run with no ``started_at`` or one older than the claim's own
+    :data:`STALE_AFTER` window (30 minutes). Both cutoffs are compared with
+    ``now()`` in PostgreSQL, never with the process clock, so the decision cannot
+    disagree with the row the claim reads. The order is ``requested_at`` then id,
+    which makes the sweep deterministic even when two rows share a timestamp.
 
     Nothing is written. Enqueueing the message is enough, because the claim's
     stale branch in :func:`~lmi_core.simulation.service.execute_run` takes a
@@ -133,12 +129,17 @@ def requeue_stale(
     that 30-minute window; that window is the documented recovery bound after a
     crash, and a row inside it is left alone so a healthy worker keeps it.
 
+    A broker failure for one row is one warning and the sweep continues with the
+    next row, so a single refused message cannot strand every stale row behind
+    it. Only the ids actually handed to ``enqueue`` are returned; a failed send
+    is absent from the result and from the log line the caller reports.
+
     Args:
         session_factory: the factory of the session the query uses.
         enqueue: the function that sends one run id to the worker.
 
     Returns:
-        The selected run ids, in query order.
+        The run ids actually handed to the broker, in query order.
     """
     now = func.now()
     statement = (
@@ -147,7 +148,7 @@ def requeue_stale(
             or_(
                 and_(
                     SimulationRun.status == "queued",
-                    SimulationRun.requested_at < now - _QUEUED_STALE_AFTER,
+                    SimulationRun.requested_at < now - QUEUED_STALE_AFTER,
                 ),
                 and_(
                     SimulationRun.status == "running",
@@ -162,9 +163,17 @@ def requeue_stale(
     )
     with session_factory() as session:
         run_ids = list(session.scalars(statement))
+    enqueued: list[uuid.UUID] = []
     for run_id in run_ids:
-        enqueue(run_id)
-    return run_ids
+        try:
+            enqueue(run_id)
+        except Exception:
+            logger.warning(
+                "requeue: cannot enqueue stale run %s; continuing", run_id, exc_info=True
+            )
+            continue
+        enqueued.append(run_id)
+    return enqueued
 
 
 def on_worker_ready(sender: object = None, **kwargs: object) -> None:
@@ -173,7 +182,9 @@ def on_worker_ready(sender: object = None, **kwargs: object) -> None:
     A worker that starts after a crash is the cheapest moment to repair the
     queue, because no other component is guaranteed to run. A database failure
     is one log line and the worker still starts: refusing to boot would turn a
-    recoverable sweep into an outage.
+    recoverable sweep into an outage. A broker failure is one log line too: the
+    sweep continues past a refused message, and anything it cannot send is
+    retried by the next worker that starts.
     """
     try:
         engine = make_engine(get_settings())
@@ -190,6 +201,8 @@ def on_worker_ready(sender: object = None, **kwargs: object) -> None:
         logger.info("worker_ready: re-enqueued %d stale run(s)", len(requeued))
     except SQLAlchemyError:
         logger.warning("worker_ready: cannot reach the database; skipping stale sweep")
+    except Exception:
+        logger.warning("worker_ready: the stale sweep failed; skipping it", exc_info=True)
     finally:
         engine.dispose()
 

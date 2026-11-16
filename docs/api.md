@@ -606,17 +606,20 @@ season carries is a `404` with `Season not found`.
 **An identical request does not create a second run.** When an active run
 already holds the same season, as-of date, run count, seed and model, the
 response is that run, with its own `id`, and the worker is told about it again
-only when the row looks abandoned: `queued` for more than thirty minutes, or
-`running` with a start older than that.
+only when the row looks abandoned: `queued` for more than one minute, or
+`running` with a start older than thirty minutes.
 
 **When the queue refuses the message.** The row is committed before the message
 is sent, so a broker failure leaves a row nobody will execute. It is then stored
-as `failed` with the enqueue instant as its start and finish and a short `error`
-text that carries no broker address, and the request answers `503` with a
-`Problem` body: title `Service Unavailable`, detail `Simulation enqueue failed`.
-The broker's own text stays in the server log, because it can carry the
-connection URL. A client recovers by requesting the run again: a `failed` run
-does not hold the key, so the next identical request stores a new one.
+as `failed` when no worker has claimed it yet, with the enqueue instant as its
+start and finish and a short `error` text that carries no broker address, and
+the request answers `503` with a `Problem` body: title `Service Unavailable`,
+detail `Simulation enqueue failed`. The broker's own text stays in the server
+log, because it can carry the connection URL. A row a worker has already
+claimed is never marked `failed` by a failed enqueue: the request answers `202`
+and describes the stored run, `running` or already `succeeded`. A client
+recovers by requesting the run again: a `failed` run does not hold the key, so
+the next identical request stores a new one.
 
 ### `GET /v1/simulations`
 

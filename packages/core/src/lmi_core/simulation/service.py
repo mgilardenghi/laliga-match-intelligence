@@ -19,6 +19,13 @@ one committed ``UPDATE ... RETURNING``. When the update matches no row, another
 executor owns the run or it already finished, and the call returns without doing
 any work. Staleness timestamps come from the database clock, never the process
 clock, so a stale decision cannot disagree with the stored row.
+
+A request that repeats an active run is answered with that row, and its message
+is sent again only when the row looks abandoned. The two states have different
+windows: a ``queued`` row waits :data:`QUEUED_STALE_AFTER` (one minute), because
+a lost message leaves work nobody is doing, while a ``running`` row waits
+:data:`STALE_AFTER` (30 minutes), because a claimed run may still be executing.
+The claim's stale branch keeps the 30-minute window for the same reason.
 """
 
 import datetime
@@ -40,10 +47,20 @@ from lmi_core.results.store import installed_code_version
 from lmi_core.simulation.engine import Qualification, SeasonSimulation, SimFixture, simulate_season
 from lmi_core.standings import MatchResult, StandingRow, compute_standings
 
-__all__ = ["MODEL_NAME", "STALE_AFTER", "backfill_dates", "create_run", "execute_run"]
+__all__ = [
+    "MODEL_NAME",
+    "QUEUED_STALE_AFTER",
+    "STALE_AFTER",
+    "backfill_dates",
+    "create_run",
+    "execute_run",
+]
 
 MODEL_NAME: Final = "dixon_coles"
 """The only model the simulation schema accepts."""
+
+QUEUED_STALE_AFTER: Final = datetime.timedelta(minutes=1)
+"""How long a queued run may wait before a second request re-sends its message."""
 
 STALE_AFTER: Final = datetime.timedelta(minutes=30)
 """How old a claim may be before a second executor may take the run over."""
@@ -111,9 +128,11 @@ def create_run(
     as-of date, run count, seed and model, restricted to ``queued`` and
     ``running`` rows. When such a row exists nothing is inserted and the second
     element says whether the caller must enqueue it again: a queued row whose
-    ``requested_at`` is older than :data:`STALE_AFTER`, or a running row with no
-    ``started_at`` or one older than that, looks abandoned and is ``True``;
-    every other active row is ``False``.
+    ``requested_at`` is older than :data:`QUEUED_STALE_AFTER` (one minute), or a
+    running row with no ``started_at`` or one older than :data:`STALE_AFTER`
+    (30 minutes), looks abandoned and is ``True``; every other active row is
+    ``False``. The queued window is the short one because a lost message leaves
+    work nobody is doing, while a running row may still be executing.
 
     A concurrent insert that wins the natural key is not an error: the
     ``IntegrityError`` is rolled back and the row that won is returned. When that
@@ -291,7 +310,7 @@ def _database_now(session: Session) -> datetime.datetime:
 def _is_stale(run: SimulationRun, now: datetime.datetime) -> bool:
     """Return whether an active row looks abandoned at database time ``now``."""
     if run.status == "queued":
-        return now - run.requested_at > STALE_AFTER
+        return now - run.requested_at > QUEUED_STALE_AFTER
     if run.status == "running":
         started_at = run.started_at
         return started_at is None or now - started_at > STALE_AFTER
