@@ -12,6 +12,7 @@ import {
   Sparkline,
   type CalibrationPoint,
 } from "@/components/charts";
+import { HowToRead, Legend, MetricHelp, SectionNav, StatTile } from "@/components/ui";
 
 import styles from "./page.module.css";
 
@@ -85,6 +86,38 @@ function buildPositionRow(expectedPosition: number): readonly number[] {
 const PROJECTED_TABLE: readonly (readonly number[])[] =
   EXPECTED_POSITIONS.map(buildPositionRow);
 
+// Every target is an id that this page really renders.
+const SECTION_LINKS = [
+  { id: "at-a-glance-heading", label: "At a glance" },
+  { id: "positions-heading", label: "Projected table" },
+  { id: "points-heading", label: "Projected points" },
+  { id: "metrics-heading", label: "Model metrics" },
+  { id: "calibration-heading", label: "Calibration" },
+] as const;
+
+const QUALIFICATION_LEGEND = [
+  { token: "zone-ucl", label: "Champions League places" },
+  { token: "zone-relegation", label: "Relegation places" },
+] as const;
+
+const READING_GUIDE = [
+  {
+    term: "Probability",
+    definition:
+      "The model's chance that an outcome happens, from 0 percent to 100 percent. A 38 percent home win is not a prediction of a home win.",
+  },
+  {
+    term: "Percentile band",
+    definition:
+      "The thin bar spans the 5th to 95th percentile and the thick bar the middle 50 percent, so the width shows how uncertain the projection is.",
+  },
+  {
+    term: "Calibration",
+    definition:
+      "How close predicted probabilities are to observed frequencies. Points on the diagonal mean a model's 30 percent chances happened about 30 percent of the time.",
+  },
+] as const;
+
 export default function ChartGalleryPage(): ReactElement {
   // Only the development stack sets this variable, so the gallery is absent
   // from every other deployment.
@@ -102,6 +135,65 @@ export default function ChartGalleryPage(): ReactElement {
           not a published forecast.
         </p>
       </header>
+
+      <SectionNav sections={SECTION_LINKS} />
+
+      <section className={styles.section} aria-labelledby="at-a-glance-heading">
+        <h2 id="at-a-glance-heading" className={styles.heading}>
+          At a glance
+        </h2>
+        <div className={styles.statRow}>
+          <StatTile
+            label="Matches played"
+            value="8"
+            subline="Neutral: a plain count, with no judgement attached."
+          />
+          <StatTile
+            label="Champions League probability"
+            value="62%"
+            subline="Good: more likely than not to finish in a Champions League place."
+            tone="good"
+            help={{
+              definition:
+                "The model's probability that the club finishes in the top four.",
+              direction: "higher-is-better",
+            }}
+          />
+          <StatTile
+            label="Relegation probability"
+            value="18%"
+            subline="Bad: the risk is real, though below the one-in-four warning line."
+            tone="bad"
+            help={{
+              definition:
+                "The model's probability that the club finishes in the bottom three.",
+              direction: "lower-is-better",
+            }}
+          />
+        </div>
+        <div className={styles.helpRow}>
+          <p className={styles.intro}>
+            A metric help control on its own: open it to read what the metric
+            means and which direction is better.
+          </p>
+          <MetricHelp
+            label="Log loss"
+            definition="Average negative log probability the model gave to the result that happened."
+            direction="lower-is-better"
+          />
+        </div>
+      </section>
+
+      <section className={styles.section} aria-labelledby="legend-heading">
+        <h2 id="legend-heading" className={styles.heading}>
+          Legend
+        </h2>
+        <Legend caption="The app legend, with its default entries" />
+        <Legend
+          caption="Two custom entries: the qualification zones"
+          items={QUALIFICATION_LEGEND}
+        />
+      </section>
 
       <section className={styles.section} aria-labelledby="form-heading">
         <h2 id="form-heading" className={styles.heading}>
@@ -195,13 +287,19 @@ export default function ChartGalleryPage(): ReactElement {
         <LineChart
           id="dev-relegation-probability"
           title="Relegation probability by matchday"
-          description="Model-estimated relegation probability for Valencia, Real Betis and Girona after each of the first eight matchdays."
-          note="Valencia is the focus team; the probability rises for all three as the season narrows."
+          description="Model-estimated relegation probability for Valencia, Real Betis and Girona after each of the first eight matchdays. A league baseline is off scale above the axis and is marked at the top edge of the plot."
+          note="Valencia is the focus team; the probability rises for all three as the season narrows. The axis is fixed at 0 to 50 percent. The relegation baseline is off scale: it is marked at the top edge and prints its value in the right-hand gutter instead of a line."
+          domain={[0, 50]}
           xLabels={["MD1", "MD2", "MD3", "MD4", "MD5", "MD6", "MD7", "MD8"]}
           series={[
             { name: "Valencia", values: [12, 14, 18, 22, 27, 31, 36, 42], emphasis: true },
             { name: "Real Betis", values: [6, 7, 8, 9, 11, 13, 15, 18] },
             { name: "Girona", values: [9, 11, 13, 16, 19, 23, 27, 32] },
+            {
+              name: "Relegation baseline",
+              values: [80, 80, 80, 80, 80, 80, 80, 80],
+              offScale: true,
+            },
           ]}
           yLabel="Relegation probability"
           valueSuffix="%"
@@ -215,9 +313,15 @@ export default function ChartGalleryPage(): ReactElement {
         <DotPlot
           id="dev-model-metrics"
           title="Model metrics compared"
-          description="One panel per metric, with one row per model. Filled dots show each model's value; dashed lines mark the home_win and market reference values."
-          note="The dashed references mark the home_win and market values of each metric."
+          description="One panel per metric, with one row per model. Filled dots show each model's value; dashed lines mark the home_win and market reference values. One log_loss reference is off scale and is marked at the right edge of its panel with its value."
+          note="The dashed references mark the home_win and market values of each metric. Each panel has a fixed axis. One reference is off scale: the log_loss uniform baseline sits above its axis, so it is marked at the panel edge with its label and its value instead of a dashed line."
           metrics={["log_loss", "brier", "rps", "accuracy"]}
+          domains={{
+            log_loss: [0.95, 1.03],
+            brier: [0.57, 0.65],
+            rps: [0.19, 0.27],
+            accuracy: [0.44, 0.52],
+          }}
           rows={[
             { model: "home_win", values: [0.993, 0.605, 0.215, 0.505] },
             { model: "base_rate", values: [1.027, 0.631, 0.232, 0.455] },
@@ -234,6 +338,12 @@ export default function ChartGalleryPage(): ReactElement {
             { metric: "rps", label: "market", value: 0.201 },
             { metric: "accuracy", label: "home_win", value: 0.505 },
             { metric: "accuracy", label: "market", value: 0.521 },
+            {
+              metric: "log_loss",
+              label: "uniform_baseline",
+              value: 1.386,
+              offScale: true,
+            },
           ]}
         />
       </section>
@@ -281,6 +391,8 @@ export default function ChartGalleryPage(): ReactElement {
           values={[2.62, 2.58, 2.55, 2.61, 2.49, 2.53, 2.48, 2.56, 2.51, 2.58, 2.44, 2.39, 2.47, 2.35]}
         />
       </section>
+
+      <HowToRead items={READING_GUIDE} />
     </main>
   );
 }

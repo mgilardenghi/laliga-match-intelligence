@@ -43,7 +43,7 @@ export async function Nav(): Promise<ReactElement> {
         </li>
         <li>
           <Link className={styles.navLink} href="/performance">
-            Performance
+            Model performance
           </Link>
         </li>
       </ul>

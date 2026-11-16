@@ -150,21 +150,31 @@
 /* The profile chart. Text uses the page's text tokens and the marks use the
    accent, the first categorical series and the muted token; the league tick is
    a mark, so it needs 3:1 and not 4.5:1. */
+/* The chart is drawn at its natural size: the component gives the SVG the
+   pixel width and height of its own `viewBox`, so the rendered scale is exactly
+   1 and no label inside it is ever scaled. */
 .chartSvg {
   display: block;
-  width: 100%;
-  height: auto;
+}
+
+/* The scroller owns the horizontal overflow of a drawing wider than a phone.
+   `min-width: 0` keeps a container that is itself a flex item from sizing to
+   the drawing's intrinsic width, so the drawing scrolls instead of pushing the
+   page wider. */
+.chartScroller {
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .chartRowLabel,
 .chartLabel {
   fill: var(--text);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .chartAxis {
   fill: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .chartAxisLine {
@@ -183,4 +193,19 @@
 .chartLeague {
   stroke: var(--muted);
   stroke-width: 2;
+}
+
+/* The formatted value at the outer end of a bar. The drawing is at its natural
+   size, so these pixels are the pixels the reader sees and the size sits on the
+   chart text scale. */
+.chartValue {
+  fill: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  /* A halo in the page colour keeps a value legible where a league tick or the
+     zero line passes behind it. */
+  paint-order: stroke;
+  stroke: var(--background);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }

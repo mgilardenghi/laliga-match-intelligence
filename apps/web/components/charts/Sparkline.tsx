@@ -24,15 +24,36 @@ export type SparklineProps = {
   readonly note?: ReactNode;
 };
 
-const WIDTH = 480;
-const PLOT_LEFT = 16;
-const PLOT_RIGHT = 464;
-const PLOT_TOP = 30;
-const PLOT_BOTTOM = 118;
-const HEIGHT = 146;
+// The mark overlay is a percent grid on both axes, so the path coordinates are
+// shares of the plot and no coordinate depends on its rendered pixel size.
+const PLOT_UNITS = 100;
+// A value label sits above its dot unless the dot is this close to the top
+// edge, where the label would leave the plot; there it moves below the dot.
+const LABEL_FLIP_PERCENT = 25;
+// The highlighted segment's label is kept this far from either edge, so a drop
+// between the first two seasons cannot push the text out of the figure.
+const HINT_LABEL_MIN_PERCENT = 12;
+const HINT_LABEL_MAX_PERCENT = 88;
 
 function isValue(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(PLOT_UNITS, Math.max(0, value));
+}
+
+/**
+ * Keep a value label clear of the plot edge: the first label grows to the right
+ * of its dot and the last one to the left, so neither runs past the plot.
+ */
+function valueLabelTransform(anchor: "start" | "end", top: number): string {
+  const horizontal = anchor === "start" ? "0" : "-100%";
+  const vertical = top < LABEL_FLIP_PERCENT ? "40%" : "-140%";
+  return `translate(${horizontal}, ${vertical})`;
 }
 
 function largestDrop(values: readonly (number | null)[]): SparklineHighlight | undefined {
@@ -83,8 +104,10 @@ export function Sparkline(props: SparklineProps): ReactElement {
   const maximum = finiteValues.length > 0 ? Math.max(...finiteValues) : 1;
   const spread = maximum - minimum;
   const padding = spread === 0 ? Math.max(1, Math.abs(maximum) * 0.1) : spread * 0.15;
-  const yScale = linearScale([minimum - padding, maximum + padding], [PLOT_BOTTOM, PLOT_TOP]);
-  const xScale = bandScale(seasons.length, [PLOT_LEFT, PLOT_RIGHT], 0.1);
+  // The y scale runs top to bottom so a value is a percent down from the top
+  // edge, which is what the HTML dots and labels position by.
+  const yScale = linearScale([minimum - padding, maximum + padding], [PLOT_UNITS, 0]);
+  const xScale = bandScale(seasons.length, [0, PLOT_UNITS], 0.1);
 
   const selected = (() => {
     const candidate = highlight === undefined ? largestDrop(values) : highlight;
@@ -96,7 +119,9 @@ export function Sparkline(props: SparklineProps): ReactElement {
     return high > low ? { from: low, to: high } : undefined;
   })();
   const points = values.map((value, index) =>
-    isValue(value) ? { x: xScale.center(index), y: yScale.scale(value) } : null,
+    isValue(value)
+      ? { x: clampPercent(xScale.center(index)), y: clampPercent(yScale.scale(value)) }
+      : null,
   );
   // Runs of consecutive seasons with a value: a missing season breaks the line.
   const runs: { x: number; y: number }[][] = [];
@@ -135,9 +160,17 @@ export function Sparkline(props: SparklineProps): ReactElement {
   const defaultDescription = drawn
     ? `Trend of ${metric} across ${seasons.length} seasons, with one season-to-season segment highlighted.`
     : `Trend of ${metric} across ${seasons.length} seasons.`;
+  const hintLeft =
+    drawn && selected !== undefined
+      ? Math.min(
+          HINT_LABEL_MAX_PERCENT,
+          Math.max(HINT_LABEL_MIN_PERCENT, (fromPoint.x + toPoint.x) / 2),
+        )
+      : 0;
 
   return (
     <ChartFigure
+      ids={ids}
       title={title}
       description={description ?? defaultDescription}
       table={{
@@ -150,90 +183,90 @@ export function Sparkline(props: SparklineProps): ReactElement {
       }}
       note={note}
     >
-      <svg
+      <div
         role="img"
         aria-labelledby={ids.labelledBy}
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className={styles.svg}
-        preserveAspectRatio="xMidYMid meet"
+        className={`${styles.plot} ${styles.sparkline}`}
       >
-        <title id={ids.titleId}>{title}</title>
-        <desc id={ids.descId}>{description ?? defaultDescription}</desc>
-        {runs
-          .filter((run) => run.length > 1)
-          .map((run, index) => (
-            <polyline
-              key={`run-${index}`}
-              points={run.map((point) => `${point.x} ${point.y}`).join(" ")}
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ stroke: "var(--accent, #0072b2)", strokeWidth: 1.6 }}
-            />
-          ))}
-        {points.map((point, index) =>
-          point === null ? null : (
-            <circle
-              key={`point-${index}`}
-              cx={point.x}
-              cy={point.y}
-              r={2.2}
-              style={{ fill: "var(--accent, #0072b2)" }}
-            />
-          ),
-        )}
-        {drawn ? (
-          <g>
-            <line
-              x1={fromPoint.x}
-              y1={fromPoint.y}
-              x2={toPoint.x}
-              y2={toPoint.y}
-              strokeLinecap="round"
-              style={{ stroke: "var(--zone-relegation, #d55e00)", strokeWidth: 3.4 }}
-            />
-            <text
-              x={(fromPoint.x + toPoint.x) / 2}
-              y={14}
-              textAnchor="middle"
-              className={styles.axisText}
-              style={{ fill: "currentColor", opacity: 1 }}
+        {drawn && selected !== undefined ? (
+          <div className={styles.sparklineHint}>
+            <span
+              className={styles.sparklineHintLabel}
+              style={{ left: `${hintLeft}%` }}
             >
               {`${seasons[selected.from]} → ${seasons[selected.to]}`}
-            </text>
-          </g>
+            </span>
+          </div>
         ) : null}
-        {firstPoint !== null ? (
-          <text
-            x={firstPoint.x}
-            y={Math.max(PLOT_TOP - 4, firstPoint.y - 7)}
-            textAnchor="start"
-            className={styles.endLabel}
+        <div className={styles.sparklinePlot}>
+          <svg
+            aria-hidden="true"
+            focusable="false"
+            viewBox={`0 0 ${PLOT_UNITS} ${PLOT_UNITS}`}
+            preserveAspectRatio="none"
+            className={styles.plotOverlay}
           >
-            {`${formatNumber(values[firstIndex] as number)}${unit ?? ""}`}
-          </text>
-        ) : null}
-        {lastPoint !== null ? (
-          <text
-            x={lastPoint.x}
-            y={Math.min(PLOT_BOTTOM - 2, lastPoint.y + 13)}
-            textAnchor="end"
-            className={styles.endLabel}
-          >
-            {`${formatNumber(values[lastIndex] as number)}${unit ?? ""}`}
-          </text>
-        ) : null}
-        {seasons.length > 0 ? (
-          <text x={PLOT_LEFT} y={PLOT_BOTTOM + 16} textAnchor="start" className={styles.axisText}>
-            {seasons[0]}
-          </text>
-        ) : null}
-        {seasons.length > 1 ? (
-          <text x={PLOT_RIGHT} y={PLOT_BOTTOM + 16} textAnchor="end" className={styles.axisText}>
-            {seasons[seasons.length - 1]}
-          </text>
-        ) : null}
-      </svg>
+            {runs
+              .filter((run) => run.length > 1)
+              .map((run, index) => (
+                <polyline
+                  key={`run-${index}`}
+                  points={run.map((point) => `${point.x} ${point.y}`).join(" ")}
+                  className={styles.sparklineTrend}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            {drawn ? (
+              <line
+                x1={fromPoint.x}
+                y1={fromPoint.y}
+                x2={toPoint.x}
+                y2={toPoint.y}
+                className={styles.sparklineDrop}
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : null}
+          </svg>
+          {points.map((point, index) =>
+            point === null ? null : (
+              <span
+                key={`point-${index}`}
+                aria-hidden="true"
+                className={styles.sparklineDot}
+                style={{ left: `${point.x}%`, top: `${point.y}%` }}
+              />
+            ),
+          )}
+          {firstPoint !== null ? (
+            <span
+              className={styles.sparklineValue}
+              style={{
+                left: `${firstPoint.x}%`,
+                top: `${firstPoint.y}%`,
+                transform: valueLabelTransform("start", firstPoint.y),
+              }}
+            >
+              {`${formatNumber(values[firstIndex] as number)}${unit ?? ""}`}
+            </span>
+          ) : null}
+          {lastPoint !== null ? (
+            <span
+              className={styles.sparklineValue}
+              style={{
+                left: `${lastPoint.x}%`,
+                top: `${lastPoint.y}%`,
+                transform: valueLabelTransform("end", lastPoint.y),
+              }}
+            >
+              {`${formatNumber(values[lastIndex] as number)}${unit ?? ""}`}
+            </span>
+          ) : null}
+        </div>
+        <div className={styles.sparklineSeasons}>
+          {seasons.length > 0 ? <span>{seasons[0]}</span> : null}
+          {seasons.length > 1 ? <span>{seasons[seasons.length - 1]}</span> : null}
+        </div>
+      </div>
     </ChartFigure>
   );
 }

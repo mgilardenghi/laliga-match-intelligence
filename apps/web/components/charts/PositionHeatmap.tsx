@@ -23,8 +23,13 @@ const DEFAULT_TITLE = "Projected finishing position probabilities";
 const DEFAULT_DESCRIPTION =
   "Heatmap of each team's probability of finishing in every league position. Rows follow the projected table; columns are positions 1 to n.";
 
-const CELL_WIDTH = 30;
-const ROW_HEIGHT = 24;
+// A cell is wide and tall enough that the widest label, "100%" at 11 px, fits
+// inside it with a margin on both sides, so no cell label touches its neighbour
+// or overflows its own rect. The 36 px cell is sized against the widest sans
+// fallback metric (about 2.83 em for "100%"), not just the narrowest one; the
+// horizontal scroller absorbs the grid width that follows.
+const CELL_WIDTH = 36;
+const ROW_HEIGHT = 26;
 const HEADER_HEIGHT = 20;
 const ZONE_LABEL_HEIGHT = 16;
 
@@ -112,6 +117,7 @@ export function PositionHeatmap(props: PositionHeatmapProps): ReactElement {
 
   return (
     <ChartFigure
+      ids={ids}
       title={title}
       description={description}
       table={{
@@ -137,6 +143,17 @@ export function PositionHeatmap(props: PositionHeatmapProps): ReactElement {
               </div>
             ))}
           </div>
+          {/* This plot is fixed-size and never scales: the element is given the
+              pixel width and height of its own `viewBox`, so the rendered scale
+              is exactly 1. That is why its cell labels, column numbers and zone
+              labels can stay in the SVG: none of them is ever shrunk by a
+              viewBox, and the horizontal scroller takes the width instead.
+              The figure is named from outside the drawing: the figcaption
+              carries the title id and the hidden span below it carries the
+              description. The drawing stays the plot root because the gallery
+              reads its cell labels through `svg[role="img"]`; its own `<title>`
+              and `<desc>` keep their text without ids, so no id in the figure
+              is duplicated. */}
           <svg
             role="img"
             aria-labelledby={ids.labelledBy}
@@ -145,15 +162,15 @@ export function PositionHeatmap(props: PositionHeatmapProps): ReactElement {
             style={{ width: `${gridWidth}px`, height: `${gridHeight}px` }}
             preserveAspectRatio="xMidYMid meet"
           >
-            <title id={ids.titleId}>{title}</title>
-            <desc id={ids.descId}>{description}</desc>
+            <title>{title}</title>
+            <desc>{description}</desc>
             {Array.from({ length: columnCount }, (_, columnIndex) => (
               <text
                 key={`header-${columnIndex}`}
                 x={(columnIndex + 0.5) * CELL_WIDTH}
                 y={ZONE_LABEL_HEIGHT + HEADER_HEIGHT - 7}
                 textAnchor="middle"
-                className={styles.axisText}
+                className={styles.heatmapHeaderText}
               >
                 {columnIndex + 1}
               </text>
@@ -205,7 +222,7 @@ export function PositionHeatmap(props: PositionHeatmapProps): ReactElement {
                 <text
                   key={`zone-${zone.label}`}
                   x={((zone.from + zone.to) / 2) * CELL_WIDTH}
-                  y={11}
+                  y={12}
                   textAnchor="middle"
                   className={styles.heatmapZoneLabel}
                 >

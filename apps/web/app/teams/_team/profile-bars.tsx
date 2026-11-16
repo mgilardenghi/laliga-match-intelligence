@@ -3,10 +3,12 @@
  *
  * One row per metric with two bars facing each other: the club's own average
  * extends to the right and the average its opponents produced extends to the
- * left, so a club that shoots a lot and concedes a lot reads as two long bars
- * instead of two numbers a reader has to compare. The league average is a tick
+ * left, so a club that shoots a lot and concedes a lot reads as two long bars,
+ * and each bar prints its value at its outer end. The league average is a tick
  * on both sides of the same row, because it is one number and the two bars are
  * measured from the same zero.
+ *
+ * Each row carries its own scale, because the metrics count different things.
  *
  * The component draws only the SVG. The heading, the description, the data
  * table and the coverage note belong to the `ChartFigure` the page wraps around
@@ -18,6 +20,7 @@ import type { ReactElement } from "react";
 
 import { chartIds, linearScale, niceMax } from "@/components/charts";
 import type { GetData } from "@/lib/api";
+import { formatValue } from "@/lib/format";
 
 import styles from "./team-page.module.css";
 
@@ -58,19 +61,30 @@ export type ProfileBarsProps = {
 
 const TITLE = "Per-match averages of the club and of its opponents";
 const DESCRIPTION =
-  "One row per metric. The bar to the right is the club's own per-match average, the bar to the left the average of the clubs it faced, and the tick marks the league average. A metric the season did not record has no bar.";
+  "One row per metric, each on its own scale. The bar to the right is the club's own per-match average, the bar to the left the average of the clubs it faced, and the tick marks the league average. A metric the season did not record has no bar.";
 
-const WIDTH = 480;
-// The metric labels sit left of the plot and are right-aligned against it, so
-// the longest one decides where the plot starts.
-const LABEL_EDGE = 108;
-const PLOT_LEFT = 112;
-const PLOT_RIGHT = 468;
+// The drawing is rendered at its natural size: the element is given the pixel
+// width and height of its own `viewBox`, so the rendered scale is exactly 1 and
+// every label keeps the pixel size the stylesheet declares. It is also narrow
+// enough for a phone: the metric label sits above its row instead of beside it,
+// so the whole mirrored pair fits in 300 px and nothing hides behind a sideways
+// scroll. The scroller stays only as a safety net for a narrower window.
+const WIDTH = 300;
+// The value of a bar prints at its outer end, outside the plot, so both sides
+// keep a gutter of their own: it holds a formatted value such as "12.34" at
+// 12 px without running past the drawing.
+const PLOT_LEFT = 46;
+const PLOT_RIGHT = 254;
+const VALUE_GAP = 5;
 // The zero line is placed so both sides of the plot have the same width; a
 // short right side would make the same average look larger than its mirror.
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const TOP = 34;
-const ROW_HEIGHT = 26;
+// A row holds its 12 px label on top and the bar pair below it, so the label
+// never sits on the zero line and the rows do not touch.
+const ROW_HEIGHT = 42;
+const LABEL_OFFSET = 8;
+const BAR_OFFSET = 24;
 const BAR_HEIGHT = 12;
 const TICK_HEIGHT = 8;
 const BOTTOM = 22;
@@ -86,133 +100,135 @@ export function ProfileBars(props: ProfileBarsProps): ReactElement {
 
   const height = TOP + PROFILE_METRICS.length * ROW_HEIGHT + BOTTOM;
 
-  // One shared scale for every row, so the bars of two metrics are comparable.
-  // It spans zero and the largest value of any of the three lines, which is why
-  // a month of red cards still fits beside a month of shots.
-  const observed: number[] = [];
-  for (const metric of PROFILE_METRICS) {
-    for (const line of [forLine, againstLine, leagueLine]) {
-      const value = line[metric.key];
-      if (value !== null) {
-        observed.push(value);
-      }
-    }
-  }
-  const scale = linearScale(
-    [0, niceMax(observed.reduce((max, value) => Math.max(max, value), 0))],
-    [CENTRE, PLOT_RIGHT],
-  );
-
   return (
-    <svg
-      role="img"
-      aria-labelledby={ids.labelledBy}
-      viewBox={`0 0 ${WIDTH} ${height}`}
-      className={styles.svg}
-      preserveAspectRatio="xMidYMid meet"
-    >
-      <title id={ids.titleId}>{TITLE}</title>
-      <desc id={ids.descId}>{DESCRIPTION}</desc>
-      <text
-        x={(PLOT_LEFT + CENTRE) / 2}
-        y={16}
-        textAnchor="middle"
-        className={styles.axisText}
+    <div className={styles.chartScroller}>
+      <svg
+        role="img"
+        aria-labelledby={ids.labelledBy}
+        viewBox={`0 0 ${WIDTH} ${height}`}
+        className={styles.svg}
+        style={{ width: `${WIDTH}px`, height: `${height}px` }}
+        preserveAspectRatio="xMidYMid meet"
       >
-        Against
-      </text>
-      <text
-        x={(CENTRE + PLOT_RIGHT) / 2}
-        y={16}
-        textAnchor="middle"
-        className={styles.axisText}
-      >
-        For
-      </text>
-      <line
-        x1={CENTRE}
-        y1={TOP - 6}
-        x2={CENTRE}
-        y2={TOP + PROFILE_METRICS.length * ROW_HEIGHT + 4}
-        className={styles.axisLine}
-      />
-      {PROFILE_METRICS.map((metric, index) => {
-        const centreY = TOP + index * ROW_HEIGHT + ROW_HEIGHT / 2;
-        const forValue = forLine[metric.key];
-        const againstValue = againstLine[metric.key];
-        const leagueValue = leagueLine[metric.key];
-        return (
-          <g key={metric.key}>
-            <text
-              x={LABEL_EDGE - 6}
-              y={centreY}
-              textAnchor="end"
-              dominantBaseline="central"
-              className={styles.metricLabel}
-            >
-              {metric.label}
-            </text>
-            {forValue === null ? null : (
-              <rect
+        <title id={ids.titleId}>{TITLE}</title>
+        <desc id={ids.descId}>{DESCRIPTION}</desc>
+        <text
+          x={(PLOT_LEFT + CENTRE) / 2}
+          y={16}
+          textAnchor="middle"
+          className={styles.axisText}
+        >
+          Against
+        </text>
+        <text
+          x={(CENTRE + PLOT_RIGHT) / 2}
+          y={16}
+          textAnchor="middle"
+          className={styles.axisText}
+        >
+          For
+        </text>
+        {PROFILE_METRICS.map((metric, index) => {
+          const rowTop = TOP + index * ROW_HEIGHT;
+          const centreY = rowTop + BAR_OFFSET + BAR_HEIGHT / 2;
+          const forValue = forLine[metric.key];
+          const againstValue = againstLine[metric.key];
+          const leagueValue = leagueLine[metric.key];
+          // Each row is scaled to its own largest value, so goals and shots both
+          // use the width they need and a short bar never reads as "nothing".
+          const observed = [forValue, againstValue, leagueValue].filter(
+            (value): value is number => value !== null,
+          );
+          const scale = linearScale(
+            [0, niceMax(observed.reduce((max, value) => Math.max(max, value), 0))],
+            [CENTRE, PLOT_RIGHT],
+          );
+          return (
+            <g key={metric.key}>
+              <text
                 x={CENTRE}
-                y={centreY - BAR_HEIGHT / 2}
-                width={Math.max(0, scale.scale(forValue) - CENTRE)}
-                height={BAR_HEIGHT}
-                className={styles.forBar}
+                y={rowTop + LABEL_OFFSET}
+                textAnchor="middle"
+                dominantBaseline="central"
+                className={styles.metricLabel}
+              >
+                {metric.label}
+              </text>
+              <line
+                x1={CENTRE}
+                y1={centreY - BAR_HEIGHT / 2 - 3}
+                x2={CENTRE}
+                y2={centreY + BAR_HEIGHT / 2 + 3}
+                className={styles.axisLine}
               />
-            )}
-            {againstValue === null ? null : (
-              <rect
-                x={Math.min(mirror(scale.scale(againstValue)), CENTRE)}
-                y={centreY - BAR_HEIGHT / 2}
-                width={Math.max(0, CENTRE - mirror(scale.scale(againstValue)))}
-                height={BAR_HEIGHT}
-                className={styles.againstBar}
-              />
-            )}
-            {leagueValue === null ? null : (
-              <g className={styles.leagueTick}>
-                <line
-                  x1={scale.scale(leagueValue)}
-                  y1={centreY - TICK_HEIGHT}
-                  x2={scale.scale(leagueValue)}
-                  y2={centreY + TICK_HEIGHT}
+              {forValue === null ? null : (
+                <rect
+                  x={CENTRE}
+                  y={centreY - BAR_HEIGHT / 2}
+                  width={Math.max(0, scale.scale(forValue) - CENTRE)}
+                  height={BAR_HEIGHT}
+                  className={styles.forBar}
                 />
-                <line
-                  x1={mirror(scale.scale(leagueValue))}
-                  y1={centreY - TICK_HEIGHT}
-                  x2={mirror(scale.scale(leagueValue))}
-                  y2={centreY + TICK_HEIGHT}
+              )}
+              {againstValue === null ? null : (
+                <rect
+                  x={Math.min(mirror(scale.scale(againstValue)), CENTRE)}
+                  y={centreY - BAR_HEIGHT / 2}
+                  width={Math.max(0, CENTRE - mirror(scale.scale(againstValue)))}
+                  height={BAR_HEIGHT}
+                  className={styles.againstBar}
                 />
-              </g>
-            )}
-          </g>
-        );
-      })}
-      <text
-        x={CENTRE}
-        y={height - 6}
-        textAnchor="middle"
-        className={styles.axisText}
-      >
-        0
-      </text>
-      <text
-        x={PLOT_LEFT}
-        y={height - 6}
-        textAnchor="start"
-        className={styles.axisText}
-      >
-        higher
-      </text>
-      <text
-        x={PLOT_RIGHT}
-        y={height - 6}
-        textAnchor="end"
-        className={styles.axisText}
-      >
-        higher
-      </text>
-    </svg>
+              )}
+              {leagueValue === null ? null : (
+                <g className={styles.leagueTick}>
+                  <line
+                    x1={scale.scale(leagueValue)}
+                    y1={centreY - TICK_HEIGHT}
+                    x2={scale.scale(leagueValue)}
+                    y2={centreY + TICK_HEIGHT}
+                  />
+                  <line
+                    x1={mirror(scale.scale(leagueValue))}
+                    y1={centreY - TICK_HEIGHT}
+                    x2={mirror(scale.scale(leagueValue))}
+                    y2={centreY + TICK_HEIGHT}
+                  />
+                </g>
+              )}
+              {forValue === null ? null : (
+                <text
+                  x={scale.scale(forValue) + VALUE_GAP}
+                  y={centreY}
+                  textAnchor="start"
+                  dominantBaseline="central"
+                  className={styles.barValue}
+                >
+                  {formatValue(forValue, 2)}
+                </text>
+              )}
+              {againstValue === null ? null : (
+                <text
+                  x={mirror(scale.scale(againstValue)) - VALUE_GAP}
+                  y={centreY}
+                  textAnchor="end"
+                  dominantBaseline="central"
+                  className={styles.barValue}
+                >
+                  {formatValue(againstValue, 2)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        <text
+          x={CENTRE}
+          y={height - 6}
+          textAnchor="middle"
+          className={styles.axisText}
+        >
+          0
+        </text>
+      </svg>
+    </div>
   );
 }

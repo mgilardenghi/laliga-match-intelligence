@@ -27,7 +27,7 @@ the landmarks and the two boundaries around a page.
 | Region | What it renders |
 | --- | --- |
 | `header` | The site name as a link, the navigation and the theme control. The site name is not an `h1`: each page owns its heading. |
-| `nav` | `Table`, `Matchday`, `Teams`, `Focus` and `Performance`, in that order. The Focus entry reads `Focus: <team name>` when a team resolves and `Focus` alone when the API cannot answer, so the header still renders when the stack is down. |
+| `nav` | `Table`, `Matchday`, `Teams`, `Focus` and `Model performance`, in that order. The Focus entry reads `Focus: <team name>` when a team resolves and `Focus` alone when the API cannot answer, so the header still renders when the stack is down. |
 | `main#main` | The page. The skip link targets it. A page must not render its own `main` element. |
 | `footer` | The API status, the freshness of the data and the attribution. It never throws: a failed freshness read says so instead of failing the page. |
 
@@ -72,6 +72,58 @@ The outcome fills and the sequential scale are identical in both themes, because
 the form strip and the heatmap pick each label's ink (dark or white) from the
 luminance of the fill it sits on (`components/charts/contrast.ts`), and the chart
 gallery test checks every label-on-fill pair for 4.5:1 in both themes.
+
+### Components and visual rules
+
+The chart primitives are in `apps/web/components/charts` and the shared UI
+components are in `apps/web/components/ui`. Every chart is a `ChartFigure`: one
+`figcaption`, exactly one element carrying `role="img"` with the chart's
+accessible name, and a `Data table` disclosure that repeats the numbers for a
+screen reader and for export.
+
+**No chart text lives inside a scaled SVG.** A chart's labels, axis ticks,
+values and legends are HTML beside or over the marks, at a fixed size from the
+type scale (12–14 px), so a chart reads the same on a laptop and on a phone and a
+long team name wraps instead of being cut. What stays in an SVG draws marks only,
+with `vector-effect: non-scaling-stroke`, and a plot has a maximum width and a
+fixed height. Five drawings still hold their labels in an SVG — the projected
+positions heatmap, the calibration panels, the form squares, and the two
+per-match profiles on the club and match pages — and each of them renders at its
+natural size (its CSS size equals its `viewBox`, with a scroll container where
+that is wider than a phone), so nothing in them scales either. The two profiles
+put each metric label above its pair of bars and are 300 px wide, so both sides
+of the mirror fit a phone with nothing behind a sideways scroll, and each row has
+its own scale because the metrics count different things. An assertion on the
+gallery and one on the real pages measure the size a reader sees and fail if any
+chart text leaves the 11–18 px band, and one more fails if a profile chart has
+anything to scroll at 390 px.
+
+Axes fit their data. `IntervalBars` rounds its domain out to the next nice step
+of the rows it draws, so the axis ends within one step of the largest value
+instead of at a fixed 0–200. `DotPlot` takes a `domains` prop and `LineChart` a
+`domain` prop for an explicit axis, and both can leave a reference or a series
+that falls far outside the others as an off-scale marker with its value printed,
+instead of flattening every other mark into one dot.
+
+One colour legend covers the whole app, in both themes: `--side-home` (home side,
+the focus club), `--side-draw` (a draw, the league average), `--side-away` (away
+side, the opponent), `--result-w`, `--result-d` and `--result-l` (a win, a draw
+and a loss, and the Champions League, Europe and relegation places) and
+`--zone-ucl`, `--zone-europe` and `--zone-relegation`. A colour means one thing
+wherever it appears, and blue and orange differ in lightness as well as hue so
+the legend still reads in greyscale. The result fills are identical in both
+themes because the form strip picks a label's ink from the fill's hex fallback:
+a token whose fallback is handed to `inkForFill` keeps fallback == token value
+in every theme, and the comment in `globals.css` says so.
+
+The five shared components are Server Components, so a page can use them without
+adding a client bundle: `MetricHelp` (the ⓘ beside a metric name — a `<details>`
+disclosure that also works with Enter, Space, a click and a tap), `HowToRead`
+(the panel that closes a page with 2–4 term and definition pairs), `SectionNav`
+(the sticky in-page anchor bar, which wraps on a phone), `StatTile` (one headline
+number with its label, sub-line, an optional tone and an optional `MetricHelp`)
+and `Legend` (the swatch row driven by the tokens above). They are exported from
+`apps/web/components/ui` and each one is rendered in the `/dev/charts` gallery.
 
 ### Focus team
 

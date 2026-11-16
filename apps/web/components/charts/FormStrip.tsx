@@ -31,25 +31,37 @@ type OutcomePaint = {
 
 // The fill is a token with a hex fallback, and the label ink is derived from
 // that same fallback: fill and ink come from one declaration, so they cannot
-// disagree about the colour behind the letters. The gallery e2e test guards a
-// token and its fallback staying identical.
+// disagree about the colour behind the letters. The three result tokens are
+// identical in both themes, so the derived ink is correct in either one.
 const OUTCOME_COLOURS: Record<FormOutcome, OutcomePaint> = {
-  W: { fill: "var(--outcome-w, #15803d)", fallback: "#15803d" },
-  D: { fill: "var(--outcome-d, #5f6368)", fallback: "#5f6368" },
-  L: { fill: "var(--outcome-l, #b91c1c)", fallback: "#b91c1c" },
+  W: { fill: "var(--result-w, #0f7b3f)", fallback: "#0f7b3f" },
+  D: { fill: "var(--result-d, #5b6472)", fallback: "#5b6472" },
+  L: { fill: "var(--result-l, #b3261e)", fallback: "#b3261e" },
 };
 
-const WIDTH = 320;
-const HEIGHT = 74;
-const SQUARE = 46;
-const GAP = 10;
-const START_X = 16;
-const START_Y = 8;
+// Both strips keep an SVG because a table-row test pins its `<title>` and the
+// letter-on-square pairs. The drawing therefore never scales: the component
+// gives the element the CSS width and height of its `viewBox` in px, so every
+// label is drawn at its declared pixel size and a table row keeps its height.
+const SQUARE = 32;
+const GAP = 8;
+const START_X = 8;
+const START_Y = 4;
+const LABEL_ROW = 20;
+const HEIGHT = START_Y + SQUARE + LABEL_ROW;
 
-const COMPACT_WIDTH = 126;
-const COMPACT_HEIGHT = 26;
-const COMPACT_SQUARE = 22;
-const COMPACT_GAP = 4;
+const COMPACT_SQUARE = 20;
+const COMPACT_GAP = 3;
+const COMPACT_HEIGHT = 20;
+
+function stripWidth(count: number, square: number, gap: number, padding = 0): number {
+  // A strip without a result keeps a one-pixel box instead of a zero-sized
+  // element, so the drawing stays valid and its `<title>` stays in the page.
+  if (count <= 0) {
+    return 1;
+  }
+  return padding * 2 + count * square + (count - 1) * gap;
+}
 
 export function FormStrip(props: FormStripProps): ReactElement {
   const {
@@ -71,13 +83,14 @@ export function FormStrip(props: FormStripProps): ReactElement {
   const ids = chartIds(id ?? title);
 
   if (compact) {
+    const width = stripWidth(shown.length, COMPACT_SQUARE, COMPACT_GAP);
     return (
       <svg
         role="img"
         aria-label={title}
-        viewBox={`0 0 ${COMPACT_WIDTH} ${COMPACT_HEIGHT}`}
-        className={`${styles.svg} ${styles.formCompactSvg}`}
-        preserveAspectRatio="xMidYMid meet"
+        viewBox={`0 0 ${width} ${COMPACT_HEIGHT}`}
+        className={styles.formStripSvg}
+        style={{ width: `${width}px`, height: `${COMPACT_HEIGHT}px` }}
       >
         <title id={ids.titleId}>{title}</title>
         {shown.map((result, index) => {
@@ -97,11 +110,8 @@ export function FormStrip(props: FormStripProps): ReactElement {
                 y={COMPACT_SQUARE / 2}
                 textAnchor="middle"
                 dominantBaseline="central"
-                style={{
-                  fill: inkForFill(OUTCOME_COLOURS[result].fallback),
-                  fontSize: 14,
-                  fontWeight: 700,
-                }}
+                className={`${styles.formLetter} ${styles.formLetterCompact}`}
+                style={{ fill: inkForFill(OUTCOME_COLOURS[result].fallback) }}
               >
                 {result}
               </text>
@@ -112,8 +122,10 @@ export function FormStrip(props: FormStripProps): ReactElement {
     );
   }
 
+  const width = stripWidth(shown.length, SQUARE, GAP, START_X);
   return (
     <ChartFigure
+      ids={ids}
       title={title}
       description={description}
       table={{
@@ -126,15 +138,20 @@ export function FormStrip(props: FormStripProps): ReactElement {
       }}
       note={note}
     >
+      {/* The figure is named from outside the drawing: the figcaption carries
+          the title id and the hidden span below it carries the description.
+          The drawing stays the plot root because the gallery reads its outcome
+          letters through `svg[role="img"]`; its own `<title>` and `<desc>` keep
+          their text without ids, so no id in the figure is duplicated. */}
       <svg
         role="img"
         aria-labelledby={ids.labelledBy}
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className={styles.svg}
-        preserveAspectRatio="xMidYMid meet"
+        viewBox={`0 0 ${width} ${HEIGHT}`}
+        className={styles.formStripSvg}
+        style={{ width: `${width}px`, height: `${HEIGHT}px` }}
       >
-        <title id={ids.titleId}>{title}</title>
-        <desc id={ids.descId}>{description}</desc>
+        <title>{title}</title>
+        <desc>{description}</desc>
         {shown.map((result, index) => {
           const x = START_X + index * (SQUARE + GAP);
           return (
@@ -152,11 +169,8 @@ export function FormStrip(props: FormStripProps): ReactElement {
                 y={START_Y + SQUARE / 2}
                 textAnchor="middle"
                 dominantBaseline="central"
-                style={{
-                  fill: inkForFill(OUTCOME_COLOURS[result].fallback),
-                  fontSize: 20,
-                  fontWeight: 700,
-                }}
+                className={`${styles.formLetter} ${styles.formLetterFull}`}
+                style={{ fill: inkForFill(OUTCOME_COLOURS[result].fallback) }}
               >
                 {result}
               </text>
@@ -166,9 +180,9 @@ export function FormStrip(props: FormStripProps): ReactElement {
         {shown.length > 0 ? (
           <text
             x={START_X + SQUARE / 2}
-            y={START_Y + SQUARE + 12}
+            y={START_Y + SQUARE + 14}
             textAnchor="middle"
-            className={styles.axisText}
+            className={styles.formNewest}
           >
             newest
           </text>

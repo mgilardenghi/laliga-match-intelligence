@@ -96,6 +96,89 @@ export function extent(values: readonly number[]): readonly [number, number] {
   return [min, max];
 }
 
+export type FittedDomain = {
+  readonly domain: readonly [number, number];
+  readonly ticks: readonly number[];
+};
+
+/** Round away the float noise a division leaves, without losing real digits. */
+function settle(value: number): number {
+  return Number(value.toPrecision(12));
+}
+
+/** The next 1/2/5 x 10^k step above `step`. */
+function nextNiceStep(step: number): number {
+  const magnitude = 10 ** Math.floor(Math.log10(step));
+  const residual = step / magnitude;
+  if (residual < 1.5) {
+    return 2 * magnitude;
+  }
+  if (residual < 3.5) {
+    return 5 * magnitude;
+  }
+  return 10 * magnitude;
+}
+
+/**
+ * Fit an axis to the data instead of to a round guess.
+ *
+ * The domain starts at zero, or at the next nice value below the minimum when
+ * the data holds negative values. It ends at the smallest multiple of a
+ * 1/2/5 x 10^k step that is at least the maximum and that splits the axis into
+ * at most `tickCount` intervals, so the last tick is the domain maximum and the
+ * axis never runs more than one step past the data.
+ */
+export function fittedDomain(values: readonly number[], tickCount: number): FittedDomain {
+  const intervals = Math.max(1, Math.floor(tickCount));
+  let minimum = 0;
+  let maximum = 0;
+  let finite = 0;
+  for (const value of values) {
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+    finite += 1;
+    if (value < minimum) {
+      minimum = value;
+    }
+    if (value > maximum) {
+      maximum = value;
+    }
+  }
+
+  // No finite value, or every value exactly zero: a degenerate axis would draw
+  // nothing, so fall back to one readable interval.
+  const start = minimum < 0 ? minimum : 0;
+  if (finite === 0 || maximum - start <= 0) {
+    return { domain: [0, 1], ticks: [0, 1] };
+  }
+
+  let step = niceStep(maximum - start, intervals);
+  let lower = 0;
+  let upper = 1;
+  let count = 1;
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    lower = start < 0 ? Math.floor(settle(start / step)) * step : 0;
+    upper = Math.ceil(settle(maximum / step)) * step;
+    count = Math.round(settle((upper - lower) / step));
+    if (count >= 1 && count <= intervals) {
+      break;
+    }
+    step = nextNiceStep(step);
+  }
+
+  const domainMinimum = settle(lower);
+  const domainMaximum = settle(upper);
+  const ticks: number[] = [];
+  for (let index = 0; index <= count; index += 1) {
+    ticks.push(settle(lower + index * step));
+  }
+  // The last tick is the axis end by definition, even when the float sum of the
+  // step lands a hair beside it.
+  ticks[ticks.length - 1] = domainMaximum;
+  return { domain: [domainMinimum, domainMaximum], ticks };
+}
+
 export function niceMax(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return 1;

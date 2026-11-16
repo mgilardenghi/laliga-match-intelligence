@@ -1,0 +1,269 @@
+/*
+ * The shared UI foundation: metric help, how-to-read panel, section
+ * navigation, stat tiles and the legend.
+ *
+ * Every colour is a token from globals.css and no component declares a hex
+ * value of its own, so a theme is still one block of values.
+ */
+
+/* MetricHelp ------------------------------------------------------------- */
+
+.metricHelp {
+  display: inline-block;
+}
+
+/* Opening the disclosure turns it into a full-width row, so the panel gets the
+   card's width and can never be clipped by the viewport edge. */
+.metricHelp[open] {
+  display: block;
+  flex: 1 1 100%;
+}
+
+.metricHelpSummary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--control-border);
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--muted);
+  cursor: pointer;
+  /* A non-list-item display removes the native marker; the WebKit pseudo
+     element below covers the older engines that keep it. */
+  list-style: none;
+}
+
+.metricHelpSummary::-webkit-details-marker {
+  display: none;
+}
+
+.metricHelpSummary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.metricHelpGlyph {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.metricHelpPanel {
+  max-width: 24rem;
+  margin-top: 0.35rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--background);
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.metricHelpText + .metricHelpText {
+  margin-top: 0.35rem;
+}
+
+/* HowToRead -------------------------------------------------------------- */
+
+.howToRead {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.howToReadTitle {
+  font-size: 1.125rem;
+}
+
+.howToReadList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.howToReadItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.howToReadTerm {
+  font-weight: 600;
+}
+
+.howToReadDefinition {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+/* SectionNav ------------------------------------------------------------- */
+
+.sectionNav {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+}
+
+.sectionNavSticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.sectionNavList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.875rem;
+  list-style: none;
+}
+
+.sectionNavLink {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.sectionNavLink:hover,
+.sectionNavLink:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* StatTile --------------------------------------------------------------- */
+
+.statTile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-left-width: 0.3rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.toneNeutral {
+  border-left-color: var(--muted);
+}
+
+.toneGood {
+  border-left-color: var(--zone-ucl);
+}
+
+.toneBad {
+  border-left-color: var(--zone-relegation);
+}
+
+.statTileHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.statTileLabel {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.statTileValue {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.statTileSubline {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* Legend ----------------------------------------------------------------- */
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.legendCaption {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.legendList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  font-size: 0.875rem;
+  list-style: none;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legendLabel {
+  /* The text label, not the swatch, carries the meaning. */
+  color: var(--text);
+}
+
+.swatch {
+  flex: 0 0 auto;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+}
+
+.swatchSideHome {
+  background: var(--side-home);
+}
+
+.swatchSideDraw {
+  background: var(--side-draw);
+}
+
+.swatchSideAway {
+  background: var(--side-away);
+}
+
+.swatchResultW {
+  background: var(--result-w);
+}
+
+.swatchResultD {
+  background: var(--result-d);
+}
+
+.swatchResultL {
+  background: var(--result-l);
+}
+
+.swatchZoneUcl {
+  background: var(--zone-ucl);
+}
+
+.swatchZoneEurope {
+  background: var(--zone-europe);
+}
+
+.swatchZoneRelegation {
+  background: var(--zone-relegation);
+}

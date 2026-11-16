@@ -82,7 +82,7 @@ def test_cards_link_to_matches_and_show_a_probability_bar(page: Page, dashboard_
             )
         else:
             drew_a_bar = True
-            expect(figures.first.locator('svg[role="img"]')).to_have_attribute(
+            expect(figures.first.locator('[role="img"]')).to_have_attribute(
                 "aria-labelledby", re.compile(r"\S+")
             )
 

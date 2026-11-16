@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from "react";
+import type { ChartIds } from "./chart-ids";
 import styles from "./charts.module.css";
 
 export type ChartTable = {
@@ -13,14 +14,30 @@ export type ChartFigureProps = {
   readonly table: ChartTable;
   readonly note?: ReactNode;
   readonly children: ReactNode;
+  /**
+   * The aria ids a chart labels its marks with. When they are given, the
+   * figcaption carries the title id and a visually hidden span right below it
+   * carries the description, so an overlay chart can point `aria-labelledby`
+   * at text outside its own scaled drawing. Without them the figure renders
+   * neither element, which is what the charts that still draw their own
+   * `<title>` and `<desc>` rely on.
+   */
+  readonly ids?: ChartIds;
 };
 
 export function ChartFigure(props: ChartFigureProps): ReactElement {
-  const { title, table, note, children } = props;
+  const { title, description, table, note, children, ids } = props;
 
   return (
     <figure className={styles.figure}>
-      <figcaption className={styles.caption}>{title}</figcaption>
+      <figcaption id={ids?.titleId} className={styles.caption}>
+        {title}
+      </figcaption>
+      {ids ? (
+        <span id={ids.descId} className={styles.srOnly}>
+          {description}
+        </span>
+      ) : null}
       {children}
       {note ? <p className={styles.note}>{note}</p> : null}
       <details className={styles.details}>

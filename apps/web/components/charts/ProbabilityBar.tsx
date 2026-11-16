@@ -18,52 +18,27 @@ const DEFAULT_TITLE = "Home win, draw and away win probabilities";
 const DEFAULT_DESCRIPTION =
   "Stacked bar of the home win, draw and away win probabilities. Every segment is labelled with its outcome letter and percentage.";
 
-const WIDTH = 480;
-const HEIGHT = 120;
-const PLOT_LEFT = 12;
-const PLOT_RIGHT = 468;
-const BAR_Y = 26;
-const BAR_HEIGHT = 34;
-// One row per segment: with three labels and three rows a free row always
-// exists, so two labels can never be drawn on top of each other.
-const LABEL_ROWS = 3;
-const LABEL_ROW_Y = 80;
-const LABEL_ROW_GAP = 14;
-const CHAR_WIDTH = 5.4;
-
-// Every fallback keeps at least 3:1 against both the light and the dark page
-// background, so a chart is legible before the theme tokens exist.
-const SEGMENT_COLOURS: readonly string[] = [
-  "var(--cat-1, #b45309)",
-  "var(--cat-2, #0f766e)",
-  "var(--cat-3, #cc79a7)",
-];
-
 type Segment = {
   readonly key: "H" | "D" | "A";
   readonly probability: number;
-  readonly colour: string;
+  /** The semantic fill of one side of the result, shared by the bar and the swatch. */
+  readonly fill: string;
 };
 
 type LabelledSegment = Segment & {
-  readonly start: number;
-  readonly width: number;
-  readonly label: string;
-  readonly labelX: number;
-  readonly labelRow: number;
-  readonly labelWidth: number;
+  /** This segment's share of the total, from 0 to 1. */
+  readonly share: number;
 };
 
 export function ProbabilityBar(props: ProbabilityBarProps): ReactElement {
   const { home, draw, away, id, title = DEFAULT_TITLE, description = DEFAULT_DESCRIPTION, note } =
     props;
   const ids = chartIds(id ?? title);
-  const plotWidth = PLOT_RIGHT - PLOT_LEFT;
 
   const segments: readonly Segment[] = [
-    { key: "H", probability: home.probability, colour: SEGMENT_COLOURS[0] },
-    { key: "D", probability: draw.probability, colour: SEGMENT_COLOURS[1] },
-    { key: "A", probability: away.probability, colour: SEGMENT_COLOURS[2] },
+    { key: "H", probability: home.probability, fill: styles.fillHome },
+    { key: "D", probability: draw.probability, fill: styles.fillDraw },
+    { key: "A", probability: away.probability, fill: styles.fillAway },
   ];
   const total = segments.reduce((sum, segment) => sum + Math.max(0, segment.probability), 0);
   // A bar whose widths disagree with its own labels would be a lie. Each
@@ -72,29 +47,14 @@ export function ProbabilityBar(props: ProbabilityBarProps): ReactElement {
   // the raw inputs.
   const denominator = total > 0 ? total : 1;
   const scaled = Math.abs(total - 1) > 1e-6;
-
-  let cursor = PLOT_LEFT;
-  const occupied: { low: number; high: number }[][] = Array.from({ length: LABEL_ROWS }, () => []);
-  const labelled: LabelledSegment[] = segments.map((segment) => {
-    const width = (Math.max(0, segment.probability) / denominator) * plotWidth;
-    const start = cursor;
-    cursor += width;
-    const label = `${segment.key} ${formatPercent(Math.max(0, segment.probability) / denominator)}`;
-    const labelWidth = label.length * CHAR_WIDTH;
-    const half = labelWidth / 2;
-    const centre = Math.min(PLOT_RIGHT - half, Math.max(PLOT_LEFT + half, start + width / 2));
-    const low = centre - half;
-    const high = centre + half;
-    const freeRow = occupied.findIndex((spans) =>
-      spans.every((span) => high <= span.low || low >= span.high),
-    );
-    const labelRow = freeRow >= 0 ? freeRow : LABEL_ROWS - 1;
-    occupied[labelRow].push({ low, high });
-    return { ...segment, start, width, label, labelX: centre, labelRow, labelWidth };
-  });
+  const labelled: readonly LabelledSegment[] = segments.map((segment) => ({
+    ...segment,
+    share: Math.max(0, segment.probability) / denominator,
+  }));
 
   return (
     <ChartFigure
+      ids={ids}
       title={title}
       description={description}
       table={{
@@ -108,68 +68,46 @@ export function ProbabilityBar(props: ProbabilityBarProps): ReactElement {
       }}
       note={note}
     >
-      <svg
+      <div
         role="img"
         aria-labelledby={ids.labelledBy}
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className={styles.svg}
-        preserveAspectRatio="xMidYMid meet"
+        className={`${styles.plot} ${styles.probabilityChart}`}
       >
-        <title id={ids.titleId}>{title}</title>
-        <desc id={ids.descId}>{description}</desc>
-        <text x={PLOT_LEFT} y={16} textAnchor="start" className={styles.segmentName}>
-          {home.name}
-        </text>
-        <text x={PLOT_RIGHT} y={16} textAnchor="end" className={styles.segmentName}>
-          {away.name}
-        </text>
-        <rect
-          x={PLOT_LEFT}
-          y={BAR_Y}
-          width={plotWidth}
-          height={BAR_HEIGHT}
-          rx={3}
-          style={{ fill: "var(--border, #d4d4d8)", opacity: 0.35 }}
-        />
-        {labelled.map((segment) => (
-          <rect
-            key={`bar-${segment.key}`}
-            x={segment.start}
-            y={BAR_Y}
-            width={segment.width}
-            height={BAR_HEIGHT}
-            style={{ fill: segment.colour }}
-          />
-        ))}
-        {labelled.map((segment) => {
-          const labelY = LABEL_ROW_Y + segment.labelRow * LABEL_ROW_GAP;
-          const segmentCentre = segment.start + segment.width / 2;
-          return (
-            <g key={`label-${segment.key}`}>
-              <line
-                x1={segment.labelX}
-                y1={labelY - 6}
-                x2={segmentCentre}
-                y2={BAR_Y + BAR_HEIGHT + 2}
-                className={styles.leaderLine}
+        <div className={styles.probabilityNames}>
+          <span className={styles.probabilityName}>{home.name}</span>
+          <span className={`${styles.probabilityName} ${styles.probabilityNameAway}`}>
+            {away.name}
+          </span>
+        </div>
+        <div className={styles.probabilityTrack}>
+          {labelled.map((segment) => (
+            <span
+              key={`bar-${segment.key}`}
+              aria-hidden="true"
+              className={`${styles.probabilitySegment} ${segment.fill}`}
+              style={{ flexGrow: segment.share }}
+            />
+          ))}
+        </div>
+        {/* The labels sit against the bar instead of on it: small text on a
+            coloured fill cannot keep a readable contrast. */}
+        <div className={styles.probabilityLabels}>
+          {labelled.map((segment) => (
+            <span key={`label-${segment.key}`} className={styles.probabilityLabel}>
+              <span
+                aria-hidden="true"
+                className={`${styles.probabilitySwatch} ${segment.fill}`}
               />
-              <text
-                x={segment.labelX}
-                y={labelY}
-                textAnchor="middle"
-                className={styles.probLabel}
-              >
-                {segment.label}
-              </text>
-            </g>
-          );
-        })}
+              {`${segment.key} ${formatPercent(segment.share)}`}
+            </span>
+          ))}
+        </div>
         {scaled ? (
-          <text x={PLOT_LEFT} y={HEIGHT - 6} textAnchor="start" className={styles.axisText}>
+          <p className={styles.probabilityTotal}>
             {`The inputs add up to ${formatPercent(total)}; each segment shows its share of that total.`}
-          </text>
+          </p>
         ) : null}
-      </svg>
+      </div>
     </ChartFigure>
   );
 }

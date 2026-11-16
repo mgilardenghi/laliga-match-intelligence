@@ -37,30 +37,43 @@ def test_chart_gallery_renders_every_chart(page: Page, dashboard_url: str) -> No
         caption_text = caption.inner_text().strip()
         assert caption_text, f"figure {index} has an empty figcaption"
 
-        svg = figure.locator('svg[role="img"]')
-        expect(svg).to_have_count(1)
-        # The chart components label the SVG with both its title and its
-        # description, so the accessible name is exactly the two texts in that
-        # order. Anything else means the labelledby wiring drifted.
-        labelled_by = svg.get_attribute("aria-labelledby")
-        assert labelled_by is not None, f"figure {index} SVG has no aria-labelledby"
+        plots = figure.locator('[role="img"]')
+        expect(plots).to_have_count(1)
+        plot = plots.first
+        # A chart labels its marks with two ids: the figcaption that names it and
+        # the text that describes it. The element that draws the marks may be an
+        # SVG or, once the axis labels move to HTML, a plain container, so the
+        # test resolves the ids from the page instead of from inside the SVG.
+        labelled_by = plot.get_attribute("aria-labelledby")
+        assert labelled_by is not None, f"figure {index} role=img has no aria-labelledby"
         tokens = labelled_by.split()
         assert len(tokens) == 2, (
             f"figure {index} should label with a title and a description, got {labelled_by!r}"
         )
-        title_element = svg.locator(f"[id='{tokens[0]}']")
-        desc_element = svg.locator(f"[id='{tokens[1]}']")
-        expect(title_element).to_have_count(1)
-        expect(desc_element).to_have_count(1)
-        assert title_element.evaluate("(element) => element.tagName.toLowerCase()") == "title"
-        assert desc_element.evaluate("(element) => element.tagName.toLowerCase()") == "desc"
-        title_text = _text_content(title_element)
-        desc_text = _text_content(desc_element)
-        assert title_text == caption_text, (
-            f"figure {index} SVG title {title_text!r} does not match figcaption {caption_text!r}"
+        title_id, desc_id = tokens
+        # The title id belongs to the figcaption the reader sees, not to a
+        # `<title>` inside the drawing: a chart that names itself inside a
+        # scaled SVG could announce one string while the visible heading says
+        # another. Requiring the caption makes the two the same element, so the
+        # name cannot drift from the heading a reader reads.
+        caption_id = caption.get_attribute("id")
+        assert caption_id == title_id, (
+            f"figure {index} ({caption_text!r}) labels its plot with the title id "
+            f"{title_id!r}, but its figcaption id is {caption_id!r}"
         )
-        assert desc_text, f"figure {index} SVG has an empty description"
-        expect(svg).to_have_accessible_name(f"{title_text} {desc_text}")
+        # The caption is also the single element with that id, so the name the
+        # plot announces is neither duplicated nor hidden inside the marks.
+        title_element = page.locator(f"[id='{title_id}']")
+        expect(title_element).to_have_count(1)
+        title_text = _text_content(title_element)
+        assert title_text == caption_text, (
+            f"figure {index} title {title_text!r} does not match figcaption {caption_text!r}"
+        )
+        desc_element = page.locator(f"[id='{desc_id}']")
+        expect(desc_element).to_have_count(1)
+        desc_text = _text_content(desc_element)
+        assert desc_text, f"figure {index} has an empty description"
+        expect(plot).to_have_accessible_name(f"{title_text} {desc_text}")
 
         details = figure.locator("details")
         expect(details).to_have_count(1)
@@ -87,9 +100,14 @@ def test_chart_gallery_renders_every_chart(page: Page, dashboard_url: str) -> No
     probability_section = page.locator("section").filter(
         has=page.get_by_role("heading", name="Home win probability", exact=True)
     )
-    probability_texts = probability_section.locator('svg[role="img"] text').all_text_contents()
-    percentages = [text for text in probability_texts if "%" in text]
-    assert len(percentages) >= 3, f"probability bar renders {len(percentages)} percentages"
+    # The probability bar is an HTML plot: its percentages are HTML text, not
+    # text inside a scaled viewBox, so the check reads the plot's own text.
+    probability_plot = probability_section.locator('[role="img"]')
+    expect(probability_plot).to_have_count(1)
+    percentages = [token for token in probability_plot.inner_text().split() if "%" in token]
+    assert len(percentages) >= 3, (
+        f"probability bar renders {len(percentages)} percentages in its HTML text"
+    )
 
 
 # The zone colour is for lines and segments. Small text filled with it measured
