@@ -24,7 +24,7 @@ path shape. The route only nests deeper; ``teams.py`` is not edited.
 import datetime
 import decimal
 from collections.abc import Mapping, Sequence
-from typing import Final, NamedTuple
+from typing import NamedTuple
 
 from fastapi import APIRouter, HTTPException
 from lmi_core.analytics.season_stats import (
@@ -42,12 +42,10 @@ from lmi_core.analytics.season_stats import (
 from lmi_core.analytics.season_stats import StatLine as CoreStatLine
 from lmi_core.analytics.season_stats import Venue as CoreVenue
 from lmi_core.db.models import Match as MatchModel
-from lmi_core.db.models import MatchOdd as MatchOddModel
 from lmi_core.db.models import MatchStat as MatchStatModel
 from lmi_core.db.models import Team as TeamModel
-from lmi_core.live.data import ODDS_PRIORITY
 from lmi_core.standings import StandingRow, compute_standings
-from sqlalchemy import case, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lmi_api import views
@@ -58,9 +56,6 @@ from lmi_api.schemas.team_season_stats import TeamSeasonStats
 from lmi_api.schemas.teams import Team
 
 router = APIRouter(prefix="/teams", tags=["teams"])
-
-_ONE_X_TWO: Final[str] = "1x2"
-"""The market of a 1x2 price, the only market this resource prices a match with."""
 
 
 class _PlayedRow(NamedTuple):
@@ -117,7 +112,8 @@ def get_team_season_stats(
     :data:`lmi_core.live.data.ODDS_PRIORITY`, and the selected row per match is
     the most trusted of them, by the priority rank the live loader and the match
     preview also apply. A closing price is never read, whatever its bookmaker:
-    it is only known at kickoff. One statement reads every eligible row of the
+    it is only known at kickoff. One statement of
+    :func:`lmi_api.views.load_pre_closing_prices` reads every eligible row of the
     club's played matches, ordered by fixture and then by that rank, and the
     first row of each fixture is kept in Python. The priority list holds three
     bookmakers, so a fixture can add at most three candidate rows: the read is
@@ -203,7 +199,7 @@ def get_team_season_stats(
     stats_by_match = _load_stats(session, match_ids=[row.id for row in played_rows])
 
     team_rows = [row for row in played_rows if team_id in (row.home_team_id, row.away_team_id)]
-    prices = _pre_closing_prices(session, match_ids=[row.id for row in team_rows])
+    prices = views.load_pre_closing_prices(session, match_ids=[row.id for row in team_rows])
     team_matches = [
         _played_match(
             row,
@@ -312,58 +308,6 @@ def _load_stats(session: Session, *, match_ids: Sequence[int]) -> dict[int, Matc
             select(MatchStatModel).where(MatchStatModel.match_id.in_(match_ids))
         )
     }
-
-
-def _pre_closing_prices(
-    session: Session, *, match_ids: Sequence[int]
-) -> dict[int, tuple[float, float, float]]:
-    """Return the most trusted pre-closing ``1x2`` price of each requested match.
-
-    The eligible rows are the pre-closing ``1x2`` prices of a bookmaker of
-    :data:`lmi_core.live.data.ODDS_PRIORITY`, ordered by match and then by the
-    priority rank, so the first row of a match is the one the live loader and
-    the match preview would also select. A closing price is excluded in SQL,
-    whatever its bookmaker: it is only known at kickoff.
-
-    One statement serves every match. The rows are ordered so that the most
-    trusted row of a fixture comes first, and the first row of each fixture is
-    then kept in Python: the priority list bounds the candidates to one per
-    bookmaker, and PostgreSQL ``DISTINCT ON`` is not needed to keep the read to
-    one statement. A fixture with no eligible price is absent from the mapping.
-
-    Args:
-        session: a session bound to the application database.
-        match_ids: the fixtures to price. An empty sequence issues no statement.
-
-    Returns:
-        The ``(home, draw, away)`` decimal prices of each priceable match, by
-        match identifier.
-    """
-    if not match_ids:
-        return {}
-    priority = case(
-        *((MatchOddModel.bookmaker == name, rank) for rank, name in enumerate(ODDS_PRIORITY)),
-        else_=len(ODDS_PRIORITY),
-    )
-    statement = (
-        select(
-            MatchOddModel.match_id,
-            MatchOddModel.home,
-            MatchOddModel.draw,
-            MatchOddModel.away,
-        )
-        .where(
-            MatchOddModel.match_id.in_(match_ids),
-            MatchOddModel.is_closing.is_(False),
-            MatchOddModel.market == _ONE_X_TWO,
-            MatchOddModel.bookmaker.in_(ODDS_PRIORITY),
-        )
-        .order_by(MatchOddModel.match_id, priority)
-    )
-    prices: dict[int, tuple[float, float, float]] = {}
-    for match_id, home, draw, away in session.execute(statement).all():
-        prices.setdefault(int(match_id), (float(home), float(draw), float(away)))
-    return prices
 
 
 def _played_match(

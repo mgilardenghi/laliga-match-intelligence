@@ -47,7 +47,7 @@ the one fact the client still has, and it ties the screen to the server log.
 
 | Route | State |
 | --- | --- |
-| `/` | The M0 placeholder, until the table page lands. |
+| `/` | The current table of a season (`?season=`), with the projected columns, the position heatmap and the points intervals when a simulation is stored. Empty states name `make ingest` or `make simulate`. |
 | `/teams` | The clubs of one season, and the picker that stores the focus team. |
 | `/focus` | Resolves the focus team and redirects to `/focus/<teamId>`; it renders nothing itself. |
 | `/dev/charts` | The chart gallery, behind `LMI_DEV_PAGES=1`. |

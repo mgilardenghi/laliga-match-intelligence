@@ -325,6 +325,266 @@ One row of `matches` is shown; a season of 38 matchdays returns 38.
 }
 ```
 
+### `GET /v1/teams/{team_id}/history`
+
+One club's seasons, ascending, with its table position, its per-game averages and
+the steepest decline of each metric between two adjacent seasons.
+
+The resource takes no query parameter: it is the club's whole stored history,
+so a caller that wants one season asks
+[the season statistics](#get-v1teamsteam_idseason-stats) instead.
+
+**Which club.** An identifier no stored club has is a `404` with the detail
+`Team not found`. A stored club that has played no match at all answers `200`
+with empty `seasons` and `largest_drop`: a club without history is a state of
+the data, not an error, and a line of zeros would invent a season it never
+played.
+
+**Which seasons are listed.** Exactly the seasons in which the club played at
+least one match, meaning a match with status `played` and both goal columns set.
+A season in which the club only had fixtures, or none at all, is absent rather
+than served with zeros. The order is the season `start_year` ascending and then
+the season code, so two reads of one history serve the same list.
+
+**The position.** `position` is the club's place in that season's table as the
+[standings endpoint](#get-v1standings) ranks it: the team set is every club that
+appears as a side of any match of the season, and the counted results are the
+played ones. Both endpoints rank a season with the same function, so over the same results they place a club the same way, and a club the table does not rank keeps a `null` instead of a borrowed place. A standings request that passes `as_of` counts only the matches up to that date, which is a shorter season than this resource reports, so that table can rank the club differently on purpose. Two requests are still two reads of a stored state that can
+move between them, and a club that changes place after a result is stored is a
+change of the data rather than a disagreement about the rule.
+
+**The averages.** `points_pg`, `goals_for_pg` and `goals_against_pg` divide by
+`played` and are always known for a listed season. Every other average is taken
+over only the matches that carry the value, so its denominator can be smaller
+than `played` and can differ from field to field: a match without a statistics
+row counts in the goals and in nothing else, and a statistics row without
+cards counts in the shots and in nothing else. A field no counted match carries
+is `null`, never `0.0`, while a field every counted match records as zero
+averages to `0.0`. `cards_pg` averages the club's own yellow plus red per
+match, not the difference between the two sides. `xpts_pg` averages the expected
+points of the fixtures that carry an eligible **pre-closing** `1x2` price, by
+the same selection and the same formula the season statistics apply, so a
+closing price is ignored whatever its bookmaker.
+
+**The largest drops.** `largest_drop` answers which numbers fell between two
+adjacent seasons of the list. It covers the nine per-game metrics of the payload
+-- `points_pg`, `goals_for_pg`, `goals_against_pg`, `shots_for_pg`,
+`shots_against_pg`, `sot_for_pg`, `sot_against_pg`, `cards_pg` and `xpts_pg` --
+and names each one by its payload key, so an entry can be matched to the number
+it describes. Absolute `points` is deliberately not a metric: a season can be
+shorter, and a drop in a total would then describe the calendar instead of the
+club.
+
+`delta` is oriented so that a **negative** value always means the club got worse:
+`later - earlier` for the five higher-is-better metrics, and `earlier - later`
+for `goals_against_pg`, `shots_against_pg` and `cards_pg`, so conceding more and
+collecting more cards read as a fall like any other number that got worse. A
+pair with a `null` on either side is skipped for that metric alone, because a gap
+in the source is not a decline on the pitch. Each metric contributes at most one
+entry -- its steepest decline -- so a metric that never fell is absent, and the
+list is empty when nothing declined and when fewer than two seasons are listed.
+The order is `delta` ascending and then `metric`.
+
+Two of the four seasons are shown.
+
+```json
+{
+  "team": { "id": 1, "name": "Alavés" },
+  "seasons": [
+    {
+      "season": "2007-08",
+      "position": 14,
+      "played": 38,
+      "points": 47,
+      "points_pg": 1.236842105263158,
+      "goals_for_pg": 1.5,
+      "goals_against_pg": 1.605263157894737,
+      "shots_for_pg": null,
+      "shots_against_pg": null,
+      "sot_for_pg": null,
+      "sot_against_pg": null,
+      "cards_pg": null,
+      "xpts_pg": null
+    },
+    {
+      "season": "2030-31",
+      "position": 20,
+      "played": 10,
+      "points": 6,
+      "points_pg": 0.6,
+      "goals_for_pg": 1.4,
+      "goals_against_pg": 2.3,
+      "shots_for_pg": 10.0,
+      "shots_against_pg": 10.0,
+      "sot_for_pg": 4.0,
+      "sot_against_pg": 4.0,
+      "cards_pg": 2.5,
+      "xpts_pg": 1.3596881959910916
+    }
+  ],
+  "largest_drop": [
+    {
+      "metric": "goals_against_pg",
+      "from_season": "2007-08",
+      "to_season": "2030-31",
+      "delta": -0.6947368421052629
+    },
+    {
+      "metric": "points_pg",
+      "from_season": "2007-08",
+      "to_season": "2030-31",
+      "delta": -0.636842105263158
+    }
+  ]
+}
+```
+
+### `GET /v1/teams/{team_id}/relegation-race`
+
+One club's survival race in one season: the league's historical survival line,
+the club and the clubs it is racing, their run history and the fixtures still to
+play.
+
+| Parameter | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `season` | string | the current season (see below) | Season code. An unknown code is a `404`. |
+
+**Which season by default.** The same rule the standings endpoint applies:
+without `season`, the answer is the greatest `start_year` among the seasons that
+have at least one match, and a database in which no season has a match is a
+`404`.
+
+**Which club.** An identifier no stored club has is a `404` with the detail
+`Team not found`. A stored club that is not a side of any match of the resolved
+season is a `404` with the detail `Team not found in season`, which is a
+different answer from an identifier no club has.
+
+**The survival threshold.** The line answers how many points usually keep a club
+up. It is read from the final table of every **completed 20-club season from
+2005-06 onwards**, and the counted place is the highest relegated one: with the
+configured three relegation places that is position 17, which is what `position`
+reports. A season is completed only when every fixture of its double round
+robin was played, so the 380 results of twenty clubs are the proof; a season
+still being played is skipped instead of contributing a partial table, and no
+clock is read anywhere. `points_median` is the median of that place's final
+totals and is never rounded, `points_min` and `points_max` are the extremes of
+the same sample, and `seasons_used` is its size, so a client can see how thin
+the evidence is. The sample does not depend on the `season` asked for: a request
+for an old season also counts the completed seasons stored after it, because the
+line is a historical reference, not a forecast made at that time. When no stored season qualifies the endpoint is a `404` with
+the detail `no completed season`: the field is not nullable, and falling back to
+the current table or serving zero would read as a survival line somebody
+computed.
+
+**The rivals and the series.** `rivals` is the club plus the four clubs nearest
+to it by expected final position in the latest **succeeded** simulation of the
+season, served in expected-position order. "Latest" is the finish instant
+descending, then the as-of date, then the identifier, so the race and the team
+focus describe the same run. A queued, running or failed run measures nothing
+and is never read. Distance is absolute, so the neighbours may sit above or
+below the club, and a tie is decided by the lower expected position and then by
+the lower identifier. Each rival carries the stored columns of that one run:
+the real points at the as-of date, the mean final total, the relegation
+probability and the 5th and 95th percentiles of the projected total.
+
+`series` is the [simulation history](#get-v1simulationshistory) of the season
+restricted to exactly those clubs, one point per as-of date from the latest
+succeeded run of that date, so the group's forecast can be charted without a
+second request. A stored season without a succeeded run answers `200` with
+`run_id` and `as_of_date` `null`, `rivals: []` and a series that names the
+season and holds no point, while the threshold and the fixtures are served as
+usual: a race without a simulation is a state of the data and not an error. The
+same run that holds no row for the club gives `rivals: []` and still names the
+run.
+
+**The remaining fixtures.** `remaining_fixtures` is the club's `scheduled`
+matches of the season, ascending by kickoff date and then identifier, each with
+the fixture summary, the venue the club plays it at, and the opponent's position
+in the season's table. A `withdrawn` fixture is not listed: it will not be
+played. `opponent_position` is `null` for an opponent the table does not rank.
+
+**The per-fixture and next-match projections.** `p_win`, `p_draw`, `p_loss` of
+every remaining fixture and the whole of `next_match` are `null` in this
+milestone. They are the simulation's per-fixture and next-match outputs, which
+the simulator does not store yet: the fields are declared nullable so a stored
+simulation can fill them without a change to this contract, and the endpoint
+serves `null` instead of a placeholder model or a number nobody simulated.
+
+One rival, one series point and one fixture are shown.
+
+```json
+{
+  "team": { "id": 1, "name": "Alavés" },
+  "season": "2030-31",
+  "run_id": "e76dd01f-21e0-46c1-ad86-404bc30a983e",
+  "as_of_date": "2030-10-26",
+  "survival_threshold": {
+    "points_median": 45.0,
+    "points_min": 43,
+    "points_max": 47,
+    "seasons_used": 3,
+    "position": 17
+  },
+  "rivals": [
+    {
+      "team": { "id": 18, "name": "Hércules" },
+      "current_points": 9,
+      "expected_points": 41.994,
+      "p_relegation": 0.279,
+      "points_p05": 31,
+      "points_p95": 53
+    }
+  ],
+  "series": {
+    "season": "2030-31",
+    "points": [
+      {
+        "run_id": "e76dd01f-21e0-46c1-ad86-404bc30a983e",
+        "as_of_date": "2030-10-26",
+        "kind": "live",
+        "last_complete_matchday": 10,
+        "teams": [
+          {
+            "team": { "id": 18, "name": "Hércules" },
+            "p_title": 0.0,
+            "p_ucl": 0.002,
+            "p_europe": 0.013,
+            "p_relegation": 0.279,
+            "expected_points": 41.994,
+            "expected_position": 15.415
+          }
+        ]
+      }
+    ]
+  },
+  "remaining_fixtures": [
+    {
+      "match": {
+        "id": 1241,
+        "season": "2030-31",
+        "kickoff_date": "2030-10-26",
+        "kickoff_time": null,
+        "matchday": 11,
+        "status": "scheduled",
+        "home_team": { "id": 1, "name": "Alavés" },
+        "away_team": { "id": 10, "name": "Eibar" },
+        "home_goals": null,
+        "away_goals": null,
+        "ht_home_goals": null,
+        "ht_away_goals": null,
+        "result": null
+      },
+      "venue": "home",
+      "opponent_position": 16,
+      "p_win": null,
+      "p_draw": null,
+      "p_loss": null
+    }
+  ],
+  "next_match": null
+}
+```
+
 ## Matches
 
 ### `GET /v1/matches`

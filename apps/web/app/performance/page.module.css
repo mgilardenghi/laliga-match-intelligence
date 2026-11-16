@@ -1,0 +1,208 @@
+/*
+ * The performance page: the run header, the prediction counts, the metric
+ * tables and the charts.
+ *
+ * Only this page's own layout lives here. The shell, the shared states and the
+ * chart figures bring their own styles, so a change to those is never repeated
+ * here. Every colour is a token from globals.css.
+ */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  /* An explicit width: `margin: auto` on the cross axis would otherwise switch
+     this flex item to shrink-to-fit and size the page by the intrinsic width of
+     the widest table instead of by the viewport. */
+  width: 100%;
+  max-width: 64rem;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.title {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.intro {
+  max-width: 48rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.heading {
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.subsets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.subsetList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The target is at least 24 by 24 CSS pixels, so the control stays usable by
+   touch, and the pill shape makes the two choices read as one control. */
+.subsetLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.subsetLink:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The current subset is marked in the markup, so the style follows the
+   attribute instead of a second class the caller could forget to set. */
+.subsetLink[aria-current="page"] {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+}
+
+/* A two-column term and value list: one column on a phone, so a long version
+   string wraps instead of squeezing the label, and two from 640px. */
+.pairs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.term {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  max-width: 48rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.evaluated {
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.code {
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--surface);
+  font-size: 0.875em;
+}
+
+/* Every wide table scrolls inside its own container rather than widening the
+   page, which keeps the chart figures below at the viewport width. */
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 36rem;
+  border-collapse: collapse;
+  color: var(--text);
+}
+
+.caption {
+  padding-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.cell {
+  padding: 0.5rem 0.75rem 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.headCell {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.rowHeader {
+  font-weight: 600;
+}
+
+/* Numbers line up by their digits, so a reader compares a column of scores
+   rather than a column of word shapes. */
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 640px) {
+  .main {
+    padding: 2rem 1.5rem 3rem;
+  }
+
+  .heading {
+    font-size: 1.25rem;
+  }
+
+  .pairs {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.4rem 1.25rem;
+  }
+
+  .table {
+    min-width: 40rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .main {
+    padding: 2.5rem 2rem 4rem;
+  }
+}
