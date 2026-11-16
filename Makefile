@@ -83,10 +83,18 @@ e2e-guard:
 	@# A wrong value here addresses real data: `down -v` on the developer's own
 	@# `lmi` project would delete their volumes, and a reserved port collides with
 	@# the local stack. So every override is validated before any Docker command.
-	@if [ -z "$(E2E_PROJECT)" ] || [ "$(E2E_PROJECT)" = "lmi" ]; then \
-		echo "e2e-guard: E2E_PROJECT must not be empty or 'lmi' (got '$(E2E_PROJECT)')" >&2; \
-		exit 1; \
-	fi
+	@# The project name is also checked against Compose project-name syntax, because
+	@# it is interpolated into a shell command: the exact string `lmi` is not the
+	@# only value that could reach that project (`lmi ` would), and a value holding
+	@# shell syntax would rewrite the command instead of naming a project.
+	@case "$(E2E_PROJECT)" in \
+		''|lmi) echo "e2e-guard: E2E_PROJECT must not be empty or 'lmi' (got '$(E2E_PROJECT)')" >&2; exit 1 ;; \
+	esac
+	@case "$(E2E_PROJECT)" in \
+		[-_]*|*[!a-z0-9_-]*) \
+			echo "e2e-guard: E2E_PROJECT must use lowercase letters, digits, '-' and '_' (got '$(E2E_PROJECT)')" >&2; \
+			exit 1 ;; \
+	esac
 	@for port in "$(E2E_API_PORT)" "$(E2E_WEB_PORT)"; do \
 		case "$$port" in \
 			''|*[!0-9]*) echo "e2e-guard: port '$$port' must be numeric" >&2; exit 1 ;; \

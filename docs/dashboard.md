@@ -60,9 +60,9 @@ The throwaway stack is its own Compose project on its own ports, so it never
 touches the user's `lmi` stack.
 
 The three `E2E_*` values are validated before any Docker command runs: the
-project must differ from `lmi`, and the ports must be numeric, distinct and
-outside the reserved ranges. An invalid value fails before a container is
-touched.
+project must differ from `lmi` and be a Compose project name (lowercase letters,
+digits, `-` and `_`), and the ports must be numeric, distinct and outside the
+reserved ranges. An invalid value fails before a container is touched.
 
 Two rules hold for every test. A test asserts structure, never values: it
 checks that a page renders the region, the column or the state it should, not
