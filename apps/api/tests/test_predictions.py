@@ -262,6 +262,33 @@ def test_model_and_match_status_each_narrow_the_page(
     assert combined == {"ids": [played.id], "total": 1}
 
 
+def test_the_matchday_filter_narrows_the_page_and_combines_with_and(
+    api_client: TestClient, db_session: Session
+) -> None:
+    today = madrid_today(db_session)
+    season = create_season(db_session, code=SEASON_CODE, start_year=SEASON_START_YEAR)
+    run = create_prediction_run(db_session)
+    first = _fixture(
+        db_session, season, kickoff_date=today + _days(2), tag="matchday-1", matchday=1
+    )
+    second = _fixture(
+        db_session, season, kickoff_date=today + _days(3), tag="matchday-2", matchday=2
+    )
+    third = _fixture(
+        db_session, season, kickoff_date=today + _days(4), tag="matchday-2b", matchday=2
+    )
+    first_row = create_prediction(db_session, match=first, model="home_win", run=run)
+    second_row = create_prediction(db_session, match=second, model="home_win", run=run)
+    third_row = create_prediction(db_session, match=third, model="dixon_coles", run=run)
+
+    by_matchday = _page(api_client, {"season": season.code, "matchday": 2})
+    combined = _page(api_client, {"season": season.code, "matchday": 2, "model": "dixon_coles"})
+
+    assert first_row.id not in by_matchday["ids"]
+    assert by_matchday == {"ids": [second_row.id, third_row.id], "total": 2}
+    assert combined == {"ids": [third_row.id], "total": 1}
+
+
 def test_the_kickoff_date_range_is_inclusive_and_combines_with_and(
     api_client: TestClient, db_session: Session
 ) -> None:
@@ -473,6 +500,8 @@ def test_an_unknown_season_match_or_team_is_not_found(
         ({"model": "understat"}, ["query", "model"], "understat"),
         ({"evaluation": "unknown"}, ["query", "evaluation"], "unknown"),
         ({"date_from": "not-a-date"}, ["query", "date_from"], "not-a-date"),
+        ({"matchday": 0}, ["query", "matchday"], "0"),
+        ({"matchday": 47}, ["query", "matchday"], "47"),
     ],
 )
 def test_a_rejected_request_is_unprocessable_without_echoing_the_value(
@@ -582,6 +611,12 @@ def test_openapi_documents_the_predictions_contract() -> None:
     assert schemas["PredictionPage"]["properties"]["items"]["items"]["$ref"] == PREDICTION_OUT_REF
     assert "model_config" in schemas["PredictionDetail"]["properties"]
 
+    parameters = {parameter["name"]: parameter for parameter in collection["parameters"]}
+    matchday = parameters["matchday"]
+    assert matchday["required"] is False
+    bounds = matchday["schema"].get("anyOf", [matchday["schema"]])
+    assert any(entry.get("minimum") == 1 and entry.get("maximum") == 46 for entry in bounds)
+
     for operation in (collection, single):
         for status in ("404", "422"):
             content = operation["responses"][status]["content"]
@@ -596,11 +631,25 @@ def _days(count: int) -> datetime.timedelta:
     return datetime.timedelta(days=count)
 
 
-def _fixture(session: Session, season: Season, *, kickoff_date: datetime.date, tag: str) -> Match:
+def _fixture(
+    session: Session,
+    season: Season,
+    *,
+    kickoff_date: datetime.date,
+    tag: str,
+    matchday: int = 1,
+) -> Match:
     """Insert one scheduled fixture of ``season`` with a pair of synthetic teams."""
     home = create_team(session, name=f"Synthetic Home {tag}")
     away = create_team(session, name=f"Synthetic Away {tag}")
-    return create_match(session, season=season, home=home, away=away, kickoff_date=kickoff_date)
+    return create_match(
+        session,
+        season=season,
+        home=home,
+        away=away,
+        kickoff_date=kickoff_date,
+        matchday=matchday,
+    )
 
 
 def _page(api_client: TestClient, params: dict[str, str | int | bool]) -> dict[str, Any]:

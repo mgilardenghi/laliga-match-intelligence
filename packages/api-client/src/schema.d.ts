@@ -371,10 +371,10 @@ export interface paths {
          *     season code selects that season; without one the season that starts latest
          *     among the seasons with a match is served, exactly as the standings endpoint
          *     selects it. ``match_id`` restricts the page to one fixture and ``team_id``
-         *     to the fixtures a team played home or away, ``model`` to one registered
-         *     model name, ``match_status`` to the current status of the match, and the two
-         *     dates to an inclusive range of ``kickoff_date``, so a range covers whole
-         *     days.
+         *     to the fixtures a team played home or away, ``matchday`` to the fixtures of
+         *     one matchday of the season, ``model`` to one registered model name,
+         *     ``match_status`` to the current status of the match, and the two dates to an
+         *     inclusive range of ``kickoff_date``, so a range covers whole days.
          *
          *     The two derived filters are ordered, and the order is part of the contract.
          *     ``latest_only`` projects the rows the *other* filters selected onto one
@@ -410,9 +410,10 @@ export interface paths {
          *             ``match_id`` or ``team_id`` names no stored row. The detail is a
          *             fixed sentence in every case and never repeats the value the client
          *             sent.
-         *         RequestValidationError: 422 when ``date_from`` is after ``date_to``,
-         *             rendered by the installed handler as a problem details body that
-         *             names the offending parameter and not the dates.
+         *         RequestValidationError: 422 when ``date_from`` is after ``date_to``, or
+         *             when ``matchday`` is outside ``1..46``, rendered by the installed
+         *             handler as a problem details body that names the offending
+         *             parameter and not the values.
          */
         get: operations["list_predictions"];
         put?: never;
@@ -895,6 +896,110 @@ export interface paths {
          *             value the client sent.
          */
         get: operations["get_team_focus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/season-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Team Season Stats
+         * @description Return the season statistics of one team in one season.
+         *
+         *     ``team`` is the stored club and ``season`` the resolved season code, so a
+         *     client can pass the code back to every other endpoint. The team has to be
+         *     part of the season's team set, which is every club that appears as the home
+         *     or the away side in any match of the season; a club of another season names
+         *     nothing this season can describe.
+         *
+         *     ``played`` and ``points`` are the counters of that team set's table row,
+         *     read from :func:`lmi_core.standings.compute_standings` rather than recounted
+         *     here, so the standings endpoint stays the owner of the table and a team can
+         *     never read one total here and another there. ``per_match`` is the team's own
+         *     and its opponents' per-match average over exactly those played matches, and
+         *     ``league_avg`` is the same average over both sides of every played match of
+         *     the season, which is the comparison baseline the payload promises.
+         *
+         *     ``xpts_market`` sums the expected points of the matches that carry one, and
+         *     ``xpts_coverage`` counts them. The expected points of a match are
+         *     ``3 * p_home + p_draw`` when the team was the home side and
+         *     ``3 * p_away + p_draw`` when it was the visitor, where the three
+         *     probabilities are :func:`lmi_core.modeling.market.remove_margin` over the
+         *     one eligible price row. A fixture without an eligible pre-closing price has
+         *     null expected points and is left out of the sum and of the counter, rather
+         *     than contributing a zero.
+         *
+         *     The price is always *pre-closing*. The eligible rows are the ``1x2`` prices
+         *     with ``is_closing`` false from a bookmaker of
+         *     :data:`lmi_core.live.data.ODDS_PRIORITY`, and the selected row per match is
+         *     the most trusted of them, by the priority rank the live loader and the match
+         *     preview also apply. A closing price is never read, whatever its bookmaker:
+         *     it is only known at kickoff. All prices of the team's matches are read in
+         *     one statement, and because that statement cannot cap one row per match
+         *     without dropping matches, the first eligible row per fixture is kept in
+         *     Python after the rows are ordered.
+         *
+         *     ``stat_coverage`` counts the matches that carry a statistics row and
+         *     ``xg_coverage`` the matches that carry an expected-goals value on either
+         *     side. A played match without a statistics row is normal and stays absent:
+         *     it contributes its goals to the goals average and nothing to the other
+         *     fields, so a missing row never becomes a row of zeros. The same rule holds
+         *     inside a row: one missing column is null and is left out of that field's
+         *     mean only.
+         *
+         *     ``splits`` is the season by venue, ``home`` counting the matches the team
+         *     played as the home side and ``away`` the ones it played as the visitor. Both
+         *     records come from the same ``match_record`` rule as the tiers, so the two
+         *     views cannot disagree on what a win is worth.
+         *
+         *     ``tiers`` groups the team's matches by the opponent's position in the season
+         *     table. With ``n`` teams the top tier is positions ``1..ceil(n/3)``, the
+         *     middle the next ``ceil(n/3)`` and the bottom the rest; each record carries
+         *     the counters of every match against a club of that tier, whatever the venue,
+         *     and the tier's ``team_ids`` ascending. ``team_ids`` is the membership of the
+         *     tier, not only the opponents this team has already met.
+         *
+         *     ``matches`` is the chronological season, ordered by kickoff date and then
+         *     match identifier exactly as ``summarise`` orders it. Each row nests the
+         *     fixture summary and adds the venue, the points, the expected points, the
+         *     venue-scoped goals, the shots of both sides and the rolling form over the at
+         *     most five matches immediately before it. The first row's rolling form is
+         *     therefore all null: a window over no match has no average.
+         *
+         *     Every optional field means "not known", never zero. An average over an
+         *     empty set is null, a statistic no counted match carries is null, and a
+         *     group that played no match has a null ``points_per_game``. The coverage
+         *     counters are what lets a client tell an average of one match from an average
+         *     of six.
+         *
+         *     The request issues at most eight statements whatever the size of the season:
+         *     the team, the season resolution, the two of
+         *     :func:`lmi_api.views.load_season_standings` (the team set and the counted
+         *     results), the season's played matches, their statistics rows, the
+         *     pre-closing prices and the match summaries of the rows the payload lists. A
+         *     season without a played match of the team skips the statistics, price and
+         *     summary reads and issues fewer, never more.
+         *
+         *     The return annotation is the response model, so no ``response_model`` is
+         *     passed.
+         *
+         *     Raises:
+         *         HTTPException: 404 when no stored team has ``team_id``, when ``season``
+         *             names no stored season, when no season has a match while ``season``
+         *             is absent, or when the team is not a side of any match of the
+         *             resolved season. All four details are fixed sentences and never
+         *             repeat the value the client sent.
+         */
+        get: operations["get_team_season_stats"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1638,6 +1743,19 @@ export interface components {
             run: components["schemas"]["BacktestRunOut"];
         };
         /**
+         * PerMatch
+         * @description The team's own and its opponents' per-match averages over the season.
+         *
+         *     ``for_`` is the team's line and ``against`` the line of the clubs it faced.
+         *     The two are kept apart so a team that wins without creating chances is
+         *     distinguishable from one that creates without winning. The JSON key of the
+         *     first side is ``for``, which is why the attribute is ``for_``.
+         */
+        PerMatch: {
+            against: components["schemas"]["StatLine"];
+            for: components["schemas"]["StatLine"];
+        };
+        /**
          * PredictionBrief
          * @description One prediction as the team focus and the match preview nest it.
          *
@@ -1892,6 +2010,24 @@ export interface components {
             type: string;
         };
         /**
+         * Rolling5
+         * @description Averages over the at most five matches immediately before one match.
+         *
+         *     The window never includes the match it describes, so the line answers what
+         *     the team did before kickoff. Every field is null when the window is empty,
+         *     which is the team's first match of the season.
+         */
+        Rolling5: {
+            /** Goals Against Pg */
+            goals_against_pg: number | null;
+            /** Goals For Pg */
+            goals_for_pg: number | null;
+            /** Points Pg */
+            points_pg: number | null;
+            /** Xpts Pg */
+            xpts_pg: number | null;
+        };
+        /**
          * Season
          * @description One league season as the API returns it.
          *
@@ -1904,6 +2040,53 @@ export interface components {
             code: string;
             /** Start Year */
             start_year: number;
+        };
+        /**
+         * SeasonMatchLine
+         * @description One played match of the season, seen from the team's side.
+         *
+         *     ``match`` is the fixture summary, nested so a client renders the clubs, the
+         *     date and the score without a second request. ``shots_for`` and
+         *     ``shots_against`` are the shots columns only, and are null when that side of
+         *     the match has no statistics row or no shots value.
+         */
+        SeasonMatchLine: {
+            /** Goals Against */
+            goals_against: number;
+            /** Goals For */
+            goals_for: number;
+            match: components["schemas"]["MatchSummary"];
+            /** Points */
+            points: number;
+            rolling5: components["schemas"]["Rolling5"];
+            /** Shots Against */
+            shots_against: number | null;
+            /** Shots For */
+            shots_for: number | null;
+            /**
+             * Venue
+             * @enum {string}
+             */
+            venue: "home" | "away";
+            /** Xpts */
+            xpts: number | null;
+        };
+        /**
+         * SeasonTiers
+         * @description The team's season split by the tier of the opponent it faced.
+         *
+         *     With ``n`` teams in the season the top tier is positions ``1..ceil(n/3)``,
+         *     the middle the next ``ceil(n/3)`` and the bottom the rest, so the three
+         *     records partition the table exactly. A table of fewer than five clubs can
+         *     leave the bottom tier empty -- with ``n = 4``, ``ceil(n/3) = 2`` fills the
+         *     top and the middle and leaves nothing for the bottom -- and an empty tier is
+         *     served as a record of zeros with a null ``points_per_game`` and an empty
+         *     ``team_ids`` rather than being dropped.
+         */
+        SeasonTiers: {
+            bottom: components["schemas"]["TierRecord"];
+            middle: components["schemas"]["TierRecord"];
+            top: components["schemas"]["TierRecord"];
         };
         /**
          * SimulationCurrent
@@ -2348,6 +2531,33 @@ export interface components {
             season: string;
         };
         /**
+         * StatLine
+         * @description A per-match average line of one side, every field optional.
+         *
+         *     ``goals`` is averaged over every counted match; each other field is averaged
+         *     over only the matches that carry it, so the denominators can differ by
+         *     field. A null field means the counted matches hold no value for it, which a
+         *     client renders as unknown.
+         */
+        StatLine: {
+            /** Corners */
+            corners: number | null;
+            /** Fouls */
+            fouls: number | null;
+            /** Goals */
+            goals: number | null;
+            /** Red */
+            red: number | null;
+            /** Shots */
+            shots: number | null;
+            /** Shots On Target */
+            shots_on_target: number | null;
+            /** Xg */
+            xg: number | null;
+            /** Yellow */
+            yellow: number | null;
+        };
+        /**
          * Team
          * @description One club as the API returns it.
          *
@@ -2386,6 +2596,41 @@ export interface components {
             upcoming: components["schemas"]["UpcomingMatch"][];
         };
         /**
+         * TeamSeasonStats
+         * @description Everything one team's season serves: averages, tiers and one row per match.
+         *
+         *     ``season`` is the season code the other endpoints accept as their filter.
+         *     ``played`` and ``points`` are the table's counters over the same played
+         *     matches, ``per_match`` and ``league_avg`` are the season's own and the
+         *     league-wide per-match averages, and the coverage counters say how many
+         *     matches each derived number rests on. ``splits`` covers the season by venue
+         *     and ``tiers`` by the opponent's table position, while ``matches`` is the
+         *     chronological season the rolling form of each row is computed from.
+         */
+        TeamSeasonStats: {
+            league_avg: components["schemas"]["StatLine"];
+            /** Matches */
+            matches: components["schemas"]["SeasonMatchLine"][];
+            per_match: components["schemas"]["PerMatch"];
+            /** Played */
+            played: number;
+            /** Points */
+            points: number;
+            /** Season */
+            season: string;
+            splits: components["schemas"]["TeamSplits"];
+            /** Stat Coverage */
+            stat_coverage: number;
+            team: components["schemas"]["Team"];
+            tiers: components["schemas"]["SeasonTiers"];
+            /** Xg Coverage */
+            xg_coverage: number;
+            /** Xpts Coverage */
+            xpts_coverage: number;
+            /** Xpts Market */
+            xpts_market: number | null;
+        };
+        /**
          * TeamSplits
          * @description The season of one team split by venue.
          *
@@ -2397,6 +2642,35 @@ export interface components {
         TeamSplits: {
             away: components["schemas"]["SplitRecord"];
             home: components["schemas"]["SplitRecord"];
+        };
+        /**
+         * TierRecord
+         * @description The record of a team's matches against one tier of the season table.
+         *
+         *     The counters are the same shape as a venue split and cover every match
+         *     against a club of that tier, whatever the venue. ``team_ids`` is the
+         *     membership of the tier, ascending: the clubs that occupy those table
+         *     positions, not only the opponents this team has already met.
+         */
+        TierRecord: {
+            /** Drawn */
+            drawn: number;
+            /** Goals Against */
+            goals_against: number;
+            /** Goals For */
+            goals_for: number;
+            /** Lost */
+            lost: number;
+            /** Played */
+            played: number;
+            /** Points */
+            points: number;
+            /** Points Per Game */
+            points_per_game: number | null;
+            /** Team Ids */
+            team_ids: number[];
+            /** Won */
+            won: number;
         };
         /**
          * UpcomingMatch
@@ -2765,6 +3039,7 @@ export interface operations {
                 team_id?: number | null;
                 model?: ("home_win" | "base_rate" | "market" | "elo" | "dixon_coles") | null;
                 match_status?: ("scheduled" | "played" | "withdrawn") | null;
+                matchday?: number | null;
                 evaluation?: ("pending" | "scored" | "superseded" | "withdrawn" | "late") | null;
                 date_from?: string | null;
                 date_to?: string | null;
@@ -3245,6 +3520,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TeamFocus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    get_team_season_stats: {
+        parameters: {
+            query?: {
+                season?: string | null;
+            };
+            header?: never;
+            path: {
+                team_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamSeasonStats"];
                 };
             };
             /** @description Not Found */
