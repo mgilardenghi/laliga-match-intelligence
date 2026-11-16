@@ -2,8 +2,7 @@
 
 The dashboard is the Next.js app in `apps/web`. This page covers how it reads
 data, what the shell renders, which commands run it, and which environment
-variables and browser tests it has. The data pages are described nowhere yet:
-they arrive in later M5 tasks.
+variables and browser tests it has. The data pages are listed under Routes below.
 
 ## Read path
 
@@ -48,8 +47,13 @@ the one fact the client still has, and it ties the screen to the server log.
 | Route | State |
 | --- | --- |
 | `/` | The current table of a season (`?season=`), with the projected columns, the position heatmap and the points intervals when a simulation is stored. Empty states name `make ingest` or `make simulate`. |
-| `/teams` | The clubs of one season, and the picker that stores the focus team. |
+| `/matchday` | The fixtures of one matchday (`?matchday=`), one card per fixture, with the stored probabilities of every model and the market-implied probabilities. Empty states name `make ingest` or `make predict`. |
+| `/matches/[matchId]` | One match: the pre-match probabilities next to the market-implied ones, both clubs' form, the head-to-head record, the match statistics and both clubs' season profiles. Empty states name `make predict`. |
+| `/teams` | The clubs of one season (`?season=`) and the picker that stores the focus team (`?pick=focus`). |
+| `/teams/[teamId]` | One club's season (`?season=`): season at a glance, home and away split, for and against, results, next fixtures and the focus form. Empty states name `make ingest` and `make simulate`. |
 | `/focus` | Resolves the focus team and redirects to `/focus/<teamId>`; it renders nothing itself. |
+| `/focus/[teamId]` | The team focus page: season diagnosis, the multi-season trend, the relegation race and the next-match preview (MVP specification, section 6). |
+| `/performance` | The backtest metrics per model and season and the live predictions against the market (`?subset=all\|common`). Empty states name `make backtest` and `make predict`. |
 | `/dev/charts` | The chart gallery, behind `LMI_DEV_PAGES=1`. |
 
 ### Theme
@@ -152,8 +156,8 @@ together.
 ## Status
 
 The generated client, the browser harness, the shell and the data layer are in
-place: the workspace package, the Dockerfile and the Compose setup, the two test
-tiers, the layout with its tokens, the shared states, the teams index and the
-focus redirect, and this page. The data pages — the table, the matchday list,
-the team and focus pages, the match preview and the performance page — arrive in
-later M5 tasks, and so does the table page that replaces the `/` placeholder.
+place, and so are the data pages: the table, the matchday list, the teams index,
+the team page, the match page, the performance page and the focus redirect. Two outputs stay
+deferred: the per-fixture win, draw and loss probabilities and the next-match
+detail of the relegation race are `null`, because the simulator does not store
+them yet.
