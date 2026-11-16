@@ -28,8 +28,10 @@
   --cat-3: #c2689e;
   --cat-4: #33608c;
   --zone-relegation: #d55e00;
-  /* Sequential scale: identical in both themes, because the heatmap draws a
-     fixed dark text on steps 0-4 and a fixed white text on steps 5-8. */
+  /* Sequential scale: identical in both themes. The heatmap derives each
+     label's ink from the luminance of the hex fallback it paints with
+     (components/charts/contrast.ts), so a token must keep its fallback's value;
+     the chart gallery test checks every label for 4.5:1 in both themes. */
   --seq-0: #f0f4f9;
   --seq-1: #dbe9f6;
   --seq-2: #9ecae1;
@@ -60,8 +62,8 @@
     --cat-4: #7fb3e0;
     --zone-relegation: #d55e00;
     /* The outcome fills and the sequential scale stay as they are in light:
-       white letters sit on the outcome fills and the heatmap steps carry fixed
-       text colours, so a second palette would break their contrast. */
+       their label ink is derived from each fill's hex fallback, so a dark
+       override of these tokens would no longer match the ink chosen for it. */
   }
 }
 

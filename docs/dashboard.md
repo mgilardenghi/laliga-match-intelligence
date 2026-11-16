@@ -69,8 +69,9 @@ The root layout reads the `lmi_theme` cookie on the server and writes
 right theme and nothing has to be corrected in the browser. The theme control
 cycles system, light and dark, writes the same cookie and sets the attribute.
 The outcome fills and the sequential scale are identical in both themes, because
-the form strip draws white letters on the outcome fills and the heatmap draws
-fixed text colours on the sequential cells.
+the form strip and the heatmap pick each label's ink (dark or white) from the
+luminance of the fill it sits on (`components/charts/contrast.ts`), and the chart
+gallery test checks every label-on-fill pair for 4.5:1 in both themes.
 
 ### Focus team
 
