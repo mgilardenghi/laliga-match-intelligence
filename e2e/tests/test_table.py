@@ -95,10 +95,16 @@ def test_the_table_renders_one_ranked_row_per_club(page: Page, dashboard_url: st
     expect(table).to_have_count(1)
     expect(table.locator(":scope > caption")).to_have_text(CAPTION)
 
+    headers = table.locator(":scope > thead > tr > th")
+    scopes = [headers.nth(index).get_attribute("scope") for index in range(headers.count())]
+    assert scopes == ["col"] * len(scopes), f"the column headers declare scopes {scopes}"
+
     rows = table.locator(":scope > tbody > tr")
     expect(rows).to_have_count(CLUB_COUNT)
 
-    for index in range(3):
+    # Every row, not just the first ones: a form strip or a team link that went
+    # missing halfway down the table is exactly the regression this guards.
+    for index in range(rows.count()):
         row = rows.nth(index)
         position = row.locator(':scope > th[scope="row"]')
         expect(position).to_have_count(1)
@@ -179,6 +185,12 @@ def test_zone_tinting_marks_the_qualification_places(page: Page, dashboard_url: 
     expect(last).to_have_attribute("data-zone", "relegation")
     expect(last.locator(':scope > th[scope="row"]')).to_contain_text("Relegation")
 
+    # The middle zone is its own band: a table that jumped from UCL straight to
+    # relegation would still pass the two assertions above.
+    europe = _main_table(page).locator(':scope > tbody > tr[data-zone="europe"]')
+    expect(europe.first).to_be_visible()
+    expect(europe.first.locator(':scope > th[scope="row"]')).to_contain_text("Europe")
+
     # The tint marks qualification places, not every row, so at least one middle
     # row carries no zone attribute at all.
     untinted = _main_table(page).locator(":scope > tbody > tr:not([data-zone])")
@@ -203,8 +215,14 @@ def test_a_season_without_a_simulation_offers_make_simulate(page: Page, dashboar
     expect(page.locator("code", has_text="make simulate")).to_have_count(1)
     expect(page.get_by_role("heading", name="No simulation for this season yet")).to_have_count(1)
 
+    # Neither projection chart may survive the missing run, and the table keeps
+    # only its current-standings columns.
+    expect(_figure(page, HEATMAP_CAPTION)).to_have_count(0)
     expect(_figure(page, INTERVALS_CAPTION)).to_have_count(0)
     expect(table.locator(":scope > tbody > tr[data-zone]")).to_have_count(0)
+    headers = table.locator(":scope > thead > tr > th")
+    texts = [headers.nth(index).inner_text().strip() for index in range(headers.count())]
+    assert texts == list(COLUMNS), f"an unsimulated season shows the columns {texts}"
 
 
 @pytest.mark.empty
