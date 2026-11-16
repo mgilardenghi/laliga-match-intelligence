@@ -90,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_simulate_parser(subparsers)
     subparsers.add_parser(
         "daily",
-        help="Run the daily ingestion, fitting and prediction job (not implemented yet).",
+        help="Ingest the current season, store the live predictions and simulate the league.",
     )
     add_backtest_parser(subparsers)
     return parser
