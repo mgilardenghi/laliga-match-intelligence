@@ -225,6 +225,12 @@ export async function TeamPage(props: TeamPageProps): Promise<ReactElement> {
           Make this my focus team
         </button>
       </form>
+      <Link
+        className={styles.focusLink}
+        href={`/focus/${teamId}?season=${encodeURIComponent(season)}`}
+      >
+        Open focus view
+      </Link>
     </div>
   );
 
