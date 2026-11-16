@@ -55,7 +55,8 @@ with an exponential, jittered backoff capped at 60 seconds. A failure among
 :data:`TRANSIENT_ERRORS` is classified by
 :func:`lmi_core.db.errors.is_transient_db_error`, which reads the PostgreSQL
 SQLSTATE, or the libpq message for a connect-time failure that has none: a
-lost or refused connection, a server shutdown or restart, too many connections, a deadlock or a serialization failure is re-raised as
+lost or refused connection, a server shutdown or restart, too many connections,
+a deadlock or a serialization failure is re-raised as
 :class:`TransientJobError`, the only class in ``autoretry_for``; an
 authentication failure, an unknown database or any statement error keeps its
 own class and is not retried. Both tasks are idempotent. The claim moves a
