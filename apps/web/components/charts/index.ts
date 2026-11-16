@@ -28,6 +28,8 @@ export type { SparklineHighlight, SparklineProps } from "./Sparkline";
 export { chartIds } from "./chart-ids";
 export type { ChartIds } from "./chart-ids";
 
+export { DARK_INK, LIGHT_INK, contrastRatio, inkForFill, relativeLuminance } from "./contrast";
+
 export { extent, bandScale, linearScale, niceMax } from "./scale";
 export type { BandScale, LinearScale } from "./scale";
 

@@ -70,7 +70,6 @@ export function Sparkline(props: SparklineProps): ReactElement {
   } = props;
   const firstSeason = seasons[0] ?? "";
   const title = props.title ?? (firstSeason.length > 0 ? `${metric} since ${firstSeason}` : metric);
-  const defaultDescription = `Trend of ${metric} across ${seasons.length} seasons, with one season-to-season segment highlighted.`;
   const ids = chartIds(id ?? title);
 
   if (seasons.length !== values.length) {
@@ -96,7 +95,6 @@ export function Sparkline(props: SparklineProps): ReactElement {
     const high = Math.min(seasons.length - 1, Math.max(candidate.from, candidate.to));
     return high > low ? { from: low, to: high } : undefined;
   })();
-
   const points = values.map((value, index) =>
     isValue(value) ? { x: xScale.center(index), y: yScale.scale(value) } : null,
   );
@@ -128,6 +126,15 @@ export function Sparkline(props: SparklineProps): ReactElement {
   const lastPoint = lastIndex > firstIndex ? points[lastIndex] : null;
   const fromPoint = selected === undefined ? null : points[selected.from];
   const toPoint = selected === undefined ? null : points[selected.to];
+  // One condition decides both the drawing and the default description, so the
+  // description cannot claim a segment that is absent. A null highlight, a
+  // series without a decline, and a highlight that spans a season with no value
+  // (values [null, 1] with highlight 0 -> 1) all leave the line unhighlighted,
+  // because an endpoint has no point to draw from or to.
+  const drawn = selected !== undefined && fromPoint !== null && toPoint !== null;
+  const defaultDescription = drawn
+    ? `Trend of ${metric} across ${seasons.length} seasons, with one season-to-season segment highlighted.`
+    : `Trend of ${metric} across ${seasons.length} seasons.`;
 
   return (
     <ChartFigure
@@ -175,7 +182,7 @@ export function Sparkline(props: SparklineProps): ReactElement {
             />
           ),
         )}
-        {selected !== undefined && fromPoint != null && toPoint != null ? (
+        {drawn ? (
           <g>
             <line
               x1={fromPoint.x}
