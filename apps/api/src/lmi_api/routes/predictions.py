@@ -50,6 +50,7 @@ def list_predictions(
     team_id: int | None = None,
     model: ModelName | None = None,
     match_status: MatchStatus | None = None,
+    matchday: Annotated[int | None, Query(ge=1, le=46)] = None,
     evaluation: Evaluation | None = None,
     date_from: datetime.date | None = None,
     date_to: datetime.date | None = None,
@@ -63,10 +64,10 @@ def list_predictions(
     season code selects that season; without one the season that starts latest
     among the seasons with a match is served, exactly as the standings endpoint
     selects it. ``match_id`` restricts the page to one fixture and ``team_id``
-    to the fixtures a team played home or away, ``model`` to one registered
-    model name, ``match_status`` to the current status of the match, and the two
-    dates to an inclusive range of ``kickoff_date``, so a range covers whole
-    days.
+    to the fixtures a team played home or away, ``matchday`` to the fixtures of
+    one matchday of the season, ``model`` to one registered model name,
+    ``match_status`` to the current status of the match, and the two dates to an
+    inclusive range of ``kickoff_date``, so a range covers whole days.
 
     The two derived filters are ordered, and the order is part of the contract.
     ``latest_only`` projects the rows the *other* filters selected onto one
@@ -102,9 +103,10 @@ def list_predictions(
             ``match_id`` or ``team_id`` names no stored row. The detail is a
             fixed sentence in every case and never repeats the value the client
             sent.
-        RequestValidationError: 422 when ``date_from`` is after ``date_to``,
-            rendered by the installed handler as a problem details body that
-            names the offending parameter and not the dates.
+        RequestValidationError: 422 when ``date_from`` is after ``date_to``, or
+            when ``matchday`` is outside ``1..46``, rendered by the installed
+            handler as a problem details body that names the offending
+            parameter and not the values.
     """
     if date_from is not None and date_to is not None and date_from > date_to:
         raise RequestValidationError(
@@ -127,6 +129,8 @@ def list_predictions(
         match_statement = match_statement.where(
             or_(MatchModel.home_team_id == team_id, MatchModel.away_team_id == team_id)
         )
+    if matchday is not None:
+        match_statement = match_statement.where(MatchModel.matchday == matchday)
     season_match_ids = list(session.scalars(match_statement))
 
     stored = views.load_stored_predictions(
