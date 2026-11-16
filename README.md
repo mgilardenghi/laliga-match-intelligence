@@ -47,11 +47,13 @@ Prerequisites: Docker with Compose, and `make`. The stack itself needs nothing e
    make up
    ```
 
-   The command builds the images, applies the schema and the seed with the one-shot `migrate` service, waits until db, redis, api and web are healthy, then starts the worker.
+   The command builds the images, applies the schema and the seed with the one-shot `migrate` service, waits until db, redis, api and web are healthy, then starts the worker, which now stays running because it consumes the job queue.
 
 4. Open <http://localhost:3000> for the dashboard and <http://localhost:8000/docs> for the OpenAPI documentation. The dashboard shows `API status: online` when it can reach the API.
 
-The worker is a one-shot job: by default it runs `python -m lmi_worker status`, which prints a report of the ingested data and needs no network, then exits with status 0. A stopped worker container is the expected end state, not an error. Ingestion is a separate, explicit command that downloads the source files: `make ingest` ingests the current season and `make ingest-backfill` ingests every season from 2005-06 on. The `migrate` service is the other one-shot job: it applies the migrations and the reference-data seed, and `api` and `worker` wait for it to exit 0.
+The worker is a long-running Celery consumer of the `lmi` queue: it stays up between jobs and only runs jobs that read PostgreSQL, so the default stack never contacts a data source and works offline. The `migrate` service is the one-shot job of the stack: it applies the migrations and the reference-data seed, and `api` and `worker` wait for it to exit 0. Ingestion downloads the source files, so it stays an explicit command: `make ingest` ingests the current season and `make ingest-backfill` ingests every season from 2005-06 on. The model and the simulator run in one-off containers from the worker image: `make predict` stores the live predictions of the Madrid date, and `make simulate` runs the season simulator once and prints the projected table.
+
+Celery beat is the clock of a daily cycle at 06:00 Europe/Madrid: it ingests the season in progress, stores that day's live predictions and simulates the league. Its ingestion step needs the network, which is why beat is opt-in: the `scheduler` Compose profile is off by default, and `make scheduler` starts it. That is what keeps `make up` offline.
 
 `make clean` stops the stack and deletes the containers and the database volume of the `lmi` Compose project.
 
@@ -68,6 +70,9 @@ The worker is a one-shot job: by default it runs `python -m lmi_worker status`, 
 | `make ingest` | Run the football-data and openfootball ingestion for the current season (network) |
 | `make ingest-backfill` | Run the ingestion for every season from 2005-06 through the current one |
 | `make backtest` | Run the walk-forward backtest over the scored seasons and store its results |
+| `make predict` | Store the live predictions of the Madrid date for the season in progress |
+| `make simulate` | Run the season simulator once and print the projected table |
+| `make scheduler` | Start Celery beat for the daily cycle at 06:00 Europe/Madrid (profile `scheduler`, off by default; needs network) |
 | `make lint` | Run Python and web linters, formatters and type checks |
 | `make test` | Run the Python unit test suite (no database needed) |
 | `make test-integration` | Run the integration tests against a throwaway PostgreSQL container, setting `LMI_ALLOW_DESTRUCTIVE_TESTS=1` for it |

@@ -2,11 +2,11 @@
 
 The tests cover the exit-code paths that must work before any connection exists:
 a successful ``--help``, a malformed command line, a rejected plan, and a missing
-database configuration for both commands. The M4 stub commands are covered too:
-one test per command asserts the exit code and the stderr line, and one asserts
-``--help`` lists all three. Every command that needs configuration runs with the
-``POSTGRES_*`` variables removed, so the configuration error is the one a fresh
-shell sees.
+database configuration for both commands. Every M4 command is implemented now, so
+the stub assertions are gone: one test asserts ``--help`` lists all three and the
+others live in the module of the command they cover. Every command that needs
+configuration runs with the ``POSTGRES_*`` variables removed, so the
+configuration error is the one a fresh shell sees.
 
 One test points the configuration at a closed port: ``ingest`` checks the database
 once before the first job, so an unreachable server is one line on stderr and exit
@@ -168,15 +168,18 @@ def test_help_lists_the_three_m4_commands(capsys: pytest.CaptureFixture[str]) ->
     assert "daily" in help_text
 
 
-# `predict` is implemented, so its stub assertion is gone: `tests/test_predict_cli.py`
-# covers the command's flags, exit codes and stored rows.
+# `predict`, `simulate` and `daily` are implemented, so their stub assertions are
+# gone: `tests/test_predict_cli.py`, `tests/test_simulate_cli.py` and
+# `tests/test_jobs.py` cover the commands themselves.
 
 
-def test_daily_reports_that_it_is_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
+def test_daily_without_configuration_exits_two(
+    unconfigured: None, caplog: pytest.LogCaptureFixture
+) -> None:
     code = main(["daily"])
 
     assert code == 2
-    assert capsys.readouterr().err.strip() == "daily: not implemented"
+    assert "incomplete database configuration" in caplog.text
 
 
 def test_two_exclusive_season_flags_exit_with_two() -> None:
