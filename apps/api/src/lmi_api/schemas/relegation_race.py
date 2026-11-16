@@ -20,10 +20,14 @@ Three nulls carry meaning and none of them means zero. ``run_id`` and
 ``as_of_date`` are null when the season has no succeeded simulation, because a
 race without a simulation has no run to name rather than a run that measured
 nothing. ``opponent_position`` is null for an opponent the season's table does
-not rank. ``p_win``, ``p_draw``, ``p_loss`` and ``next_match`` are null because
-this milestone stores no per-fixture or next-match simulation output at all:
-they are declared nullable so a stored simulation can fill them without a change
-to this contract, and today they are always null.
+not rank. ``p_win``, ``p_draw``, ``p_loss`` and ``next_match`` are the stored
+outputs of the latest succeeded run of the season and are null when that run did
+not store them: a run created before revision 0004 holds no per-fixture or
+next-match detail, a fixture the run did not simulate has no probability, and
+``next_match`` stays null under the freshness and never-sampled rules of
+:func:`lmi_core.analytics.relegation.next_match_swing` and when the run holds no
+row for the club. A probability the run never measured is served as unknown,
+never as zero, which is what the nulls say.
 """
 
 import datetime
@@ -38,6 +42,7 @@ from lmi_api.schemas.teams import Team
 
 __all__ = [
     "NextMatch",
+    "NextMatchCurrent",
     "NextMatchOutcome",
     "NextMatchOutcomes",
     "RelegationRace",
@@ -87,10 +92,13 @@ class RemainingFixture(BaseModel):
 
     ``venue`` is where the club plays it, and ``opponent_position`` the
     opponent's place in the season's table, or null for a club the table does
-    not rank. ``p_win``, ``p_draw`` and ``p_loss`` are the per-fixture
-    simulation outputs the run will store, and are null today: the fields exist
-    so a stored simulation fills them without a contract change, not because the
-    numbers are currently computed and withheld.
+    not rank. ``p_win``, ``p_draw`` and ``p_loss`` are the run's probabilities of
+    the three results from the club's side: at home the stored ``p_home``,
+    ``p_draw`` and ``p_away``, away the same triple read from the other end, so
+    ``p_win`` always describes the club and not the venue. They come from the
+    latest succeeded run of the season and are null when that run did not store
+    the fixture, which is the case for a run created before revision 0004 and for
+    a fixture the run did not simulate.
     """
 
     match: MatchSummary
@@ -104,12 +112,35 @@ class RemainingFixture(BaseModel):
 class NextMatchOutcome(BaseModel):
     """What one outcome of the next match would do to the club's projected season.
 
-    The four probabilities and the expected total are what the next-match
-    simulation of the run reports for that outcome, so a client compares a win,
-    a draw and a loss on one scale instead of reading one projected table.
+    The four probabilities and the expected total are what the latest succeeded
+    run of the season measured for that outcome, so a client compares a win, a
+    draw and a loss on one scale instead of reading one projected table.
+    ``p_outcome`` is the share of the simulated runs that produced the outcome,
+    while ``p_relegation``, ``p_europe`` and ``p_title`` are the shares of those
+    same runs that ended each way; ``expected_points`` is their mean final total.
+    Because ``p_outcome`` is a sampled frequency, it may differ slightly -- about
+    half a percentage point at 10 000 runs -- from the model probability the same
+    run stores for the fixture.
     """
 
     p_outcome: float
+    p_relegation: float
+    p_europe: float
+    p_title: float
+    expected_points: float
+
+
+class NextMatchCurrent(BaseModel):
+    """The club's own row of the same run the next-match swing comes from.
+
+    ``p_relegation``, ``p_europe`` and ``p_title`` are the run's probabilities for
+    the club over the whole remaining season, and ``expected_points`` is its
+    expected final total -- the value ``rivals[].expected_points`` already
+    carries. Reading these four numbers and the swing from one run is what lets a
+    client compute every delta of the block against one consistent baseline
+    instead of mixing two runs' projections.
+    """
+
     p_relegation: float
     p_europe: float
     p_title: float
@@ -133,11 +164,22 @@ class NextMatch(BaseModel):
 
     ``match_id`` names the fixture the outcomes belong to, so a client links to
     the match endpoint without matching on a date, and the outcomes nest under
-    it so one response carries both.
+    it so one response carries both. ``current`` is the club's row of the same
+    run, so every outcome is compared against the baseline the run measured
+    rather than against a second simulation.
+
+    The block comes from the latest succeeded run of the season and is null when
+    that run did not store it: a run created before revision 0004 has no
+    next-match detail, a stored match that is no longer the club's next fixture
+    is answered as unknown by
+    :func:`lmi_core.analytics.relegation.next_match_swing`, a result the run never
+    sampled has no conditional probability, and a run without a row for the club
+    has no ``current`` to compare against.
     """
 
     match_id: int
     outcomes: NextMatchOutcomes
+    current: NextMatchCurrent
 
 
 class RelegationRace(BaseModel):
@@ -150,9 +192,11 @@ class RelegationRace(BaseModel):
     ``as_of_date`` name the simulation the rivals and the series come from and
     are null when the season has none.
 
-    ``next_match`` is null in this milestone. Its shape is already here, so the
-    day the run stores the per-outcome projections they are served in this
-    payload instead of in a new resource.
+    ``next_match`` is the club's next fixture with what each of its results does
+    to the race, read from the same run as the rivals and the series. It is null
+    when that run stored no next-match detail for the club, or answered unknown
+    for it: an absent block says the run did not measure it, not that the club
+    has no fixture left.
     """
 
     team: Team

@@ -25,19 +25,32 @@ and the subject sits above Gamma on goal difference.
 Six worlds pin the served states: a season with no simulation, a completed
 season beside an incomplete one, a league too small to be counted, a season with
 three succeeded runs and a failed one, a run without a row for the subject club,
-and the three not-found cases. Two further tests pin the statement count and the
-OpenAPI contract.
+and the three not-found cases. The detail tests store the run's per-fixture
+probabilities and next-match counts for the unfinished season, because that is
+the world where the club still has fixtures to price: they pin the venue mapping,
+a fixture the run did not simulate, the freshness guard, a never-sampled result,
+the club's own row of the run, a run that stored no detail at all, a run that
+holds no row for the club while the club still has a fixture, and a run whose
+sample size is not the default. Two further tests pin the statement counts and
+one the OpenAPI contract.
 """
 
 import datetime
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any, NamedTuple
 
 import pytest
 from fastapi.testclient import TestClient
 from lmi_api.main import create_app
-from lmi_core.db.models import Match, Season, SimulationRun, Team
+from lmi_core.db.models import (
+    Match,
+    Season,
+    SimulationFixture,
+    SimulationNextMatch,
+    SimulationRun,
+    Team,
+)
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
@@ -125,7 +138,46 @@ RIVAL_FIELDS = {
     "points_p95",
 }
 FIXTURE_FIELDS = {"match", "venue", "opponent_position", "p_win", "p_draw", "p_loss"}
+NEXT_MATCH_FIELDS = {"match_id", "outcomes", "current"}
+CURRENT_FIELDS = {"p_relegation", "p_europe", "p_title", "expected_points"}
 """The field sets of the payload and its nested objects, so a silent addition is visible."""
+
+N_RUNS = 1000
+"""The sample size a synthetic run stores, which every outcome triple sums to."""
+
+OUTCOME_COUNTS: Mapping[str, tuple[int, int, int, int, int]] = {
+    "win": (450, 90, 120, 40, 23_400),
+    "draw": (250, 100, 60, 0, 10_000),
+    "loss": (300, 180, 40, 0, 9_600),
+}
+"""The stored counts of the subject's next match, as ``_store_outcome_counts`` reads them.
+
+The three ``n_outcome`` sum to :data:`N_RUNS`, and the conditional counts sum to
+the club's own row of the same run: 370 relegations, 220 European finishes and 40
+titles out of 1000 samples, which is what ``_run_with_rows`` stores for the
+subject of the unfinished season. So the swing has to average back to that row.
+The point totals keep the same identity: 450 winning samples totalling 23 400
+points, 250 drawing samples totalling 10 000 and 300 losing samples totalling
+9 600 are the means 52, 40 and 32, and the three together total 43 000 points,
+which is the club's stored ``mean_points`` of 43.0 times its 1000 samples.
+"""
+
+SMALL_RUN_N_RUNS = 500
+"""The non-default sample size of the run the sample-size test stores."""
+
+SMALL_RUN_OUTCOME_COUNTS: Mapping[str, tuple[int, int, int, int, int]] = {
+    "win": (225, 45, 60, 20, 11_700),
+    "draw": (125, 50, 30, 0, 5_000),
+    "loss": (150, 90, 20, 0, 4_800),
+}
+"""The same club's next match, stored for a run of :data:`SMALL_RUN_N_RUNS` samples.
+
+Every identity of :data:`OUTCOME_COUNTS` is kept at the smaller sample size: the
+three ``n_outcome`` sum to 500, the relegation counts to 185 (0.37 times 500), the
+European ones to 110 (0.22 times 500) and the title ones to 20 (0.04 times 500),
+and the point totals to 21 500 (43 times 500). A read that divided by the default
+1 000 would report every frequency at half its value.
+"""
 
 
 class World(NamedTuple):
@@ -371,6 +423,56 @@ def test_a_run_without_a_row_for_the_club_serves_no_rivals(
     assert payload["survival_threshold"]["seasons_used"] == 1
 
 
+def test_a_run_without_a_row_for_the_club_still_reads_both_detail_statements(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """The club's absence from the run is decided after both detail statements.
+
+    The run of the unfinished season holds rows for the other three clubs and
+    stored counts for the subject's next fixture, but no row for the subject
+    itself, so ``current`` does not exist and the block stays null. The two
+    conditional detail reads are issued all the same, because the conditions
+    that gate them are the succeeded run and the remaining fixture: the fixture
+    triple is still served, and the counts read is not skipped just because the
+    run has nothing to hang the swing on.
+    """
+    world = _complete_season(db_session)
+    pending = _pending_season(db_session, world)
+    others = [club for club in pending.clubs if club.id != pending.subject.id]
+    run = _run_with_rows(
+        db_session,
+        season=pending.season,
+        clubs=others,
+        as_of_date=datetime.date(COMPLETE_START_YEAR + 1, 10, 1),
+        requested_at=datetime.datetime(COMPLETE_START_YEAR + 1, 10, 2, 9, 0, tzinfo=datetime.UTC),
+        scale=0,
+    )
+    home, _away = pending.fixtures
+    _store_fixture(db_session, run=run, match=home, p_home=0.5, p_draw=0.25, p_away=0.25)
+    _store_outcome_counts(
+        db_session, run=run, team=pending.subject, match=home, counts=OUTCOME_COUNTS
+    )
+
+    with _counted_statements(db_session) as statements:
+        payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    assert payload["run_id"] == str(run.id)
+    assert payload["next_match"] is None
+    assert payload["rivals"] == []
+    home_fixture, away_fixture = payload["remaining_fixtures"]
+    assert (home_fixture["p_win"], home_fixture["p_draw"], home_fixture["p_loss"]) == (
+        0.5,
+        0.25,
+        0.25,
+    )
+    assert away_fixture["p_win"] is None
+    # Nine statements: the eleven of the full world without the two history
+    # reads, which an empty rival group skips. Both detail reads are among them,
+    # so a read that skipped the counts one would stop at eight.
+    assert len(statements) == 9
+    assert all(statement.lstrip().upper().startswith("SELECT") for statement in statements)
+
+
 def test_an_unknown_team_id_is_not_found_without_echoing_the_value(
     api_client: TestClient, db_session: Session
 ) -> None:
@@ -424,17 +526,270 @@ def test_an_unknown_season_code_is_not_found(api_client: TestClient, db_session:
     assert unknown not in response.text
 
 
+def test_the_fixture_probabilities_are_read_from_the_clubs_side_of_each_venue(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """The stored triple describes the two clubs, so the club's side decides the mapping.
+
+    The first fixture is the subject's home match and the second one its away
+    match, and the two rows store visibly different numbers, so a read that
+    served ``p_home`` as ``p_win`` at both venues would show it. The draw is the
+    draw at either venue, which is why only the win and the loss swap.
+    """
+    pending, run = _pending_with_run(db_session)
+    home, away = pending.fixtures
+    _store_fixture(db_session, run=run, match=home, p_home=0.5, p_draw=0.25, p_away=0.25)
+    _store_fixture(db_session, run=run, match=away, p_home=0.6, p_draw=0.15, p_away=0.25)
+
+    fixtures = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)[
+        "remaining_fixtures"
+    ]
+
+    assert fixtures[0]["venue"] == "home"
+    assert (fixtures[0]["p_win"], fixtures[0]["p_draw"], fixtures[0]["p_loss"]) == (
+        0.5,
+        0.25,
+        0.25,
+    )
+    assert fixtures[1]["venue"] == "away"
+    assert (fixtures[1]["p_win"], fixtures[1]["p_draw"], fixtures[1]["p_loss"]) == (
+        0.25,
+        0.15,
+        0.6,
+    )
+
+
+def test_a_fixture_the_run_did_not_simulate_stays_null(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """One stored fixture is served and the other keeps three nulls.
+
+    A run that simulated only part of the remaining calendar is a legitimate
+    run, so the fixture it skipped is answered as unknown rather than with a
+    probability borrowed from the fixture beside it.
+    """
+    pending, run = _pending_with_run(db_session)
+    home, _away = pending.fixtures
+    _store_fixture(db_session, run=run, match=home, p_home=0.5, p_draw=0.25, p_away=0.25)
+
+    fixtures = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)[
+        "remaining_fixtures"
+    ]
+
+    assert fixtures[0]["p_win"] == 0.5
+    assert fixtures[0]["p_loss"] == 0.25
+    assert fixtures[1]["p_win"] is None
+    assert fixtures[1]["p_draw"] is None
+    assert fixtures[1]["p_loss"] is None
+
+
+def test_a_run_without_detail_rows_serves_a_null_next_match(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A run created before the detail tables existed is still a served race.
+
+    The run is named and its table fills the rivals and the series, while the
+    per-fixture triple and the next-match block are null with HTTP 200: the
+    detail is absent from that run, which is a state of the data and not an
+    error of the request.
+    """
+    pending, run = _pending_with_run(db_session)
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    assert payload["run_id"] == str(run.id)
+    assert payload["rivals"]
+    assert payload["next_match"] is None
+    for fixture in payload["remaining_fixtures"]:
+        assert fixture["p_win"] is None
+        assert fixture["p_draw"] is None
+        assert fixture["p_loss"] is None
+
+
+def test_a_stored_next_match_that_is_no_longer_next_serves_a_null_next_match(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """Counts for the fixture after the next one are stale, so the block stays unknown.
+
+    The run stored its counts for the second remaining fixture, which is what a
+    run created before the first match was played looks like once that match is
+    gone: the stored match is no longer the club's next one, and serving its
+    conditional probabilities would describe a match the club no longer plays.
+    """
+    pending, run = _pending_with_run(db_session)
+    _home, away = pending.fixtures
+    _store_outcome_counts(
+        db_session, run=run, team=pending.subject, match=away, counts=OUTCOME_COUNTS
+    )
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    assert payload["next_match"] is None
+
+
+def test_a_never_sampled_outcome_serves_a_null_next_match(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A result no simulated run produced has no conditional probability.
+
+    The draw was never sampled, so dividing its conditional counts by a zero
+    sample would invent a probability. The three outcomes complete the run -- the
+    counts still sum to the sample size -- and the block is still unknown.
+    """
+    pending, run = _pending_with_run(db_session)
+    home, _away = pending.fixtures
+    _store_outcome_counts(
+        db_session,
+        run=run,
+        team=pending.subject,
+        match=home,
+        counts={
+            "win": (450, 90, 120, 40, 1450),
+            "draw": (0, 0, 0, 0, 0),
+            "loss": (550, 280, 100, 0, 550),
+        },
+    )
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    assert payload["next_match"] is None
+
+
+def test_the_swing_averages_back_to_the_clubs_own_row(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """Each stored outcome weights its own values back to the club's probabilities.
+
+    ``p_outcome`` is the sampled frequency, so the three outcomes together must
+    reproduce the run's own relegation, Europe and title probabilities. The
+    relegation one is read from the club's rival row and the other two from its
+    team row of the series, because the rival contract carries only the first.
+    Each outcome is weighed against its own values, never against a separate sum
+    of the probabilities. The stored point totals weigh back the same way, and
+    their weighted mean is the ``expected_points`` of the club's own row, which
+    the block serves as ``current``.
+    """
+    pending, run = _pending_with_run(db_session)
+    home, _away = pending.fixtures
+    _store_outcome_counts(
+        db_session, run=run, team=pending.subject, match=home, counts=OUTCOME_COUNTS
+    )
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    outcomes = payload["next_match"]["outcomes"]
+    assert sum(outcome["p_outcome"] for outcome in outcomes.values()) == pytest.approx(1.0)
+    rival = next(row for row in payload["rivals"] if row["team"]["id"] == pending.subject.id)
+    team_row = next(
+        row
+        for point in payload["series"]["points"]
+        for row in point["teams"]
+        if row["team"]["id"] == pending.subject.id
+    )
+    relegation = sum(
+        outcome["p_outcome"] * outcome["p_relegation"] for outcome in outcomes.values()
+    )
+    europe = sum(outcome["p_outcome"] * outcome["p_europe"] for outcome in outcomes.values())
+    title = sum(outcome["p_outcome"] * outcome["p_title"] for outcome in outcomes.values())
+
+    assert abs(relegation - rival["p_relegation"]) < 1e-9
+    assert abs(europe - team_row["p_europe"]) < 1e-9
+    assert abs(title - team_row["p_title"]) < 1e-9
+    points = sum(outcome["p_outcome"] * outcome["expected_points"] for outcome in outcomes.values())
+    assert points == pytest.approx(payload["next_match"]["current"]["expected_points"])
+
+
+def test_a_run_is_read_at_its_own_sample_size(api_client: TestClient, db_session: Session) -> None:
+    """Every frequency divides by the run's ``n_runs``, never by the default one.
+
+    The run stores :data:`SMALL_RUN_N_RUNS` samples, so a read that divided the
+    stored counts by the default 1 000 would halve all three frequencies, and a
+    read that assumed the default would also reject the counts as an incomplete
+    run. The stored numbers keep every identity of the fixture at that size: the
+    counts sum to the run's sample size, the conditional counts to the club's row
+    scaled to it, and the point totals to its mean points times it.
+    """
+    world = _complete_season(db_session)
+    pending = _pending_season(db_session, world)
+    run = _run_with_rows(
+        db_session,
+        season=pending.season,
+        clubs=pending.clubs,
+        as_of_date=datetime.date(COMPLETE_START_YEAR + 1, 10, 1),
+        requested_at=datetime.datetime(COMPLETE_START_YEAR + 1, 10, 2, 9, 0, tzinfo=datetime.UTC),
+        scale=0,
+        n_runs=SMALL_RUN_N_RUNS,
+    )
+    home, _away = pending.fixtures
+    _store_outcome_counts(
+        db_session,
+        run=run,
+        team=pending.subject,
+        match=home,
+        counts=SMALL_RUN_OUTCOME_COUNTS,
+    )
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    outcomes = payload["next_match"]["outcomes"]
+    for outcome, counts in SMALL_RUN_OUTCOME_COUNTS.items():
+        assert outcomes[outcome]["p_outcome"] == pytest.approx(counts[0] / SMALL_RUN_N_RUNS)
+    assert sum(outcome["p_outcome"] for outcome in outcomes.values()) == pytest.approx(1.0)
+    rival = next(row for row in payload["rivals"] if row["team"]["id"] == pending.subject.id)
+    team_row = next(
+        row
+        for point in payload["series"]["points"]
+        for row in point["teams"]
+        if row["team"]["id"] == pending.subject.id
+    )
+    relegation = sum(
+        outcome["p_outcome"] * outcome["p_relegation"] for outcome in outcomes.values()
+    )
+    europe = sum(outcome["p_outcome"] * outcome["p_europe"] for outcome in outcomes.values())
+    title = sum(outcome["p_outcome"] * outcome["p_title"] for outcome in outcomes.values())
+
+    assert abs(relegation - rival["p_relegation"]) < 1e-9
+    assert abs(europe - team_row["p_europe"]) < 1e-9
+    assert abs(title - team_row["p_title"]) < 1e-9
+
+
+def test_the_next_match_current_is_the_clubs_own_row_of_the_same_run(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """The baseline of the swing is the club's team row, not a second run.
+
+    The expected numbers are the ones ``_run_with_rows`` stores for the subject
+    of the unfinished season: index three on scale zero is 0.37 relegation,
+    0.22 Europe, 0.04 title and forty-three expected points. Serving a different
+    run's row, or a rival's, would show it.
+    """
+    pending, run = _pending_with_run(db_session)
+    home, _away = pending.fixtures
+    _store_outcome_counts(
+        db_session, run=run, team=pending.subject, match=home, counts=OUTCOME_COUNTS
+    )
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    current = payload["next_match"]["current"]
+    assert set(current) == CURRENT_FIELDS
+    assert current == pytest.approx(
+        {"p_relegation": 0.37, "p_europe": 0.22, "p_title": 0.04, "expected_points": 43.0}
+    )
+
+
 def test_the_read_issues_a_fixed_number_of_statements(
     api_client: TestClient, db_session: Session
 ) -> None:
-    """The read is bounded by its nine statements, never by the payload size.
+    """The read is bounded by its eleven statements, never by the payload size.
 
     The world holds a completed season of 380 results and a second season of four
     clubs with four matches and two remaining fixtures, plus a succeeded run with
     four team rows, so a read that loaded one season, one club or one fixture at a
-    time would need more statements than this. The count is taken on the
-    connection the fixture session uses, so it observes what the request really
-    issued and not what the code claims.
+    time would need more statements than this. The two detail reads count towards
+    the total because the run succeeded and the club has a remaining fixture. The
+    count is taken on the connection the fixture session uses, so it observes what
+    the request really issued and not what the code claims.
     """
     world = _complete_season(db_session)
     pending = _pending_season(db_session, world)
@@ -452,7 +807,28 @@ def test_the_read_issues_a_fixed_number_of_statements(
 
     assert payload["rivals"]
     assert payload["remaining_fixtures"]
-    assert len(statements) == 9
+    assert len(statements) == 11
+    assert all(statement.lstrip().upper().startswith("SELECT") for statement in statements)
+
+
+def test_the_read_without_a_run_or_a_remaining_fixture_stops_after_six(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A race with nothing left to play and no simulation skips every conditional read.
+
+    The completed season holds a match, so the club, the sample and the table are
+    read; without a succeeded run there are no rivals, hence no history, and
+    without a remaining fixture there is nothing to summarise or to detail. The
+    path therefore stops after six statements.
+    """
+    world = _complete_season(db_session)
+
+    with _counted_statements(db_session) as statements:
+        payload = _race(api_client, world.clubs[SUBJECT_INDEX].id, season=COMPLETE_SEASON_CODE)
+
+    assert payload["remaining_fixtures"] == []
+    assert payload["next_match"] is None
+    assert len(statements) == 6
     assert all(statement.lstrip().upper().startswith("SELECT") for statement in statements)
 
 
@@ -479,6 +855,7 @@ def test_openapi_documents_the_relegation_race_contract() -> None:
         "RelegationRival",
         "RemainingFixture",
         "NextMatch",
+        "NextMatchCurrent",
         "NextMatchOutcomes",
         "NextMatchOutcome",
         "SimulationHistory",
@@ -488,15 +865,17 @@ def test_openapi_documents_the_relegation_race_contract() -> None:
     assert set(schemas["SurvivalThreshold"]["properties"]) == THRESHOLD_FIELDS
     assert set(schemas["RelegationRival"]["properties"]) == RIVAL_FIELDS
     assert set(schemas["RemainingFixture"]["properties"]) == FIXTURE_FIELDS
+    assert set(schemas["NextMatch"]["properties"]) == NEXT_MATCH_FIELDS
+    assert set(schemas["NextMatchCurrent"]["properties"]) == CURRENT_FIELDS
 
 
 def test_the_simulation_outputs_are_declared_nullable() -> None:
-    """The R5 fields are nullable, so a stored simulation fills them unchanged.
+    """The run's outputs are nullable, so a run that stored none serves null.
 
-    ``next_match`` and the three per-fixture probabilities are always null today.
-    They are nullable in the published contract rather than absent from it, which
-    is what lets the day the run stores them be a data change and not a breaking
-    contract change.
+    ``next_match`` and the three per-fixture probabilities are nullable in the
+    published contract rather than absent from it, which is what lets a run
+    created before revision 0004, or a fixture the run did not simulate, be
+    served as unknown instead of as a number nobody measured.
     """
     schemas = create_app().openapi()["components"]["schemas"]
     race = schemas["RelegationRace"]["properties"]
@@ -677,6 +1056,7 @@ def _run_with_rows(
     requested_at: datetime.datetime,
     scale: int,
     status: str = "succeeded",
+    n_runs: int = N_RUNS,
 ) -> SimulationRun:
     """Store one run with a row per club and return it.
 
@@ -684,6 +1064,8 @@ def _run_with_rows(
     read that selected the wrong run serves visibly different numbers instead of
     the same ones. ``scale`` is a parameter and not a counter, because a counter
     shared between tests would make the expected numbers depend on test order.
+    ``n_runs`` is passed through to the run, so a test can state a sample size
+    other than the default one and pin that the swing divides by it.
     """
     offset = 100 * scale
     run = create_simulation_run(
@@ -692,6 +1074,7 @@ def _run_with_rows(
         status=status,
         as_of_date=as_of_date,
         requested_at=requested_at,
+        n_runs=n_runs,
     )
     for index, club in enumerate(clubs):
         create_team_result(
@@ -702,7 +1085,85 @@ def _run_with_rows(
             mean_points=40.0 + index + offset,
             current_points=10 + index,
             p_relegation=0.4 - index * 0.01,
+            p_europe=0.25 - index * 0.01 + 0.01 * scale,
+            p_title=0.01 * (index + 1) + 0.01 * scale,
             points_p05=index + offset,
             points_p95=60 + index + offset,
         )
     return run
+
+
+def _pending_with_run(session: Session) -> tuple[Pending, SimulationRun]:
+    """Store the completed season, the unfinished one and a succeeded run of it.
+
+    The completed season is what the threshold counts, and the run of the
+    unfinished season is the one the detail reads select, so this is the world
+    every detail test starts from. The run is written at scale zero, which is the
+    scale the stored numbers of those tests are stated at.
+    """
+    world = _complete_season(session)
+    pending = _pending_season(session, world)
+    run = _run_with_rows(
+        session,
+        season=pending.season,
+        clubs=pending.clubs,
+        as_of_date=datetime.date(COMPLETE_START_YEAR + 1, 10, 1),
+        requested_at=datetime.datetime(COMPLETE_START_YEAR + 1, 10, 2, 9, 0, tzinfo=datetime.UTC),
+        scale=0,
+    )
+    return pending, run
+
+
+def _store_fixture(
+    session: Session,
+    *,
+    run: SimulationRun,
+    match: Match,
+    p_home: float,
+    p_draw: float,
+    p_away: float,
+) -> None:
+    """Store one simulated fixture of ``run`` and flush, never commit.
+
+    The triple describes the two clubs of the match, home side first, which is
+    what lets a test pin the venue mapping: the club's own win probability is
+    ``p_home`` at home and ``p_away`` away.
+    """
+    session.add(
+        SimulationFixture(
+            run_id=run.id, match_id=match.id, p_home=p_home, p_draw=p_draw, p_away=p_away
+        )
+    )
+    session.flush()
+
+
+def _store_outcome_counts(
+    session: Session,
+    *,
+    run: SimulationRun,
+    team: Team,
+    match: Match,
+    counts: Mapping[str, tuple[int, int, int, int, int]],
+) -> None:
+    """Store one row per outcome of ``team``'s next match in ``run`` and flush.
+
+    ``counts`` maps each outcome to its ``n_outcome``, its three conditional
+    counts and its ``points_sum``, so a test states the stored numbers the rule
+    is expected to read. Nothing is committed: the caller's transaction decides
+    whether the rows survive.
+    """
+    for outcome, (n_outcome, n_relegated, n_europe, n_title, points_sum) in counts.items():
+        session.add(
+            SimulationNextMatch(
+                run_id=run.id,
+                team_id=team.id,
+                match_id=match.id,
+                outcome=outcome,
+                n_outcome=n_outcome,
+                n_relegated=n_relegated,
+                n_europe=n_europe,
+                n_title=n_title,
+                points_sum=points_sum,
+            )
+        )
+    session.flush()

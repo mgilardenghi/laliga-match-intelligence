@@ -1,22 +1,28 @@
-"""Tests for :mod:`lmi_core.analytics.relegation` and its two rules.
+"""Tests for :mod:`lmi_core.analytics.relegation` and its three rules.
 
 All data is synthetic and every expected number is computed by hand and written
 out in the assertion, so a failure points at the rule the test pins rather than
 at a difference between two runs of the same code. The fixtures mirror what the
 future ``GET /v1/teams/{team_id}/relegation-race`` route will hand in: stored
-seasons of the sizes and result counts the ingestion produces, and a simulation
-run of one club per league place. Each test is named after the rule it covers, in
-the order of the module docstring.
+seasons of the sizes and result counts the ingestion produces, a simulation
+run of one club per league place, and the stored outcome counts of one club's
+next match. Each test is named after the rule it covers, in the order of the
+module docstring.
 """
 
 import pytest
 from lmi_core.analytics.relegation import (
+    OutcomeCounts,
     RankedTeam,
     SeasonTable,
     SurvivalThreshold,
     nearest_rivals,
+    next_match_swing,
     survival_threshold,
 )
+
+MATCH_ID = 500
+"""The next match the swing tests read: the identifier every stored row carries."""
 
 
 def points_table(seventeenth: int, *, eighteenth: int | None = None) -> tuple[int, ...]:
@@ -83,6 +89,48 @@ def run_of_twenty() -> list[RankedTeam]:
     and its neighbours are the same number of places either side.
     """
     return [ranked(100 + place, float(place)) for place in range(1, 21)]
+
+
+def outcome_row(
+    outcome: str,
+    n_outcome: int,
+    *,
+    n_relegated: int = 0,
+    n_europe: int = 0,
+    n_title: int = 0,
+    points_sum: int = 0,
+    match_id: int = MATCH_ID,
+) -> OutcomeCounts:
+    """Build one stored outcome of the next match, with the counts a test writes.
+
+    Every column defaults to zero, so a test names the counts its rule is about
+    and the rest stay visibly absent from the assertion.
+    """
+    return OutcomeCounts(
+        match_id=match_id,
+        outcome=outcome,
+        n_outcome=n_outcome,
+        n_relegated=n_relegated,
+        n_europe=n_europe,
+        n_title=n_title,
+        points_sum=points_sum,
+    )
+
+
+def next_match_outcomes() -> list[OutcomeCounts]:
+    """Return the three stored outcomes of the ten-run sample the swing tests read.
+
+    Win came out five times and took 15 points, with 3 relegations, 4 European
+    places and 1 title; draw three times and 3 points, with 1 relegation and 1
+    European place; loss twice and no points, both samples relegated. The counts
+    add up to the 10 runs and no conditional count exceeds its outcome, so this
+    is one complete run of one match.
+    """
+    return [
+        outcome_row("win", 5, n_relegated=3, n_europe=4, n_title=1, points_sum=15),
+        outcome_row("draw", 3, n_relegated=1, n_europe=1, points_sum=3),
+        outcome_row("loss", 2, n_relegated=2),
+    ]
 
 
 def test_the_threshold_reads_the_seventeenth_place_of_three_complete_seasons() -> None:
@@ -293,3 +341,128 @@ def test_an_absent_or_duplicated_club_and_a_negative_count_raise() -> None:
         nearest_rivals([*teams, ranked(110, 10.0)], team_id=110)
     with pytest.raises(ValueError):
         nearest_rivals(teams, team_id=110, count=-1)
+
+
+def test_the_swing_derives_the_three_outcomes_of_the_stored_run() -> None:
+    swings = next_match_swing(next_match_outcomes(), n_runs=10, match_id=MATCH_ID)
+
+    assert swings is not None
+    win, draw, loss = swings
+
+    # Five of the ten runs won: half the runs, 3 of those 5 relegated, 4 of them
+    # reached Europe, 1 took the title, and they averaged 15 / 5 points.
+    assert win.outcome == "win"
+    assert win.p_outcome == 0.5
+    assert win.p_relegation == 0.6
+    assert win.p_europe == 0.8
+    assert win.p_title == 0.2
+    assert win.expected_points == 3.0
+
+    # Three of the ten runs drew: 1 of those 3 relegated, 1 reached Europe, none
+    # took the title, and they averaged 3 / 3 points.
+    assert draw.outcome == "draw"
+    assert draw.p_outcome == 0.3
+    assert draw.p_relegation == pytest.approx(1 / 3)
+    assert draw.p_europe == pytest.approx(1 / 3)
+    assert draw.p_title == 0.0
+    assert draw.expected_points == 1.0
+
+    # Two of the ten runs lost: both were relegated, neither reached Europe or
+    # took the title, and they averaged 0 / 2 points.
+    assert loss.outcome == "loss"
+    assert loss.p_outcome == 0.2
+    assert loss.p_relegation == 1.0
+    assert loss.p_europe == 0.0
+    assert loss.p_title == 0.0
+    assert loss.expected_points == 0.0
+
+
+def test_the_sampled_frequencies_reproduce_the_stored_probabilities() -> None:
+    swings = next_match_swing(next_match_outcomes(), n_runs=10, match_id=MATCH_ID)
+
+    assert swings is not None
+    # The club's own stored probabilities are 3 + 1 + 2 relegations, 4 + 1 + 0
+    # European places and 1 + 0 + 0 titles out of the 10 runs, so weighting each
+    # result by how often it happened must give back 0.6, 0.5 and 0.1.
+    assert sum(swing.p_outcome * swing.p_relegation for swing in swings) == pytest.approx(
+        0.6, abs=1e-9
+    )
+    assert sum(swing.p_outcome * swing.p_europe for swing in swings) == pytest.approx(0.5, abs=1e-9)
+    assert sum(swing.p_outcome * swing.p_title for swing in swings) == pytest.approx(0.1, abs=1e-9)
+
+
+def test_no_stored_outcome_means_no_swing() -> None:
+    # The run has not stored the club's next match, so nothing is known.
+    assert next_match_swing([], n_runs=10, match_id=MATCH_ID) is None
+
+
+def test_a_missing_repeated_or_unnamed_outcome_means_no_swing() -> None:
+    rows = next_match_outcomes()
+
+    # Win and draw only: 8 of the 10 runs are accounted for and no swing can be
+    # named for the loss, so the answer is unknown rather than a sum error.
+    assert next_match_swing(rows[:2], n_runs=10, match_id=MATCH_ID) is None
+    # A repeated draw is two rows claiming one result and no loss at all.
+    assert next_match_swing([rows[0], rows[1], rows[1]], n_runs=10, match_id=MATCH_ID) is None
+    # A fourth result nobody defined is not one of the three the swing reports.
+    extra = [rows[0], rows[1], outcome_row("abandoned", 2)]
+    assert next_match_swing(extra, n_runs=10, match_id=MATCH_ID) is None
+
+
+def test_a_stale_match_means_no_swing() -> None:
+    # The rows describe match 500 and the club's next match is 501, so the sample
+    # belongs to a match already played as of the day and stays unknown until the
+    # next run replaces it -- even though the rows add up to the 10 runs.
+    assert next_match_swing(next_match_outcomes(), n_runs=10, match_id=501) is None
+
+
+def test_a_never_sampled_outcome_means_no_swing() -> None:
+    rows = [
+        outcome_row("win", 5, n_relegated=3, points_sum=15),
+        outcome_row("draw", 3, n_relegated=1, points_sum=3),
+        outcome_row("loss", 0),
+    ]
+
+    # 5 + 3 + 0 are exactly the 8 runs, so the rows are complete; the loss was
+    # simply never sampled, and dividing by its zero count would invent a
+    # conditional probability, so the never-sampled outcome wins over the sum.
+    assert next_match_swing(rows, n_runs=8, match_id=MATCH_ID) is None
+
+
+def test_rows_of_two_matches_raise() -> None:
+    rows = next_match_outcomes()
+    rows[2] = outcome_row("loss", 2, n_relegated=2, match_id=MATCH_ID + 1)
+
+    # A club has one next match, so rows of two matches are not this club's swing.
+    with pytest.raises(ValueError):
+        next_match_swing(rows, n_runs=10, match_id=MATCH_ID)
+
+
+def test_a_conditional_count_above_its_outcome_raises() -> None:
+    rows = next_match_outcomes()
+    # 6 relegations in 5 winning runs: a conditional probability of 1.2, which no
+    # run can produce, so the broken row is raised instead of served as unknown.
+    rows[0] = outcome_row("win", 5, n_relegated=6, points_sum=15)
+
+    with pytest.raises(ValueError):
+        next_match_swing(rows, n_runs=10, match_id=MATCH_ID)
+
+
+def test_outcomes_that_do_not_add_up_to_the_runs_raise() -> None:
+    rows = next_match_outcomes()
+    # 5 + 3 + 3 outcomes are 11 samples of a 10-run simulation.
+    rows[2] = outcome_row("loss", 3, n_relegated=2)
+
+    with pytest.raises(ValueError):
+        next_match_swing(rows, n_runs=10, match_id=MATCH_ID)
+
+
+def test_an_undefined_run_count_raises() -> None:
+    rows = next_match_outcomes()
+
+    # A frequency over zero runs, or over a negative number of them, is not a
+    # probability the module may report.
+    with pytest.raises(ValueError):
+        next_match_swing(rows, n_runs=0, match_id=MATCH_ID)
+    with pytest.raises(ValueError):
+        next_match_swing(rows, n_runs=-10, match_id=MATCH_ID)
