@@ -96,6 +96,28 @@ def test_subset_parameter_marks_exactly_one_link_current(
 
 
 @pytest.mark.loaded
+@pytest.mark.parametrize(
+    ("query", "caption"),
+    [
+        ("", "Overall backtest metrics, all forecasts"),
+        ("?subset=all", "Overall backtest metrics, all forecasts"),
+        ("?subset=common", "Overall backtest metrics, common matches"),
+    ],
+)
+def test_the_overall_table_caption_names_the_subset(
+    page: Page, dashboard_url: str, query: str, caption: str
+) -> None:
+    """Guard the subset switch: the table states which cohort it scores.
+
+    The loaded data gives the same scores for both cohorts, so the caption, not a
+    number, is what proves the page read the requested subset.
+    """
+    _open(page, dashboard_url, f"{PERFORMANCE_PATH}{query}")
+    backtest = page.locator(BACKTEST_SECTION)
+    expect(backtest.locator("table > caption", has_text=caption)).to_have_count(1)
+
+
+@pytest.mark.loaded
 def test_backtest_table_lists_one_row_per_model(page: Page, dashboard_url: str) -> None:
     _open(page, dashboard_url)
 

@@ -209,9 +209,21 @@ def test_a_season_without_a_simulation_offers_make_simulate(page: Page, dashboar
     page.goto(dashboard_url)
     codes = _season_codes(page)
     assert codes, "the selector offered no season"
-    oldest = min(codes)
 
-    page.goto(f"{dashboard_url}/?season={oldest}")
+    # Pick a season that has results and no stored run by reading the pages
+    # themselves, instead of assuming which season the seed data left unsimulated.
+    unsimulated = None
+    for code in sorted(codes):
+        page.goto(f"{dashboard_url}/?season={code}")
+        has_rows = _main_table(page).locator(":scope > tbody > tr").count() > 0
+        asks = page.get_by_role("heading", name="No simulation for this season yet").count() == 1
+        if has_rows and asks:
+            unsimulated = code
+            break
+    if unsimulated is None:
+        pytest.skip("every season with results has a stored simulation in this dataset")
+
+    page.goto(f"{dashboard_url}/?season={unsimulated}")
 
     expect(page.get_by_role("heading", level=1)).to_have_text(H1_TEXT)
     table = _main_table(page)

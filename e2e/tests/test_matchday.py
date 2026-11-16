@@ -159,3 +159,26 @@ def test_a_played_matchday_card_shows_its_score_and_scores(page: Page, dashboard
     else:
         expect(tables.first.locator("th", has_text="Correct")).to_have_count(1)
         expect(tables.first.locator("th", has_text="RPS")).to_have_count(1)
+
+
+@pytest.mark.loaded
+@pytest.mark.parametrize("value", ["0", "47", "abc", "-3", "13.5"])
+def test_an_out_of_range_matchday_falls_back_to_a_valid_page(
+    page: Page, dashboard_url: str, value: str
+) -> None:
+    """Guard the query validation: a bad value never reaches the API as a 422."""
+    response = page.goto(f"{dashboard_url}/matchday?matchday={value}")
+    assert response is not None and response.status == 200, (
+        f"?matchday={value} answered HTTP {response.status if response else 'none'}"
+    )
+    expect(page.get_by_role("heading", level=1)).to_have_count(1)
+    expect(page.locator("body")).not_to_contain_text("API unreachable")
+
+    nav = page.get_by_role("navigation", name="Matchday")
+    hrefs = nav.get_by_role("link").evaluate_all("links => links.map(l => l.getAttribute('href'))")
+    for href in hrefs:
+        found = re.search(r"matchday=(-?\d+)", href or "")
+        assert found is not None, f"the pager links to {href!r}"
+        assert FIRST_MATCHDAY <= int(found.group(1)) <= LAST_MATCHDAY, (
+            f"the pager links outside the season: {href!r}"
+        )

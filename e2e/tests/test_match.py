@@ -119,3 +119,63 @@ def test_a_played_match_shows_the_pre_match_view_and_the_result(
         expect(
             statistics.first.locator("th").filter(has_text=re.compile(r"^Shots$"))
         ).to_have_count(1)
+
+
+MARKET_CAPTION = "Market implied probabilities"
+MARKET_NOTE = re.compile(r"^Pre-closing odds, margin removed, from \S+\.$")
+H2H_CAPTION = re.compile(r"^The \d+ meetings? of .+ before this fixture")
+LAST_MEETINGS_CAPTION = "Last 10 meetings, newest first"
+MAX_LAST_MEETINGS = 10
+PROFILE_CAPTION = re.compile(r" per-match profile$")
+
+
+def _played_match_link(page: Page, dashboard_url: str) -> str:
+    """Return the match link of a played card on matchday 1, or skip."""
+    page.goto(f"{dashboard_url}/matchday?matchday=1")
+    played = page.locator("article").filter(has_text="Played")
+    if played.count() == 0:
+        pytest.skip("no card on matchday 1 is marked Played in the loaded dataset")
+    href = played.first.get_by_role("link").first.get_attribute("href")
+    assert href is not None and MATCH_URL.search(href), f"the played card links to {href!r}"
+    return href
+
+
+@pytest.mark.loaded
+def test_a_played_match_shows_the_market_bar_with_its_label(page: Page, dashboard_url: str) -> None:
+    """Guard the market reference: a labelled bar whose note names the price used."""
+    href = _played_match_link(page, dashboard_url)
+    page.goto(f"{dashboard_url}{href}")
+
+    market = page.locator("figure").filter(has=page.locator("figcaption", has_text=MARKET_CAPTION))
+    if market.count() == 0:
+        pytest.skip("the played fixture carries no pre-closing price, so no market bar")
+    expect(market).to_have_count(1)
+    expect(market.locator('svg[role="img"]')).to_have_count(1)
+    expect(market.locator(":scope > p")).to_have_text(MARKET_NOTE)
+
+
+@pytest.mark.loaded
+def test_the_head_to_head_and_profile_render(page: Page, dashboard_url: str) -> None:
+    """Guard the head-to-head totals, the last meetings and the opponent profile."""
+    href = _first_card_link(page, dashboard_url)
+    page.goto(f"{dashboard_url}{href}")
+
+    totals = page.locator("table").filter(has=page.locator("caption", has_text=H2H_CAPTION))
+    expect(totals).to_have_count(1)
+    expect(totals.locator("th[scope='col']").first).to_be_attached()
+
+    last = page.locator("table").filter(has=page.locator("caption", has_text=LAST_MEETINGS_CAPTION))
+    expect(last).to_have_count(1)
+    rows = last.locator(":scope > tbody > tr")
+    assert 1 <= rows.count() <= MAX_LAST_MEETINGS, (
+        f"the last-meetings table lists {rows.count()} rows, expected 1 to {MAX_LAST_MEETINGS}"
+    )
+
+    profiles = page.locator("figure").filter(
+        has=page.locator("figcaption", has_text=PROFILE_CAPTION)
+    )
+    expect(profiles).to_have_count(2)
+    for index in range(2):
+        expect(profiles.nth(index).locator('svg[role="img"]')).to_have_accessible_name(
+            re.compile(r"\S")
+        )
