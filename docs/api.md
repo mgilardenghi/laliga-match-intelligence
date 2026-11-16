@@ -43,12 +43,17 @@ generated client models the real body instead of a default error envelope:
 | `GET /v1/teams` | unknown season code | declared, not reachable (its only parameter is an unconstrained string) | — |
 | `GET /v1/teams/{team_id}` | unknown team | non-integer identifier | — |
 | `GET /v1/teams/{team_id}/season-stats` | unknown team, unknown season code, a team that is not part of the season, or no season with matches | non-integer identifier | — |
+| `GET /v1/teams/{team_id}/focus` | unknown team, unknown season code, a team that is not part of the season, or no season with matches | non-integer identifier | — |
+| `GET /v1/teams/{team_id}/history` | unknown team | non-integer identifier | — |
+| `GET /v1/teams/{team_id}/relegation-race` | unknown team, unknown season code, a team that is not part of the season, or no completed season for the survival threshold | non-integer identifier | — |
 | `GET /v1/predictions` | unknown season code, or an unknown `match_id` or `team_id` | a `matchday`, `model`, `match_status`, `evaluation` or date value outside its rule | — |
 | `GET /v1/predictions/{prediction_id}` | unknown prediction | non-integer identifier | — |
 | `GET /v1/matches` | unknown season code or team identifier | a query value outside its rule | — |
 | `GET /v1/matches/{match_id}` | unknown match | non-integer identifier | — |
+| `GET /v1/matches/{match_id}/preview` | unknown match | non-integer identifier | — |
 | `GET /v1/standings` | unknown season code, or no season with matches | malformed `as_of` | — |
 | `GET /v1/model-metrics` | `no backtest run`: no succeeded run is stored, or `run_id` names one that is missing, running or failed | malformed `run_id` | — |
+| `GET /v1/model-metrics/live` | unknown season code, or no season with matches | declared, not reachable (its only parameter is an unconstrained string) | — |
 | `GET /v1/ingestion-runs` | unknown season code | a `source`, `status`, `limit` or `offset` value outside its rule | — |
 | `GET /v1/ingestion-runs/{run_id}` | unknown ingestion run | non-UUID identifier | — |
 | `POST /v1/simulations` | unknown season code, or no season has a match while the body names none | a body value outside its bounds, or an `as_of_date` later than the Madrid date | the queue refused the message |
