@@ -11,6 +11,7 @@ rule it covers, in the order of the module docstring.
 
 import datetime
 
+import pytest
 from lmi_core.analytics.season_stats import (
     MatchLine,
     MatchRecord,
@@ -21,9 +22,12 @@ from lmi_core.analytics.season_stats import (
     StatValues,
     Venue,
     average_line,
+    market_expected_points,
     match_points,
     match_record,
     summarise,
+    tier_members,
+    tier_records,
 )
 
 TEAM = 100
@@ -328,6 +332,102 @@ def test_match_record_counts_results_and_has_no_points_per_game_over_no_match() 
     )
 
 
+def test_market_expected_points_is_three_p_win_plus_p_draw_seen_from_the_venue() -> None:
+    # 2.0 / 3.5 / 4.0: the inverse prices sum to 29/28, so p_home is 14/29 and
+    # p_draw is 8/29. The home side earns 3 * 14/29 + 8/29 = 50/29.
+    price = (2.0, 3.5, 4.0)
+    assert market_expected_points(price, venue="home") == pytest.approx(50 / 29)
+
+    # The same price read from the other venue rewards the other outcome: p_away
+    # is 7/29, so a visitor earns 3 * 7/29 + 8/29 = 29/29, which is not 50/29.
+    assert market_expected_points(price, venue="away") == pytest.approx(29 / 29)
+
+    # 3.0 / 3.2 / 2.4: the inverse prices sum to 51/48, so p_away is 20/51 and
+    # p_draw is 15/51. A visitor earns 3 * 20/51 + 15/51 = 25/17.
+    assert market_expected_points((3.0, 3.2, 2.4), venue="away") == pytest.approx(25 / 17)
+
+
+def test_tier_members_cuts_a_ranked_table_into_three_ascending_tiers() -> None:
+    # Six clubs, so ceil(6 / 3) = 2 per tier. The mapping is team id -> position
+    # and its key order is not the ranked order, which proves the position
+    # decides; every tier is then ascending by identifier, not by rank.
+    six = {14: 1, 11: 2, 15: 3, 12: 4, 16: 5, 13: 6}
+    assert tier_members(six) == {
+        "top": (11, 14),
+        "middle": (12, 15),
+        "bottom": (13, 16),
+    }
+
+    # Four clubs: ceil(4 / 3) = 2 fills the top and the middle, so the bottom is
+    # an empty tuple and never a missing key.
+    four = {24: 1, 21: 2, 23: 3, 22: 4}
+    assert tier_members(four) == {"top": (21, 24), "middle": (22, 23), "bottom": ()}
+
+
+def test_tier_records_count_only_the_matches_against_the_members_of_a_tier() -> None:
+    matches = [
+        played(1, datetime.date(2026, 1, 4), "home", 11, 2, 0),
+        played(2, datetime.date(2026, 1, 11), "away", 14, 1, 1),
+        played(3, datetime.date(2026, 1, 18), "home", 12, 0, 3),
+        played(4, datetime.date(2026, 1, 25), "away", 16, 3, 1),
+        played(5, datetime.date(2026, 2, 1), "home", 13, 1, 0),
+    ]
+
+    records = tier_records(
+        matches,
+        members={"top": (11, 14), "middle": (12, 15), "bottom": (16, 13)},
+    )
+
+    # Against the top tier: a home win and an away draw, 3 goals for 1 against
+    # over 2 matches, which is 4 points and 2.0 per game.
+    assert records["top"] == MatchRecord(
+        played=2,
+        won=1,
+        drawn=1,
+        lost=0,
+        goals_for=3,
+        goals_against=1,
+        points=4,
+        points_per_game=2.0,
+    )
+    # Against the middle: the home loss to 12 alone; club 15 was never faced.
+    assert records["middle"] == MatchRecord(
+        played=1,
+        won=0,
+        drawn=0,
+        lost=1,
+        goals_for=0,
+        goals_against=3,
+        points=0,
+        points_per_game=0.0,
+    )
+    # Against the bottom: an away win and a home win, whatever the venue.
+    assert records["bottom"] == MatchRecord(
+        played=2,
+        won=2,
+        drawn=0,
+        lost=0,
+        goals_for=4,
+        goals_against=1,
+        points=6,
+        points_per_game=3.0,
+    )
+
+    # A tier the caller left out is served as a record of zeros without a
+    # made-up average, so a client always paints three tiers.
+    empty = tier_records(matches, members={"top": (11, 14), "middle": (12,)})
+    assert empty["bottom"] == MatchRecord(
+        played=0,
+        won=0,
+        drawn=0,
+        lost=0,
+        goals_for=0,
+        goals_against=0,
+        points=0,
+        points_per_game=None,
+    )
+
+
 def test_average_line_averages_each_statistic_over_the_lines_that_carry_it() -> None:
     lines = [
         SideLine(goals=1, stats=StatValues(shots=4, red=0, xg=0.5)),
@@ -429,7 +529,7 @@ def test_rolling_form_keeps_only_the_five_most_recent_matches() -> None:
     assert rolling_form(stats.matches[6].rolling5) == (2.6, 1.6, 2.2, 0.8)
 
 
-def test_same_date_matches_keep_a_stable_order_in_the_rolling_window() -> None:
+def test_a_same_date_fixture_never_enters_the_other_window() -> None:
     day = datetime.date(2026, 3, 1)
     # Passed latest id first: the sort key must use match id, not input order.
     matches = [
@@ -441,7 +541,8 @@ def test_same_date_matches_keep_a_stable_order_in_the_rolling_window() -> None:
 
     assert [row.match_id for row in stats.matches] == [39, 40]
     assert [row.venue for row in stats.matches] == ["home", "away"]
+    # A stored date cannot order two fixtures of one day, so neither sibling is
+    # form for the other: both windows are empty, however the identifiers sort.
     assert rolling_form(stats.matches[0].rolling5) == (None, None, None, None)
-    # Match 40's window is match 39: a win, xPts 2.0, 1 goal for, none against.
-    assert rolling_form(stats.matches[1].rolling5) == (3.0, 2.0, 1.0, 0.0)
+    assert rolling_form(stats.matches[1].rolling5) == (None, None, None, None)
     assert [match.match_id for match in matches] == [40, 39]

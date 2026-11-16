@@ -11,10 +11,10 @@ database schema and the API schemas state. A statistic that no counted match
 carries is ``None``, not ``0.0``: a team with no expected-goals rows has an
 unknown xG average, while a team whose rows all say zero has an average of
 ``0.0``. An average over an empty set does not exist either, which is why
-``points_per_game`` and every field of the first match's :class:`RollingForm`
-are ``None`` rather than zero. The same rule governs coverage counters: they
-count the matches that carry the data, so the client can tell an average of one
-match from an average of six.
+``points_per_game`` and every field of a :class:`RollingForm` with no earlier
+match are ``None`` rather than zero. The same rule governs coverage counters:
+they count the matches that carry the data, so the client can tell an average of
+one match from an average of six.
 
 The rules:
 
@@ -25,6 +25,15 @@ The rules:
   of no other. An empty input gives an all-``None`` line.
 - :func:`match_record` counts wins, draws, losses, goals and points, and adds
   ``points_per_game``, which is ``None`` over no matches.
+- :func:`market_expected_points` is ``3 * p_win + p_draw`` of one pre-closing
+  ``1x2`` price, from the margin-removed probabilities, seen from the venue the
+  caller asks about. The margin removal is
+  :func:`lmi_core.modeling.market.remove_margin` and is not restated here.
+- :func:`tier_members` cuts a ranked table into three tiers -- positions
+  ``1..ceil(n/3)``, the next ``ceil(n/3)`` and the rest -- and returns the team
+  ids of each, ascending inside each tier.
+- :func:`tier_records` counts the matches whose opponent is a member of a tier,
+  whatever the venue, so the three records partition the team's matches.
 - :func:`summarise` orders the matches by ``(kickoff_date, match_id)``
   ascending, so a team that played twice on one date has a stable order that
   does not depend on the caller's list order; the caller's list is not sorted
@@ -32,22 +41,33 @@ The rules:
   value and is ``None`` when none do, and ``xpts_coverage`` says how many did.
   ``stat_coverage`` counts the matches with a statistics row and ``xg_coverage``
   the matches with an expected-goals value on either side. Each match row's
-  ``rolling5`` covers the at most five matches immediately before it in that
-  order, never the match itself, and every rolling field is ``None`` for the
-  team's first match.
+  ``rolling5`` covers the at most five matches the team played on a date
+  strictly earlier than the match's own, never the match itself and never
+  another fixture of the same day: a stored date cannot order two fixtures of
+  one day, so the form of a match is the form before its date. Every rolling
+  field is ``None`` for a row with no earlier match.
 """
 
 import datetime
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
+
+import numpy as np
+
+from lmi_core.modeling.market import remove_margin
 
 Venue = Literal["home", "away"]
 """Where the team played a match: ``"home"`` or ``"away"``."""
 
+TierName = Literal["top", "middle", "bottom"]
+"""The opponent tiers a season table is split into."""
+
 _WIN_POINTS = 3
 _DRAW_POINTS = 1
 _ROLLING_WINDOW = 5
+_TIERS: tuple[TierName, ...] = ("top", "middle", "bottom")
+"""The three tiers, in table order, so a caller always receives all of them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,12 +166,13 @@ class MatchRecord:
 
 @dataclass(frozen=True, slots=True)
 class RollingForm:
-    """Averages over the matches immediately before one match.
+    """Averages over the matches a team played before the date of one match.
 
-    The window never includes the match it describes: a form line answers what
-    the team did before kickoff, which is what a reader of a season table wants
-    and what keeps the row usable as a pre-match feature. Every field is
-    ``None`` when the window is empty.
+    The window never includes the match it describes, and never another fixture
+    of the same day: a form line answers what the team did strictly before the
+    date it plays on, which is what a reader of a season table wants and what
+    keeps the row usable as a pre-match feature. Every field is ``None`` when
+    the window is empty.
     """
 
     points_pg: float | None
@@ -268,6 +289,61 @@ def match_record(matches: Iterable[PlayedMatch]) -> MatchRecord:
     )
 
 
+def market_expected_points(prices: tuple[float, float, float], *, venue: Venue) -> float:
+    """Return 3*p_win + p_draw of one pre-closing 1x2 price, seen from ``venue``.
+
+    ``prices`` is the decimal ``(home, draw, away)`` triple and the margin is
+    removed by :func:`lmi_core.modeling.market.remove_margin`, the only margin
+    removal in the repository. A home side earns ``3 * p_home + p_draw`` and a
+    visitor ``3 * p_away + p_draw``, so the same price read from the two venues
+    gives two different numbers: the formula rewards the outcome the caller's
+    side can win.
+    """
+    probabilities = remove_margin(np.array([list(prices)], dtype=np.float64))[0]
+    win = probabilities[0] if venue == "home" else probabilities[2]
+    return _WIN_POINTS * float(win) + _DRAW_POINTS * float(probabilities[1])
+
+
+def tier_members(positions: Mapping[int, int]) -> dict[TierName, tuple[int, ...]]:
+    """Group the team ids of a table by tier, ascending inside each tier.
+
+    With ``n`` teams the top tier is positions ``1..ceil(n/3)``, the middle the
+    next ``ceil(n/3)`` and the bottom the rest, so the three groups partition
+    the table. A table of fewer than five clubs can leave the bottom tier empty
+    (``n = 4`` gives two clubs in the top and two in the middle), and an empty
+    tier is returned as an empty tuple rather than omitted. The boundary is
+    computed here once so a caller cannot cut a table differently, and a team
+    id is ordered ascending inside its tier so two reads of one season serve
+    the same membership.
+    """
+    ranked = sorted(positions, key=lambda team_id: positions[team_id])
+    third = -(-len(positions) // 3)
+    return {
+        "top": tuple(sorted(ranked[:third])),
+        "middle": tuple(sorted(ranked[third : 2 * third])),
+        "bottom": tuple(sorted(ranked[2 * third :])),
+    }
+
+
+def tier_records(
+    matches: Sequence[PlayedMatch], *, members: Mapping[TierName, Sequence[int]]
+) -> dict[TierName, MatchRecord]:
+    """Return the record of each tier: every match whose opponent is a member of it.
+
+    The venue of a match does not matter, only the tier of the club that was
+    faced, so the three records partition the team's matches when the tiers
+    partition the table. A tier with no membership -- an empty sequence or a
+    key the caller left out -- is an all-zero record with a ``None``
+    ``points_per_game``, never a missing entry, so a client always paints three
+    tiers.
+    """
+    member_sets = {tier: frozenset(members.get(tier, ())) for tier in _TIERS}
+    return {
+        tier: match_record(match for match in matches if match.opponent_id in member_sets[tier])
+        for tier in _TIERS
+    }
+
+
 def summarise(matches: Sequence[PlayedMatch], *, league: Iterable[SideLine]) -> SeasonStats:
     """Return the season of one team from its played matches and the league's lines.
 
@@ -292,7 +368,7 @@ def summarise(matches: Sequence[PlayedMatch], *, league: Iterable[SideLine]) -> 
             goals_against=match.goals_against,
             shots_for=_shots(match.stats_for),
             shots_against=_shots(match.stats_against),
-            rolling5=_rolling(ordered[max(0, index - _ROLLING_WINDOW) : index]),
+            rolling5=_rolling(_window_before(ordered, index)),
         )
         for index, match in enumerate(ordered)
     )
@@ -319,6 +395,20 @@ def _chronological(match: PlayedMatch) -> tuple[datetime.date, int]:
     return (match.kickoff_date, match.match_id)
 
 
+def _window_before(ordered: Sequence[PlayedMatch], index: int) -> list[PlayedMatch]:
+    """Return the at most five matches dated strictly before ``ordered[index]``.
+
+    The payload order is ``(kickoff_date, match_id)``, but that order cannot
+    say which of two fixtures of one day kicked off first, so a same-date
+    sibling is left out of the window whatever the identifiers say: the form of
+    a match is the form before its date, the same strict reading the match
+    preview applies.
+    """
+    date = ordered[index].kickoff_date
+    earlier = [match for match in ordered[:index] if match.kickoff_date < date]
+    return earlier[-_ROLLING_WINDOW:]
+
+
 def _mean(values: Iterable[float]) -> float | None:
     """Return the arithmetic mean of ``values``, or ``None`` when there is nothing to average."""
     numbers = list(values)
@@ -341,7 +431,7 @@ def _carries_xg(match: PlayedMatch) -> bool:
 
 
 def _rolling(window: Sequence[PlayedMatch]) -> RollingForm:
-    """Return the means over ``window``; every field is ``None`` when the window is empty."""
+    """Return the means over one strict-date ``window``, all ``None`` when it is empty."""
     if not window:
         return RollingForm(
             points_pg=None,
