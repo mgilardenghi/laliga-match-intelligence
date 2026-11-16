@@ -469,7 +469,9 @@ still being played is skipped instead of contributing a partial table, and no
 clock is read anywhere. `points_median` is the median of that place's final
 totals and is never rounded, `points_min` and `points_max` are the extremes of
 the same sample, and `seasons_used` is its size, so a client can see how thin
-the evidence is. When no stored season qualifies the endpoint is a `404` with
+the evidence is. The sample does not depend on the `season` asked for: a request
+for an old season also counts the completed seasons stored after it, because the
+line is a historical reference, not a forecast made at that time. When no stored season qualifies the endpoint is a `404` with
 the detail `no completed season`: the field is not nullable, and falling back to
 the current table or serving zero would read as a survival line somebody
 computed.
