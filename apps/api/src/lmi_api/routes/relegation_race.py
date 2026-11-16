@@ -522,7 +522,10 @@ def _run_detail(
     fixture of the club, mapped onto the club's side. The second reads the run's
     outcome counts of the club's next match, and
     :func:`lmi_core.analytics.relegation.next_match_swing` turns them into the
-    three swings. A ``None`` from that function is served as a null
+    three swings. Both statements are issued before the club's row is looked
+    for, because the two conditions above are the run and the fixture: whether
+    the run holds a row for the club decides what is served, never which
+    statements the read issues. A ``None`` from that function is served as a null
     ``next_match``, and so is a run that holds no row for the club: ``current`` is
     that row, and a swing without its baseline would misstate every delta.
 
@@ -534,14 +537,11 @@ def _run_detail(
     probabilities = _fixture_probabilities(
         session, run_id=run_id, scheduled=scheduled, team_id=team_id
     )
+    counts = _outcome_counts(session, run_id=run_id, team_id=team_id)
     subject = next((row for row in rows if row.team_id == team_id), None)
     if subject is None:
         return _Detail(probabilities=probabilities, next_match=None)
-    swings = next_match_swing(
-        _outcome_counts(session, run_id=run_id, team_id=team_id),
-        n_runs=n_runs,
-        match_id=scheduled[0].id,
-    )
+    swings = next_match_swing(counts, n_runs=n_runs, match_id=scheduled[0].id)
     if swings is None:
         return _Detail(probabilities=probabilities, next_match=None)
     by_outcome = {swing.outcome: swing for swing in swings}
