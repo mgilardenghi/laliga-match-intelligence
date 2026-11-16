@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { ChartFigure } from "./ChartFigure";
 import { chartIds } from "./chart-ids";
+import { inkForFill } from "./contrast";
 import { formatPercent } from "./format";
 import styles from "./charts.module.css";
 
@@ -27,16 +28,25 @@ const ROW_HEIGHT = 24;
 const HEADER_HEIGHT = 20;
 const ZONE_LABEL_HEIGHT = 16;
 
-const SEQUENTIAL_COLOURS: readonly string[] = [
-  "var(--seq-0, #f0f4f9)",
-  "var(--seq-1, #dbe9f6)",
-  "var(--seq-2, #9ecae1)",
-  "var(--seq-3, #6baed6)",
-  "var(--seq-4, #3f8fc4)",
-  "var(--seq-5, #2171b5)",
-  "var(--seq-6, #08519c)",
-  "var(--seq-7, #083f78)",
-  "var(--seq-8, #062d55)",
+type SequentialPaint = {
+  readonly fill: string;
+  readonly fallback: string;
+};
+
+// The fill is a token with a hex fallback, and the label ink is derived from
+// that same fallback: fill and ink come from one declaration, so they cannot
+// disagree about the colour behind the percentage. The gallery e2e test guards
+// a token and its fallback staying identical.
+const SEQUENTIAL_COLOURS: readonly SequentialPaint[] = [
+  { fill: "var(--seq-0, #f0f4f9)", fallback: "#f0f4f9" },
+  { fill: "var(--seq-1, #dbe9f6)", fallback: "#dbe9f6" },
+  { fill: "var(--seq-2, #9ecae1)", fallback: "#9ecae1" },
+  { fill: "var(--seq-3, #6baed6)", fallback: "#6baed6" },
+  { fill: "var(--seq-4, #3f8fc4)", fallback: "#3f8fc4" },
+  { fill: "var(--seq-5, #2171b5)", fallback: "#2171b5" },
+  { fill: "var(--seq-6, #08519c)", fallback: "#08519c" },
+  { fill: "var(--seq-7, #083f78)", fallback: "#083f78" },
+  { fill: "var(--seq-8, #062d55)", fallback: "#062d55" },
 ];
 
 function clamp(value: number, min: number, max: number): number {
@@ -152,6 +162,7 @@ export function PositionHeatmap(props: PositionHeatmapProps): ReactElement {
               Array.from({ length: columnCount }, (_, columnIndex) => {
                 const value = positions[rowIndex][columnIndex];
                 const step = bucket(value);
+                const paint = SEQUENTIAL_COLOURS[step];
                 const x = columnIndex * CELL_WIDTH;
                 const y = cellsTop + rowIndex * ROW_HEIGHT;
                 return (
@@ -161,7 +172,7 @@ export function PositionHeatmap(props: PositionHeatmapProps): ReactElement {
                       y={y + 0.5}
                       width={CELL_WIDTH - 1}
                       height={ROW_HEIGHT - 1}
-                      style={{ fill: SEQUENTIAL_COLOURS[step] }}
+                      style={{ fill: paint.fill }}
                     />
                     {value >= 0.05 ? (
                       <text
@@ -170,7 +181,7 @@ export function PositionHeatmap(props: PositionHeatmapProps): ReactElement {
                         textAnchor="middle"
                         dominantBaseline="central"
                         className={styles.heatmapCellText}
-                        style={step >= 5 ? { fill: "#ffffff" } : undefined}
+                        style={{ fill: inkForFill(paint.fallback) }}
                       >
                         {formatPercent(value, 0)}
                       </text>
