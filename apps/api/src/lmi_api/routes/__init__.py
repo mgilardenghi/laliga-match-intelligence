@@ -26,6 +26,7 @@ from lmi_api.routes import (
     simulations,
     standings,
     team_focus,
+    team_season_stats,
     teams,
 )
 
@@ -40,6 +41,7 @@ V1_ROUTERS: tuple[APIRouter, ...] = (
     model_metrics.router,
     ingestion_runs.router,
     team_focus.router,
+    team_season_stats.router,
     match_preview.router,
 )
 """Every router served under the versioned prefix, in mounting order."""
