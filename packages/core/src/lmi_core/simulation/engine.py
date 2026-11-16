@@ -330,13 +330,25 @@ def _team_simulation(
     n_teams: int,
     qualification: Qualification,
 ) -> TeamSimulation:
-    """Summarize one team's point totals and finishing positions over the runs."""
+    """Summarize one team's point totals and finishing positions over the runs.
+
+    A qualification probability is the integer ``sum`` of the counted runs
+    divided by ``n_runs`` once, never the sum of the already divided per-place
+    probabilities. Both are the same number mathematically, but adding up six
+    rounded fractions can land just above one (``1.0000000000000002``), and a
+    probability above one is neither honest nor storable: the schema accepts
+    only ``[0, 1]``. One division of an integer no larger than ``n_runs`` is
+    always at most one.
+    """
     points_min = int(points.min())
     points_max = int(points.max())
     counts = np.bincount(points - points_min, minlength=points_max - points_min + 1)
     position_counts = np.bincount(places, minlength=n_teams + 1)[1:]
     position_probs = position_counts / n_runs
     quantiles = np.asarray(np.quantile(points, _QUANTILES, method="inverted_cdf"), dtype=np.float64)
+    ucl_runs = int(position_counts[: qualification.ucl_positions].sum())
+    europe_runs = int(position_counts[: qualification.europe_positions].sum())
+    relegation_runs = int(position_counts[n_teams - qualification.relegation_positions :].sum())
     return TeamSimulation(
         team_id=team_id,
         mean_points=float(points.mean()),
@@ -349,10 +361,10 @@ def _team_simulation(
         points_pmf=counts / n_runs,
         mean_position=float(places.mean()),
         position_probs=position_probs,
-        p_title=float(position_probs[0]),
-        p_ucl=float(position_probs[: qualification.ucl_positions].sum()),
-        p_europe=float(position_probs[: qualification.europe_positions].sum()),
-        p_relegation=float(position_probs[n_teams - qualification.relegation_positions :].sum()),
+        p_title=float(position_counts[0]) / n_runs,
+        p_ucl=ucl_runs / n_runs,
+        p_europe=europe_runs / n_runs,
+        p_relegation=relegation_runs / n_runs,
     )
 
 

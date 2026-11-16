@@ -20,6 +20,7 @@ from lmi_core.simulation import (
     SeasonSimulation,
     SimFixture,
     TeamSimulation,
+    engine,
     simulate_season,
 )
 from lmi_core.standings import MatchResult, compute_standings
@@ -339,6 +340,40 @@ def test_the_report_keeps_its_shape_and_ordering_invariants() -> None:
         for team in simulation.teams
     ]
     assert keys == sorted(keys)
+
+
+def test_a_qualification_probability_never_exceeds_one() -> None:
+    """A place group's probability is the integer count divided once.
+
+    The counts are the ones the Compose verification produced for one real
+    team: six of its 2345 simulated seasons finished in the top six. Adding the
+    six already divided place probabilities gave ``1.0000000000000002``, which
+    is not a probability and which the stored CHECK rejects, so that backfill
+    run failed. One division of an integer sum is exactly ``1.0``.
+    """
+    n_runs = 2345
+    n_teams = 8
+    counts = [475, 1478, 317, 74, 0, 1, 0, 0]
+    assert sum(counts) == n_runs
+    places = np.repeat(np.arange(1, n_teams + 1, dtype=np.int64), counts)
+
+    team = engine._team_simulation(
+        ALPHA,
+        points=np.zeros(n_runs, dtype=np.int64),
+        places=places,
+        n_runs=n_runs,
+        n_teams=n_teams,
+        qualification=Qualification(),
+    )
+
+    assert team.p_europe == 1.0
+    assert team.p_ucl == 2344 / n_runs
+    assert team.p_title == 475 / n_runs
+    assert 0.0 <= team.p_title <= 1.0
+    assert 0.0 <= team.p_ucl <= 1.0
+    assert 0.0 <= team.p_europe <= 1.0
+    assert 0.0 <= team.p_relegation <= 1.0
+    assert team.position_probs.sum() == pytest.approx(1.0, abs=1e-12)
 
 
 def test_a_twenty_team_double_round_robin_reports_every_team() -> None:
