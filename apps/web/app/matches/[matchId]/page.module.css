@@ -194,3 +194,12 @@
   stroke: var(--muted);
   stroke-width: 2;
 }
+
+/* The formatted value at the outer end of a bar. The drawing is at its natural
+   size, so these pixels are the pixels the reader sees and the size sits on the
+   chart text scale. */
+.chartValue {
+  fill: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}

@@ -36,9 +36,13 @@ export type MirroredBarsProps = {
   readonly note?: ReactNode;
 };
 
-const WIDTH = 480;
-const PLOT_LEFT = 132;
-const PLOT_RIGHT = 468;
+const WIDTH = 560;
+// The value of a bar prints at its outer end, outside the plot, so both sides
+// keep a gutter of their own: it holds a formatted value such as "12.34" at
+// 12 px without reaching the metric labels or running past the drawing.
+const PLOT_LEFT = 152;
+const PLOT_RIGHT = 488;
+const VALUE_GAP = 5;
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const HALF_WIDTH = CENTRE - PLOT_LEFT;
 const ROW_HEIGHT = 30;
@@ -148,6 +152,28 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
                       className={styles.chartOwn}
                     />
                   ) : null}
+                  {row.own === null ? null : (
+                    <text
+                      x={CENTRE + ownWidth + VALUE_GAP}
+                      y={centreY}
+                      textAnchor="start"
+                      dominantBaseline="central"
+                      className={styles.chartValue}
+                    >
+                      {formatValue(row.own, 2)}
+                    </text>
+                  )}
+                  {row.against === null ? null : (
+                    <text
+                      x={CENTRE - againstWidth - VALUE_GAP}
+                      y={centreY}
+                      textAnchor="end"
+                      dominantBaseline="central"
+                      className={styles.chartValue}
+                    >
+                      {formatValue(row.against, 2)}
+                    </text>
+                  )}
                   {leagueX === null ? null : (
                     <line
                       x1={leagueX}

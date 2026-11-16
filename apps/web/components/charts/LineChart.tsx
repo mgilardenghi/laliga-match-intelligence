@@ -11,8 +11,9 @@ export type LineSeries = {
   readonly emphasis?: boolean;
   /**
    * Leave this series out of the y domain and draw no path for it: it becomes a
-   * marker at the top edge of the plot and its last finite value prints in the
-   * gutter, so the series is never silently dropped.
+   * marker at the plot edge nearest its value (top when above the domain,
+   * bottom when below it) and its last finite value prints in the gutter, so the
+   * series is never silently dropped.
    */
   readonly offScale?: boolean;
 };
@@ -63,6 +64,8 @@ type OffScaleEntry = {
   readonly value: number;
   readonly colour: string;
   readonly left: number;
+  /** Whether the value sits above the domain, which decides its edge. */
+  readonly above: boolean;
 };
 
 function isValue(value: number | null | undefined): value is number {
@@ -174,6 +177,10 @@ export function LineChart(props: LineChartProps): ReactElement {
         value: last.value,
         colour,
         left: xScale.center(Math.max(0, index)),
+        // A value that is not below the domain keeps the top edge the marker
+        // has always used, so an off-scale series never changes words or place
+        // by a rounding step.
+        above: !(last.value < yMin),
       });
       return;
     }
@@ -246,7 +253,9 @@ export function LineChart(props: LineChartProps): ReactElement {
                     style={{ color: entry.colour }}
                   />
                   {`${entry.name} ${formatNumber(entry.value)}${valueSuffix ?? ""}`}{" "}
-                  <span className={styles.offScaleTag}>off scale</span>
+                  <span className={styles.offScaleTag}>
+                    {entry.above ? "off scale, above the axis" : "off scale, below the axis"}
+                  </span>
                 </div>
               ))}
             </div>
@@ -324,7 +333,9 @@ export function LineChart(props: LineChartProps): ReactElement {
               <span
                 key={`off-scale-${entry.name}`}
                 aria-hidden="true"
-                className={styles.lineOffScaleMarker}
+                className={`${styles.lineOffScaleMarker}${
+                  entry.above ? "" : ` ${styles.lineOffScaleMarkerLow}`
+                }`}
                 style={{ color: entry.colour, left: `${entry.left}%` }}
               />
             ))}

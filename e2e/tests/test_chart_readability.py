@@ -137,16 +137,15 @@ INTERVAL_AXIS_SCRIPT = r"""
 }
 """
 
-# A value outside its axis has to stay in the DOM and stay readable. The entry
-# that states both the number and the off-scale wording is the deepest element
-# holding both, so an ancestor that repeats them cannot stand in for it.
+# A value outside its axis has to stay in the DOM and stay readable. The case
+# names the exact entry the figure must render: the element whose own text is
+# that string, found as the deepest holder so an ancestor cannot stand in for it.
 OFF_SCALE_ENTRY_SCRIPT = r"""
 (figure, spec) => {
   const normalise = (text) => (text || "").replace(/\s+/g, " ").trim();
-  const holders = Array.from(figure.querySelectorAll("*")).filter((element) => {
-    const text = normalise(element.textContent);
-    return text.includes(spec.value) && text.includes(spec.wording);
-  });
+  const holders = Array.from(figure.querySelectorAll("*")).filter(
+    (element) => normalise(element.textContent) === spec.text
+  );
   const deepest = holders.filter(
     (element) => !holders.some((other) => other !== element && element.contains(other))
   );
@@ -183,10 +182,14 @@ FIGURE_BOX_SCRIPT = """
 }
 """
 
-# The figure caption, the value the axis cannot hold, and the words that say so.
+# The figure caption and the exact entry a value outside its axis renders: the
+# value and the words that say which edge it passed.
 OFF_SCALE_CASES = (
-    ("Model metrics compared", "1.386", "above the axis"),
-    ("Relegation probability by matchday", "80.00%", "off scale"),
+    ("Model metrics compared", "uniform_baseline 1.386 above the axis"),
+    (
+        "Relegation probability by matchday",
+        "Relegation baseline 80.00% off scale, above the axis",
+    ),
 )
 
 
@@ -395,19 +398,19 @@ def test_interval_bars_axis_fits_its_data(page: Page, dashboard_url: str) -> Non
 
 @pytest.mark.empty
 def test_off_scale_values_are_printed(page: Page, dashboard_url: str) -> None:
-    """A value outside its axis keeps both its number and its off-scale wording."""
+    """A value outside its axis keeps its number and names the edge it passed."""
     _open_gallery(page, dashboard_url)
-    for caption, value, wording in OFF_SCALE_CASES:
+    for caption, entry_text in OFF_SCALE_CASES:
         figure = _figure_with_caption(page, caption)
-        entries = figure.evaluate(OFF_SCALE_ENTRY_SCRIPT, {"value": value, "wording": wording})
+        entries = figure.evaluate(OFF_SCALE_ENTRY_SCRIPT, {"text": entry_text})
         assert entries, (
-            f"figure {caption!r} holds no element with {value!r} and {wording!r}, "
-            "so the off-scale value is dropped from the DOM"
+            f"figure {caption!r} renders no element whose text is exactly "
+            f"{entry_text!r}, so its off-scale value is dropped or reworded"
         )
         visible = [entry for entry in entries if entry["visible"]]
         assert visible, (
-            f"figure {caption!r} holds {value!r} in the DOM but the entry that says "
-            f"{wording!r} is not visible"
+            f"figure {caption!r} holds {entry_text!r} in the DOM but the entry "
+            "that states it is not visible"
         )
 
 
@@ -447,6 +450,19 @@ def test_metric_help_is_reachable(page: Page, dashboard_url: str) -> None:
         page.keyboard.press("Enter")
         closed = summary.evaluate("(element) => element.parentElement.open")
         assert closed is False, f"a second Enter does not close the {label!r} definition"
+        expect(panel).to_be_hidden()
+
+        # Space is the other key a summary answers, so the definition has to
+        # open and close with it as well as with Enter.
+        summary.focus()
+        page.keyboard.press("Space")
+        opened = summary.evaluate("(element) => element.parentElement.open")
+        assert opened is True, f"Space does not open the {label!r} definition"
+        expect(panel).to_be_visible()
+
+        page.keyboard.press("Space")
+        closed = summary.evaluate("(element) => element.parentElement.open")
+        assert closed is False, f"a second Space does not close the {label!r} definition"
         expect(panel).to_be_hidden()
 
         summary.click()

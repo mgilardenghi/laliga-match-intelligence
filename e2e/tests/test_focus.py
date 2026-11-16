@@ -45,11 +45,23 @@ STANDINGS_TABLE = re.compile("^La Liga table for")
 RIVALS_CAPTION = re.compile("^Rivals and their relegation probability")
 FIXTURES_CAPTION = re.compile("^Remaining fixtures")
 PROJECTED_CAPTION = "Projected final points"
-# The caption of a trend figure that highlights the API's steepest decline, with
-# the signed delta that tells a reader how far the metric fell.
+# The sentence a trend figure publishes about the steepest decline of its
+# metric: the two seasons it spans, and then the signed delta that tells a
+# reader how far the metric fell.
 LARGEST_DROP = re.compile(r"fell most from \d{4}-\d{2} to \d{4}-\d{2}")
 POSITION_LABEL = "League position"
 POINTS_LABEL = "Points per match"
+# The hint span of a sparkline: its class comes from the CSS module, and the
+# local part the module keeps is what names it here, so the label is found the
+# way `Sparkline.tsx` renders it instead of by an arrow character in SVG text.
+HIGHLIGHT_LABEL_SELECTOR = '[class*="sparklineHintLabel"]'
+# What a figure publishes about the segment its drawing highlights: the hidden
+# description the chart wires into `aria-labelledby`, whose id ends in `-desc`,
+# and the note paragraph under the plot. The caption is not this text, because
+# it names the metric and never the highlight, and the label above is not
+# either, because the label is what the test checks and cannot also be its
+# evidence. The note is found by its tag, so no class name has to hold.
+HIGHLIGHT_TEXT_SELECTOR = "[id$='-desc'], p"
 
 NOT_FOUND_HEADING = "Page not found"
 NO_SEASON_HEADING = "No focus view for this season"
@@ -95,6 +107,25 @@ def _figure(root: Locator, caption: str) -> Locator:
     return root.locator("figure").filter(has_text=caption)
 
 
+def _highlight_labels(figure: Locator) -> Locator:
+    """Return the season-range label of a figure whose drop is highlighted.
+
+    A figure without a published drop renders no such label, so the locator is
+    empty rather than hidden.
+    """
+    return figure.locator(HIGHLIGHT_LABEL_SELECTOR)
+
+
+def _highlight_text(figure: Locator) -> str:
+    """Return what a figure publishes about the segment its drawing highlights.
+
+    Both sources are read: the description is the chart's own account of its
+    marks and the note repeats the published drop in words. `text_content` is
+    used because the description is hidden from sight rather than empty.
+    """
+    return " ".join(figure.locator(HIGHLIGHT_TEXT_SELECTOR).all_text_contents())
+
+
 @pytest.mark.empty
 def test_an_unknown_club_renders_the_not_found_page(page: Page, dashboard_url: str) -> None:
     """Guard the unknown club: the route 404s and the shell stays readable."""
@@ -137,7 +168,7 @@ def test_the_page_renders_exactly_the_five_section_headings(page: Page, dashboar
 
 @pytest.mark.loaded
 def test_the_trend_draws_one_sparkline_per_metric(page: Page, dashboard_url: str) -> None:
-    """Guard the trend grid: a named sparkline per metric and the drop captions."""
+    """Guard the trend grid: a named sparkline per metric and the published drops."""
     path = _default_focus_path(page, dashboard_url)
     _open(page, dashboard_url, path)
 
@@ -159,16 +190,30 @@ def test_the_trend_draws_one_sparkline_per_metric(page: Page, dashboard_url: str
 
     # The API publishes a steepest drop for most metrics, and the figure says
     # which two seasons it spans: a grid that drew the segment without the
-    # caption would leave the highlight unexplained.
+    # sentence would leave the highlight unexplained.
     assert LARGEST_DROP.search(trend.inner_text()) is not None, (
         "no trend figure names the steepest drop it highlights"
     )
 
     # The league position has no published drop, so nothing on it may be
-    # highlighted: a segment there would be computed in the browser.
+    # highlighted: a visible hint label there would be computed in the browser.
     position = _figure(trend, POSITION_LABEL)
     expect(position).to_have_count(1)
-    expect(position.locator("svg text", has_text="→")).to_have_count(0)
+    expect(_highlight_labels(position)).to_have_count(0)
+
+    # The other direction: every figure that publishes a steepest drop has to
+    # render the label that explains its highlighted segment, so a chart that
+    # lost the label fails as loudly as a no-drop chart that gained one. The
+    # count is asserted below, so a wording the figures stopped publishing
+    # cannot leave this direction empty and green.
+    labelled = 0
+    for index in range(figures.count()):
+        figure = figures.nth(index)
+        if LARGEST_DROP.search(_highlight_text(figure)) is None:
+            continue
+        labelled += 1
+        expect(_highlight_labels(figure).first).to_be_visible()
+    assert labelled > 0, "no trend figure publishes a steepest drop, so no label went unchecked"
 
 
 @pytest.mark.loaded

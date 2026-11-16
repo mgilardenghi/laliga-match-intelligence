@@ -756,7 +756,8 @@ with nearly the same value never overwrite each other. */
   stroke-width: 2.5;
 }
 
-/* The top-edge marker of a series that is off the axis. */
+/* The edge marker of a series that is off the axis: a triangle at the top edge
+   when the value is above the domain. */
 .lineOffScaleMarker {
   position: absolute;
   top: 0;
@@ -766,6 +767,15 @@ with nearly the same value never overwrite each other. */
   border-bottom: 0.4rem solid currentColor;
   border-left: 0.3rem solid transparent;
   transform: translateX(-50%);
+}
+
+/* The same marker at the bottom edge, pointing down, for a value below the
+   domain: the triangle sits at the edge its value passed. */
+.lineOffScaleMarkerLow {
+  top: auto;
+  bottom: 0;
+  border-top: 0.4rem solid currentColor;
+  border-bottom: 0;
 }
 
 .lineGutter {

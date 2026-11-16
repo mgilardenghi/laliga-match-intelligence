@@ -3,8 +3,8 @@
  *
  * One row per metric with two bars facing each other: the club's own average
  * extends to the right and the average its opponents produced extends to the
- * left, so a club that shoots a lot and concedes a lot reads as two long bars
- * instead of two numbers a reader has to compare. The league average is a tick
+ * left, so a club that shoots a lot and concedes a lot reads as two long bars,
+ * and each bar prints its value at its outer end. The league average is a tick
  * on both sides of the same row, because it is one number and the two bars are
  * measured from the same zero.
  *
@@ -18,6 +18,7 @@ import type { ReactElement } from "react";
 
 import { chartIds, linearScale, niceMax } from "@/components/charts";
 import type { GetData } from "@/lib/api";
+import { formatValue } from "@/lib/format";
 
 import styles from "./team-page.module.css";
 
@@ -64,13 +65,17 @@ const DESCRIPTION =
 // width and height of its own `viewBox`, so the rendered scale is exactly 1 and
 // every label keeps the pixel size the stylesheet declares. The scroller around
 // it takes the width a phone cannot fit, so the drawing never widens the page.
-const WIDTH = 520;
+const WIDTH = 636;
 // The metric labels sit left of the plot and are right-aligned against it, so
 // the longest one decides where the plot starts: 12 px of "Shots on target"
 // needs about 100 px, and the gutter adds the gap to the plot on top of that.
 const LABEL_EDGE = 128;
-const PLOT_LEFT = 136;
-const PLOT_RIGHT = 508;
+// The value of a bar prints at its outer end, outside the plot, so both sides
+// keep a gutter of their own: it holds a formatted value such as "12.34" at
+// 12 px without reaching the metric labels or running past the drawing.
+const PLOT_LEFT = 184;
+const PLOT_RIGHT = 584;
+const VALUE_GAP = 5;
 // The zero line is placed so both sides of the plot have the same width; a
 // short right side would make the same average look larger than its mirror.
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
@@ -194,6 +199,28 @@ export function ProfileBars(props: ProfileBarsProps): ReactElement {
                     y2={centreY + TICK_HEIGHT}
                   />
                 </g>
+              )}
+              {forValue === null ? null : (
+                <text
+                  x={scale.scale(forValue) + VALUE_GAP}
+                  y={centreY}
+                  textAnchor="start"
+                  dominantBaseline="central"
+                  className={styles.barValue}
+                >
+                  {formatValue(forValue, 2)}
+                </text>
+              )}
+              {againstValue === null ? null : (
+                <text
+                  x={mirror(scale.scale(againstValue)) - VALUE_GAP}
+                  y={centreY}
+                  textAnchor="end"
+                  dominantBaseline="central"
+                  className={styles.barValue}
+                >
+                  {formatValue(againstValue, 2)}
+                </text>
               )}
             </g>
           );
