@@ -11,17 +11,21 @@ WORKDIR /repo
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/
+# The web app depends on the workspace client, so its manifest has to be in the
+# image before `pnpm install` can resolve the link.
+COPY packages/api-client/package.json ./packages/api-client/
 RUN pnpm install --frozen-lockfile --filter web...
 
 FROM deps AS builder
-# Copy only the sources the build needs: a blanket `COPY . .` would invalidate
-# this layer on every documentation or workflow change. Host node_modules never
-# reaches the build context (see .dockerignore), and the dependencies installed
-# in the previous stage are kept.
-COPY apps/web/next.config.ts apps/web/tsconfig.json apps/web/eslint.config.mjs ./apps/web/
-COPY apps/web/app ./apps/web/app
-COPY apps/web/lib ./apps/web/lib
-COPY apps/web/public ./apps/web/public
+# Copy the two workspace directories the build reads, wholesale. A per-file list
+# would invalidate this layer on every documentation or workflow change and would
+# need an edit each time apps/web gains a folder, while a full `COPY . .` would
+# pull the whole repository in. The blanket copy is bounded to apps/web and
+# packages/api-client; the host node_modules and .next never reach the build
+# context (see .dockerignore), and the dependencies installed in the previous
+# stage are kept because COPY merges into the directories that are already there.
+COPY apps/web ./apps/web
+COPY packages/api-client ./packages/api-client
 RUN pnpm --filter web build
 
 FROM node:24.22.3-slim AS runner

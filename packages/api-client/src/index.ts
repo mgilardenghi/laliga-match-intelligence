@@ -5,7 +5,8 @@
  * committed OpenAPI snapshot. A contract change therefore surfaces as a type
  * error in the dashboard instead of as a runtime surprise.
  */
-import { createClient, type Client } from "openapi-fetch";
+// `createClient` is the default export of openapi-fetch; `Client` is a named type.
+import createClient, { type Client } from "openapi-fetch";
 import type { components, paths } from "./schema";
 
 export type { components, paths };
