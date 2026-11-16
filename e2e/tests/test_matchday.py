@@ -11,7 +11,11 @@ stack with no data; the rest needs the ingested fixtures and a stored
 prediction, so they are loaded-tier tests.
 """
 
+import os
 import re
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -183,3 +187,90 @@ def test_an_out_of_range_matchday_falls_back_to_a_valid_page(
         assert FIRST_MATCHDAY <= int(found.group(1)) <= LAST_MATCHDAY, (
             f"the pager links outside the season: {href!r}"
         )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+UPCOMING_HEADING = "Upcoming fixtures"
+
+
+def _psql(sql: str) -> str:
+    """Run ``sql`` in the throwaway e2e database and return its unaligned output.
+
+    The project name comes from the same ``E2E_PROJECT`` variable the Makefile
+    guard validates, and it is passed as an argument, never through a shell.
+    """
+    project = os.environ.get("E2E_PROJECT", "lmi-e2e")
+    command = [
+        "docker",
+        "compose",
+        "-p",
+        project,
+        "-f",
+        "docker-compose.yml",
+        "-f",
+        "e2e/compose.e2e.yml",
+        "exec",
+        "-T",
+        "db",
+        "sh",
+        "-c",
+        'psql -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
+    ]
+    result = subprocess.run(
+        command, input=sql, capture_output=True, text=True, check=True, cwd=REPO_ROOT
+    )
+    return result.stdout
+
+
+@pytest.fixture
+def upcoming_without_rounds() -> Iterator[None]:
+    """Clear the round of every fixture from Madrid today on, then restore it.
+
+    That is the state the fallback exists for: the next scheduled fixture
+    carries no matchday. The original rounds are read back from the update
+    itself and written again afterwards, whatever the test did.
+    """
+    rows = _psql(
+        """
+        WITH old AS (
+            SELECT id, matchday FROM matches
+            WHERE status = 'scheduled'
+              AND kickoff_date >= (now() AT TIME ZONE 'Europe/Madrid')::date
+              AND matchday IS NOT NULL
+            FOR UPDATE
+        )
+        UPDATE matches AS m SET matchday = NULL FROM old WHERE m.id = old.id
+        RETURNING old.id, old.matchday;
+        """
+    )
+    pairs = [line.split("|") for line in rows.splitlines() if "|" in line]
+    assert pairs, "no scheduled fixture from today on carries a round to clear"
+    try:
+        yield
+    finally:
+        values = ", ".join(f"({int(match_id)}, {int(matchday)})" for match_id, matchday in pairs)
+        _psql(
+            "UPDATE matches AS m SET matchday = v.matchday "
+            f"FROM (VALUES {values}) AS v(id, matchday) WHERE m.id = v.id;"
+        )
+
+
+@pytest.mark.loaded
+@pytest.mark.usefixtures("upcoming_without_rounds")
+def test_a_next_fixture_without_a_round_falls_back_to_upcoming_fixtures(
+    page: Page, dashboard_url: str
+) -> None:
+    """Guard the fallback: no round on the next fixture shows the coming week."""
+    response = page.goto(f"{dashboard_url}/matchday")
+    assert response is not None and response.status == 200
+
+    expect(page.get_by_role("heading", level=1)).to_have_text(UPCOMING_HEADING)
+    expect(page.get_by_role("navigation", name="Matchday")).to_have_count(0)
+    cards = page.locator("article")
+    assert cards.count() >= 1, "the fallback lists no fixture of the coming week"
+    hrefs = cards.get_by_role("link").evaluate_all(
+        "links => links.map(l => l.getAttribute('href'))"
+    )
+    assert any(MATCH_LINK.search(href or "") for href in hrefs), (
+        f"the fallback cards link to {hrefs} and none is a match page"
+    )

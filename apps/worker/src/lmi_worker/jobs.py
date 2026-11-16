@@ -39,12 +39,11 @@ every ``Exception`` from the claimed work, rolls it back and records the row
 not catch or convert that exception; there is no ``try`` around ``execute_run``.
 The daily task runs its simulation in-process through the same function, so the
 same guarantee holds there, and the cycle reports the failed run in its own log
-line and exit code. That guarantee covers a soft limit raised inside the claimed
-simulation work only: if the daily soft limit fires during the ingest or
-prediction step, that step's own ``except Exception`` contains it as a logged
-step failure and the cycle continues until the hard limit kills the process; a
-soft limit raised inside the claim or the failure bookkeeping can leave a run
-``running`` until the stale window recovers it.
+line and exit code. A daily soft limit that fires during the ingest or
+prediction step leaves the cycle too, because the task runs it with
+``escalate=True`` (see below). A soft limit raised inside the claim or the
+failure bookkeeping can still leave a run ``running`` until the stale window
+recovers it.
 
 The recorded text comes from the exception rather than from this module: the
 timeout handler raises it with no message, so ``execute_run`` stores what
@@ -52,9 +51,14 @@ timeout handler raises it with no message, so ``execute_run`` stores what
 the column names the cause without this file inventing a message.
 
 Both tasks retry transient infrastructure failures only, bounded to two retries
-with an exponential, jittered backoff capped at 60 seconds:
-:data:`TRANSIENT_ERRORS` is a database connection lost or refused and a
-socket-level connection failure. Both tasks are idempotent. The claim moves a
+with an exponential, jittered backoff capped at 60 seconds. A failure among
+:data:`TRANSIENT_ERRORS` is classified by
+:func:`lmi_core.db.errors.is_transient_db_error`, which reads the PostgreSQL
+SQLSTATE: a lost or refused connection, a server shutdown or restart, too many
+connections, a deadlock or a serialization failure is re-raised as
+:class:`TransientJobError`, the only class in ``autoretry_for``; an
+authentication failure, an unknown database or any statement error keeps its
+own class and is not retried. Both tasks are idempotent. The claim moves a
 row to ``running`` only when it is ``queued`` or stale, so a second delivery of
 the same message matches no row and returns. The daily cycle's three steps are
 idempotent too: the ingest upserts, a stored prediction is immutable and a repeat
@@ -80,17 +84,12 @@ data or configuration error (``ValueError``) are not in the tuple, and the tuple
 deliberately does not use ``SQLAlchemyError``, which would also cover
 deterministic integrity and programming errors. The daily cycle's own steps
 contain their failures deliberately, because a failed download must not cost the
-day's forecast, so a retry there covers the exception that escapes that
-containment, not a step that logged and returned, and not a transient failure a
-step already converted to its exit code: that containment lives in
-:mod:`lmi_worker.daily`, outside this module.
-
-Those classes are the only portable signal this file has. A deterministic
-failure that surfaces as one of them, an authentication failure reported as
-``OperationalError`` for instance, is therefore retried up to the bound before
-the task fails. The cost is two retry deliveries and a few seconds of backoff,
-and the row is still ``queued`` afterwards: it waits for the next worker-ready
-sweep to re-enqueue it, as :func:`requeue_stale` describes.
+day's forecast. The task runs the cycle with ``escalate=True``, so the two
+failures that containment must not hide leave the cycle instead: a transient
+database failure (the whole idempotent cycle is then retried) and a soft time
+limit (the task then fails instead of running on to the hard limit). A network
+failure of the ingest step and a deterministic failure stay contained as a
+logged step failure and an exit code, as before.
 
 Broker publishes from this module are bounded too. The sweep sends through
 ``app.send_task`` under :data:`PUBLISH_RETRY_POLICY`: three attempts with at most
@@ -112,6 +111,7 @@ from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_ready
 from lmi_core.config import get_settings
+from lmi_core.db.errors import is_transient_db_error, sqlstate_of
 from lmi_core.db.models import SimulationRun
 from lmi_core.db.session import make_engine, session_factory
 from lmi_core.simulation.service import QUEUED_STALE_AFTER, STALE_AFTER, execute_run
@@ -240,24 +240,57 @@ def run_simulation_task(run_id: str) -> None:
     engine = make_engine(get_settings())
     try:
         execute_run(session_factory(engine), uuid.UUID(run_id))
+    except TRANSIENT_ERRORS as error:
+        _raise_retryable_if_transient(error)
+        raise
     finally:
         engine.dispose()
 
 
 def run_daily_task() -> None:
-    """Run the daily cycle in this worker process and log its exit code."""
-    exit_code = daily_cycle.run_daily_cycle()
+    """Run the daily cycle in this worker process and log its exit code.
+
+    The cycle runs with ``escalate=True``, so a transient database failure and a
+    soft time limit leave the cycle and reach Celery instead of becoming a
+    logged step failure; see :func:`lmi_worker.daily.run_daily_cycle`.
+    """
+    try:
+        exit_code = daily_cycle.run_daily_cycle(escalate=True)
+    except TRANSIENT_ERRORS as error:
+        _raise_retryable_if_transient(error)
+        raise
     logger.info("daily: cycle finished with exit code %d", exit_code)
+
+
+class TransientJobError(RuntimeError):
+    """A transient infrastructure failure; the only error the tasks retry.
+
+    The message names the original class and SQLSTATE only, never the driver
+    text, which can carry the connection URL. The original is the ``__cause__``.
+    """
+
+
+def _raise_retryable_if_transient(error: BaseException) -> None:
+    """Raise :class:`TransientJobError` from ``error`` when a retry could outlive it.
+
+    A deterministic failure (an authentication error, an unknown database) is
+    left alone, so the caller re-raises it unchanged and Celery does not retry.
+    """
+    if is_transient_db_error(error):
+        code = sqlstate_of(error)
+        detail = type(error).__name__ if code is None else f"{type(error).__name__} {code}"
+        raise TransientJobError(detail) from error
 
 
 # Registration without the decorator: Celery ships no type information, and
 # this form keeps the task functions plain module-level functions. Both tasks run
-# under a measured time limit and retry only :data:`TRANSIENT_ERRORS`.
+# under a measured time limit and retry only :class:`TransientJobError`, which
+# the task functions raise for a transient failure among :data:`TRANSIENT_ERRORS`.
 simulate = app.task(
     name=SIMULATE_TASK,
     soft_time_limit=SIMULATE_SOFT_TIME_LIMIT,
     time_limit=SIMULATE_TIME_LIMIT,
-    autoretry_for=TRANSIENT_ERRORS,
+    autoretry_for=(TransientJobError,),
     max_retries=2,
     retry_backoff=True,
     retry_backoff_max=60,
@@ -267,7 +300,7 @@ daily = app.task(
     name=DAILY_TASK,
     soft_time_limit=DAILY_SOFT_TIME_LIMIT,
     time_limit=DAILY_TIME_LIMIT,
-    autoretry_for=TRANSIENT_ERRORS,
+    autoretry_for=(TransientJobError,),
     max_retries=2,
     retry_backoff=True,
     retry_backoff_max=60,
