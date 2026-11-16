@@ -37,8 +37,11 @@ The states in `apps/web/components/states` are shared by every data page:
 shows only a problem's `title` and `detail`, and `SectionSkeleton` is the
 `Suspense` fallback. `app/not-found.tsx`, `app/error.tsx` and
 `app/global-error.tsx` cover the three ways a page can fail. The error boundary
-always reads `API unreachable`, because every thrown page error is a failed API
-read, and Next strips a server error's class and message in a production build.
+reads `API unreachable`, because every page reads the API while it renders and a
+stack that is not running is the usual cause; its body leaves the other branch
+open, since Next strips a server error's class and message in a production build
+and the screen cannot know which failure it is showing. The digest under it is
+the one fact the client still has, and it ties the screen to the server log.
 
 ### Routes
 

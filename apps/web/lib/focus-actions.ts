@@ -15,8 +15,26 @@ function positiveInteger(value: string): number | null {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function isLocalPath(value: string): boolean {
-  return value.startsWith("/") && !value.startsWith("//");
+/**
+ * The local path to return to, or `null` when the submitted value is not one.
+ *
+ * A leading-slash test is not enough: browsers normalise `\` to `/` in the
+ * authority position, so `/[backslash]evil.example` and `//evil.example` both
+ * leave the dashboard even though only one of them starts with `//`. The value is
+ * therefore resolved against a fixed origin and kept only when the resolved
+ * origin is that same origin, which checks the URL the browser will follow
+ * rather than the string it was built from.
+ */
+function localPath(value: string): string | null {
+  if (!value.startsWith("/")) {
+    return null;
+  }
+  const origin = "http://dashboard.invalid";
+  const url = new URL(value, origin);
+  if (url.origin !== origin) {
+    return null;
+  }
+  return `${url.pathname}${url.search}`;
 }
 
 /**
@@ -24,7 +42,8 @@ function isLocalPath(value: string): boolean {
  *
  * A `teamId` that is not a positive integer returns without writing anything.
  * The cookie is not a secret: it holds a public team identifier. The redirect
- * goes to `redirectTo` when that is a local path, else to `/focus/<teamId>`.
+ * goes to `redirectTo` when that resolves to a path on this dashboard, else to
+ * `/focus/<teamId>`.
  */
 export async function setFocusTeam(formData: FormData): Promise<void> {
   const rawTeamId = formData.get("teamId");
@@ -44,8 +63,7 @@ export async function setFocusTeam(formData: FormData): Promise<void> {
 
   const rawRedirectTo = formData.get("redirectTo");
   const redirectTo =
-    typeof rawRedirectTo === "string" && isLocalPath(rawRedirectTo)
-      ? rawRedirectTo
-      : `/focus/${teamId}`;
+    (typeof rawRedirectTo === "string" ? localPath(rawRedirectTo) : null) ??
+    `/focus/${teamId}`;
   redirect(redirectTo);
 }

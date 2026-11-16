@@ -5,7 +5,9 @@
  * `html` and `body` — and carries its own layout as inline styles, because the
  * app stylesheet is not guaranteed to be part of this response. The colours are
  * the tokens with their light values as fallbacks, which keeps the screen
- * readable when the tokens themselves never load.
+ * readable when the tokens themselves never load. The copy is kept in step with
+ * `app/error.tsx`, which explains why it names the usual cause and not the cause
+ * of this particular failure.
  */
 "use client";
 
@@ -61,7 +63,9 @@ export default function GlobalError(props: GlobalErrorProps): ReactElement {
       <body style={BODY_STYLE}>
         <h1 style={TITLE_STYLE}>API unreachable</h1>
         <p style={TEXT_STYLE}>
-          Check that the stack is running, then try the request again.
+          Every page reads the API while it renders, so a stack that is not
+          running is the usual cause. If the stack is running, the page failed
+          for some other reason.
         </p>
         <button onClick={() => reset()} style={BUTTON_STYLE} type="button">
           Try again

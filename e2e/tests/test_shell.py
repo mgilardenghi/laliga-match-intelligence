@@ -25,6 +25,7 @@ NAV_ITEMS = (
 )
 
 THEME_COOKIE = "lmi_theme"
+FOCUS_COOKIE = "lmi_focus_team"
 THEME_BUTTON = re.compile("^Theme")
 # Tab presses needed to walk from the document into the navigation. The skip
 # link, the theme button and the five navigation links sit inside this budget.
@@ -185,4 +186,36 @@ def test_focus_redirects_to_the_default_team(page: Page, dashboard_url: str) -> 
     expect(club).to_have_count(1)
     assert club.get_attribute("href") == f"/teams/{match.group(1)}", (
         "/focus did not redirect to the club the default focus name selects"
+    )
+
+
+@pytest.mark.loaded
+def test_picking_a_focus_team_stores_it_and_returns_to_the_table(
+    page: Page, dashboard_url: str
+) -> None:
+    page.goto(f"{dashboard_url}/teams")
+
+    # The form renders only on a row that is not the focus team, so a row that
+    # carries the button is a change of choice by construction.
+    row = page.locator("tbody tr").filter(
+        has=page.get_by_role("button", name="Make this my focus team")
+    ).first
+    team_id = row.locator('input[name="teamId"]').get_attribute("value")
+    club = row.locator("th").inner_text().strip()
+    assert team_id is not None, "the picker must submit the club's identifier"
+
+    row.get_by_role("button", name="Make this my focus team").click()
+
+    # The action redirects back to the table it was submitted from and stays on
+    # this dashboard: a redirect built from submitted data is the one place where
+    # that is not obvious.
+    marked = page.locator("tbody tr").filter(has_text="Your focus team")
+    expect(marked.locator("th")).to_have_text(club)
+    assert page.url.startswith(f"{dashboard_url}/teams"), (
+        f"the action redirected off the table, to {page.url!r}"
+    )
+
+    cookies = {cookie["name"]: cookie["value"] for cookie in page.context.cookies()}
+    assert cookies.get(FOCUS_COOKIE) == team_id, (
+        f"the action must store the chosen club, cookies are {cookies}"
     )
