@@ -240,10 +240,13 @@ export function StandingsTable(props: StandingsTableProps): ReactElement {
                 <td className={`${styles.cell} ${styles.formCell}`}>
                   {/* The strip derives its aria ids from its title, and two
                       clubs can share a form string; the club identifier keeps
-                      every strip's ids unique in the document. */}
+                      every strip's ids unique in the document. The compact
+                      variant omits the figure, caption and data table so a
+                      row keeps the five outcome squares and stays short. */}
                   <FormStrip
                     id={`form-${row.team.id}`}
                     results={row.form.slice(0, 5)}
+                    compact
                   />
                 </td>
                 {hasProjection ? <ProjectedCells row={projectedRow} /> : null}

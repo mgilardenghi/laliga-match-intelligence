@@ -20,6 +20,13 @@
   height: auto;
 }
 
+/* The compact form strip sits inside a table row, so it keeps a fixed short
+   height instead of scaling with the column width. The row then stays at most
+   28px of chart plus the cell's vertical padding. */
+.formCompactSvg {
+  height: 28px;
+}
+
 .text {
   fill: currentColor;
 }

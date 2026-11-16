@@ -126,11 +126,18 @@
 .positionCell {
   width: 4.5rem;
   min-width: 4.5rem;
+  /* The compact form strip sets a short row height, so the position and its
+     zone badge stay on tight lines: with the old spacing a badge row would be
+     taller than the 48px target even after the form strip was compacted. */
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
   padding-right: 0.5rem;
+  line-height: 1.1;
 }
 
 .position {
   display: block;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
@@ -140,11 +147,11 @@
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
   color: var(--text);
   font-size: 0.625rem;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.1;
 }
 
 .badge::before {
