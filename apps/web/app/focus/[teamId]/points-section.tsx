@@ -46,8 +46,8 @@ type CumulativeSeries = {
  * A match the market did not price adds nothing to the expected-points total:
  * counting it as a zero forecast would invent an expectation nobody published.
  * The cumulative line is therefore null until the first priced match and flat
- * across later gaps, and the coverage below says how much of the season it
- * covers.
+ * across later gaps. The coverage below says how much of the season it covers,
+ * and, when it is partial, that the two lines then sum different matches.
  */
 function cumulativeSeries(
   matches: TeamSeasonStats["matches"],
@@ -91,6 +91,18 @@ function PointsBody(props: {
     { name: "Market xPts", values: xpts },
   ];
 
+  // Partial coverage means the two lines sum different matches: the points line
+  // grows on every played match, the market line only on the priced ones. The
+  // note says so instead of letting a reader compare a season with its part.
+  const coverageCaveat =
+    pricedMatches < data.matches.length
+      ? " The two lines therefore sum different matches: points earned in a match without a price lift the points line with no published expectation to beat. The comparison is the club's whole season against the priced part of it, and the two lines agree only once every played match is priced."
+      : "";
+
+  const priced = formatCount(pricedMatches);
+  const played = formatCount(data.matches.length);
+  const coverageNote = `Market expected points for ${priced} of ${played} played matches, from the pre-closing price of each one; a match without a price adds nothing to that line, so a gap in it is a gap in the coverage and not a forecast of zero.${coverageCaveat} Above the line = results better than the market expected.`;
+
   // The four rolling averages the API computes over the five matches before each
   // kickoff. LineChart refuses more than five series, so the four fit.
   const rolling: readonly LineSeries[] = [
@@ -122,16 +134,7 @@ function PointsBody(props: {
         xLabels={xLabels}
         yLabel="Points"
         series={cumulative}
-        note={
-          <>
-            Market expected points for {formatCount(pricedMatches)} of{" "}
-            {formatCount(data.matches.length)} played matches, from the
-            pre-closing price of each one; a match without a price adds nothing
-            to that line, so a gap in it is a gap in the coverage and not a
-            forecast of zero. Above the line = results better than the market
-            expected.
-          </>
-        }
+        note={coverageNote}
       />
       <LineChart
         id="focus-rolling-form"

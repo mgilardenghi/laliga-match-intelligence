@@ -23,8 +23,8 @@ export type TeamHistory = GetData<"/v1/teams/{team_id}/history">;
 /** One club's relegation race of one season, as the API serves it. */
 export type RelegationRace = GetData<"/v1/teams/{team_id}/relegation-race">;
 
-/** The latest succeeded simulation of one season, with its projected table. */
-export type LatestSimulation = GetData<"/v1/simulations/latest">;
+/** One stored simulation run, with the table it projected, as the API serves it. */
+export type SimulationDetail = GetData<"/v1/simulations/{run_id}">;
 
 /** One venue split or tier record: the counters a group of matches earned. */
 export type SeasonRecord = TeamSeasonStats["splits"]["home"];
@@ -86,14 +86,15 @@ export const loadRace = cache(
 );
 
 /**
- * Read the latest succeeded simulation of one season, once per request.
+ * Read the stored run the relegation race names, once per request.
  *
- * A season whose runs all failed answers 404, which is a state of the season
- * and not an error: the caller renders it as an empty state.
+ * The race carries the identifier of the run it was built from, so reading that
+ * run instead of the season's latest one keeps the projected table on the same
+ * answer as the race's rivals, probabilities and threshold, even when a run
+ * finishes between the two reads. A 404 means no stored run has that
+ * identifier, which is a state the caller renders and not an error.
  */
-export const loadLatestSimulation = cache(
-  async (season: string | null): Promise<ApiResult<LatestSimulation>> =>
-    season === null
-      ? get("/v1/simulations/latest")
-      : get("/v1/simulations/latest", { query: { season } }),
+export const loadSimulationDetail = cache(
+  async (runId: string): Promise<ApiResult<SimulationDetail>> =>
+    get("/v1/simulations/{run_id}", { path: { run_id: runId } }),
 );

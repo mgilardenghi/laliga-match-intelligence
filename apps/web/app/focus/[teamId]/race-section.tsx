@@ -2,11 +2,14 @@
  * "Relegation race": how much danger the club is in, and what the table around
  * it looks like.
  *
- * The section reads two endpoints: the race itself, which carries the survival
- * threshold, the nearest rivals, their stored forecast history and the fixtures
- * still to play, and the latest succeeded simulation, which carries the
- * projected points of every club. Neither is derived here: the section prints
- * the stored numbers and never re-runs a simulation.
+ * The section reads two endpoints, in order: the race itself, which carries the
+ * survival threshold, the nearest rivals, their stored forecast history, the
+ * fixtures still to play and the identifier of the run it was built from, and
+ * then that run with the projected points of every club. The run is read from
+ * the identifier the race names, never from the season's latest one, because a
+ * run that succeeded between two reads would otherwise pair new quantiles with
+ * an older race. Neither is derived here: the section prints the stored numbers
+ * and never re-runs a simulation.
  *
  * A club that the stored runs never put near the drop is not shown a chart of
  * a flat zero. Its race collapses to a sentence and the two tables, because the
@@ -31,10 +34,10 @@ import {
 import { formatMadridDate } from "@/lib/madrid";
 
 import {
-  loadLatestSimulation,
   loadRace,
-  type LatestSimulation,
+  loadSimulationDetail,
   type RelegationRace,
+  type SimulationDetail,
   type TeamFocus,
 } from "./data";
 import styles from "./page.module.css";
@@ -176,7 +179,7 @@ function RelegationHistory(props: {
  */
 function ProjectedPoints(props: {
   readonly race: RelegationRace;
-  readonly simulation: LatestSimulation;
+  readonly simulation: SimulationDetail;
   readonly season: string;
 }): ReactElement {
   const { race, simulation, season } = props;
@@ -444,7 +447,7 @@ function CollapsedRace(props: {
 /** The race itself: the histories, the projections and the two tables. */
 function RaceBody(props: {
   readonly race: RelegationRace;
-  readonly simulation: LatestSimulation;
+  readonly simulation: SimulationDetail;
   readonly teamId: number;
   readonly teamName: string;
   readonly season: string;
@@ -515,10 +518,10 @@ export async function RaceSection(
 ): Promise<ReactElement> {
   const { teamId, season, teamName, outlook } = props;
 
-  const [raceResult, simulationResult] = await Promise.all([
-    loadRace(teamId, season),
-    loadLatestSimulation(season),
-  ]);
+  // The race is read first because it names the run its numbers come from; the
+  // projection has to be the table of that same run. Two parallel reads could
+  // pair a new run's quantiles with an older race.
+  const raceResult = await loadRace(teamId, season);
 
   let body: ReactElement;
   if (!raceResult.ok) {
@@ -534,23 +537,28 @@ export async function RaceSection(
       ) : (
         <ProblemState problem={raceResult.problem} />
       );
-  } else if (!simulationResult.ok) {
-    body =
-      simulationResult.status === 404 ? (
-        <EmptyState
-          title={`No simulation stored for ${season}`}
-          command="make simulate"
-        >
-          <p>
-            The season has no succeeded simulation, so the projected points of
-            the race have no stored run to read.
-          </p>
-        </EmptyState>
-      ) : (
-        <ProblemState problem={simulationResult.problem} />
-      );
-  } else {
+  } else if (raceResult.data.run_id === null) {
+    // The race names no run exactly when the season holds no succeeded run, so
+    // there is no projected table to draw. The section says so instead of
+    // mounting a chart of an absence.
     body = (
+      <EmptyState
+        title={`No simulation stored for ${season}`}
+        command="make simulate"
+      >
+        <p>
+          The season has no succeeded simulation, so the race names no run and
+          the section has no projected points to draw.
+        </p>
+      </EmptyState>
+    );
+  } else {
+    // A failed read of the run the race names leaves the section in its failure
+    // state; it never throws out of the section. A 404 here means the stored run
+    // is gone, not that the season lacks one, so the season-level empty state
+    // above would misdescribe it.
+    const simulationResult = await loadSimulationDetail(raceResult.data.run_id);
+    body = simulationResult.ok ? (
       <RaceBody
         outlook={outlook}
         race={raceResult.data}
@@ -559,6 +567,8 @@ export async function RaceSection(
         teamId={teamId}
         teamName={teamName}
       />
+    ) : (
+      <ProblemState problem={simulationResult.problem} />
     );
   }
 
