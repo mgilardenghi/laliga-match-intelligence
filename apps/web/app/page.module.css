@@ -158,7 +158,11 @@
 
 .teamCell {
   font-weight: 600;
-  overflow-wrap: anywhere;
+  /* A club name is one unit: letting it break would shrink the column to a few
+     characters on a phone and turn "Barcelona" into three lines of syllables.
+     The table already scrolls sideways, so the name stays on one line and the
+     table grows instead. */
+  white-space: nowrap;
 }
 
 .formCell {

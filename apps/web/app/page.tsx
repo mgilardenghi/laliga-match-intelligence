@@ -122,9 +122,10 @@ export default async function HomePage(
   }
 
   // The projection is a second read because it needs the season the standings
-  // answered with. A 404 is the normal state of a season nobody simulated; an
-  // empty table is the same answer, because a run without team rows claims
-  // nothing a page can draw.
+  // answered with. A 404 is the normal state of a season nobody simulated. A
+  // successful answer without a single team row is not that state: the run is
+  // stored, so the page reports an incomplete projection instead of asking for
+  // a run the season already has.
   const simulationResult = await get("/v1/simulations/latest", {
     query: { season: standings.season },
   });
@@ -132,6 +133,8 @@ export default async function HomePage(
     simulationResult.ok && simulationResult.data.table.length > 0
       ? simulationResult.data
       : null;
+  const projectionIncomplete =
+    simulationResult.ok && simulationResult.data.table.length === 0;
   const projectionRejected =
     !simulationResult.ok && simulationResult.status !== 404;
   const projectionProblem: Problem | null = simulationResult.ok
@@ -160,7 +163,23 @@ export default async function HomePage(
         </h2>
         {projectionRejected ? (
           <ProblemState problem={projectionProblem} />
-        ) : projection === null ? (
+        ) : projection !== null ? (
+          <ProjectionSection
+            simulation={projection}
+            season={standings.season}
+          />
+        ) : projectionIncomplete ? (
+          <EmptyState
+            title="The latest simulation stored no projected table"
+            command="make simulate"
+          >
+            <p>
+              The run the API returned has finished but holds no team row, so it
+              is not a season without a forecast and this page cannot draw one
+              from it. The table above is the current standings.
+            </p>
+          </EmptyState>
+        ) : (
           <EmptyState
             title="No simulation for this season yet"
             command="make simulate"
@@ -171,11 +190,6 @@ export default async function HomePage(
               points interval.
             </p>
           </EmptyState>
-        ) : (
-          <ProjectionSection
-            simulation={projection}
-            season={standings.season}
-          />
         )}
       </section>
     </div>
