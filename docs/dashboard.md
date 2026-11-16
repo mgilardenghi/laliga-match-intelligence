@@ -1,9 +1,9 @@
 # Dashboard reference
 
 The dashboard is the Next.js app in `apps/web`. This page covers how it reads
-data, which commands run it, and which environment variables and browser tests
-it has. The pages themselves are described nowhere yet: they arrive in later M5
-tasks.
+data, what the shell renders, which commands run it, and which environment
+variables and browser tests it has. The data pages are described nowhere yet:
+they arrive in later M5 tasks.
 
 ## Read path
 
@@ -19,6 +19,60 @@ committed OpenAPI snapshot, `make api-client` turns it into typed paths and
 components, and the app imports the result as `@lmi/api-client`. A call such as
 `client.GET("/v1/seasons")` is typed by that snapshot, so a contract change
 surfaces as a type error in the dashboard instead of as a runtime surprise.
+
+## Shell
+
+Every page renders inside one root layout, which owns the document, the theme,
+the landmarks and the two boundaries around a page.
+
+| Region | What it renders |
+| --- | --- |
+| `header` | The site name as a link, the navigation and the theme control. The site name is not an `h1`: each page owns its heading. |
+| `nav` | `Table`, `Matchday`, `Teams`, `Focus` and `Performance`, in that order. The Focus entry reads `Focus: <team name>` when a team resolves and `Focus` alone when the API cannot answer, so the header still renders when the stack is down. |
+| `main#main` | The page. The skip link targets it. A page must not render its own `main` element. |
+| `footer` | The API status, the freshness of the data and the attribution. It never throws: a failed freshness read says so instead of failing the page. |
+
+The states in `apps/web/components/states` are shared by every data page:
+`EmptyState` names what is missing and the command that fills it, `ProblemState`
+shows only a problem's `title` and `detail`, and `SectionSkeleton` is the
+`Suspense` fallback. `app/not-found.tsx`, `app/error.tsx` and
+`app/global-error.tsx` cover the three ways a page can fail. The error boundary
+always reads `API unreachable`, because every thrown page error is a failed API
+read, and Next strips a server error's class and message in a production build.
+
+### Routes
+
+| Route | State |
+| --- | --- |
+| `/` | The M0 placeholder, until the table page lands. |
+| `/teams` | The clubs of one season, and the picker that stores the focus team. |
+| `/focus` | Resolves the focus team and redirects to `/focus/<teamId>`; it renders nothing itself. |
+| `/dev/charts` | The chart gallery, behind `LMI_DEV_PAGES=1`. |
+
+### Theme
+
+The tokens live in `apps/web/app/globals.css`: surfaces, text, borders, the
+focus ring, the categorical chart series, the form outcomes, the relegation
+zone and the nine-step sequential scale. `:root` holds the light values, a
+`prefers-color-scheme: dark` block overrides them, and `:root[data-theme]`
+overrides both, so a stored choice wins over the system.
+
+The root layout reads the `lmi_theme` cookie on the server and writes
+`data-theme` into the opening `<html>` tag, so the first paint is already the
+right theme and nothing has to be corrected in the browser. The theme control
+cycles system, light and dark, writes the same cookie and sets the attribute.
+The outcome fills and the sequential scale are identical in both themes, because
+the form strip draws white letters on the outcome fills and the heatmap draws
+fixed text colours on the sequential cells.
+
+### Focus team
+
+The focus team is resolved on the server, in this order: the `lmi_focus_team`
+cookie when `GET /v1/teams/{id}` answers for it; otherwise the exact name in
+`LMI_FOCUS_TEAM`, looked up in the teams of the current season; otherwise no
+team, and `/focus` sends the reader to `/teams?pick=focus` instead of guessing.
+The teams index stores the choice through a Server Action, which sets the cookie
+for a year.
 
 ## Commands
 
@@ -94,7 +148,9 @@ together.
 
 ## Status
 
-This task ships the generated client, the browser harness and the
-infrastructure around them: the workspace package, the Dockerfile and the
-Compose setup, the two test tiers, and this page. The pages themselves, and the
-code that reads `LMI_FOCUS_TEAM` and `LMI_DEV_PAGES`, arrive in later M5 tasks.
+The generated client, the browser harness, the shell and the data layer are in
+place: the workspace package, the Dockerfile and the Compose setup, the two test
+tiers, the layout with its tokens, the shared states, the teams index and the
+focus redirect, and this page. The data pages — the table, the matchday list,
+the team and focus pages, the match preview and the performance page — arrive in
+later M5 tasks, and so does the table page that replaces the `/` placeholder.
