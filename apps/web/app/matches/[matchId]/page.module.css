@@ -1,0 +1,186 @@
+/*
+ * The match page: the fixture header, its sections, the two tables and the
+ * mirrored profile chart.
+ *
+ * Only this page's own layout lives here. The heading, the charts, the states
+ * and the formatters come from the shared modules, so a change to those is never
+ * repeated here. Every colour is a token from globals.css; the chart's two fills
+ * and its league tick are marks, and they clear 3:1 in both themes.
+ */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  /* An explicit width: `margin: auto` on the cross axis would otherwise switch
+     this flex item to shrink-to-fit and size the page by the intrinsic width of
+     a chart instead of by the viewport. */
+  width: 100%;
+  max-width: 64rem;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.title {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+/* The kickoff date, the source's local time, the status and the matchday link
+   read as one line on a wide screen and as a stack on a narrow one. */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.result {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.score {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.sectionTitle {
+  font-size: 1.15rem;
+}
+
+.subTitle {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.lead {
+  max-width: 48rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* The charts stack in one column: each is a figure with its own caption and
+   data table, so a second column would make a two-up comparison of numbers that
+   have different scales. */
+.charts {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.formBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 20rem;
+  border-collapse: collapse;
+  color: var(--text);
+}
+
+.caption {
+  padding-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.cell {
+  padding: 0.4rem 0.75rem 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.headCell {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* The labelled column travels with the reader while the table scrolls
+   sideways, so a number is never separated from the row it belongs to. The
+   background is opaque for the same reason. */
+.stickyColumn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--background);
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* The profile chart. Text uses the page's text tokens and the marks use the
+   accent, the first categorical series and the muted token; the league tick is
+   a mark, so it needs 3:1 and not 4.5:1. */
+.chartSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.chartRowLabel,
+.chartLabel {
+  fill: var(--text);
+  font-size: 11px;
+}
+
+.chartAxis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.chartAxisLine {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chartOwn {
+  fill: var(--accent);
+}
+
+.chartAgainst {
+  fill: var(--cat-1);
+}
+
+.chartLeague {
+  stroke: var(--muted);
+  stroke-width: 2;
+}
