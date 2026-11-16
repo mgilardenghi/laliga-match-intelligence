@@ -2,9 +2,10 @@
 
 ``ingest`` and ``status`` exist since M1. ``ingest`` downloads one source file
 per planned job, loads it and records every run; ``status`` prints the current
-state of the data without touching the network. The M4 commands ``predict``,
-``simulate`` and ``daily`` are registered here, but their bodies land in a later
-M4 task, so each of them is a stub that exits with code 2. ``python -m
+state of the data without touching the network. Of the M4 commands, ``predict``
+is implemented: it stores today's live predictions or prints the live metrics
+report. ``simulate`` and ``daily`` are registered here, but their bodies land in
+a later M4 task, so each of them is a stub that exits with code 2. ``python -m
 lmi_worker`` runs the same entry point, and the Compose worker uses ``status``
 so starting the stack never contacts a source.
 

@@ -107,6 +107,15 @@ def write_batch(session: Session, run_id: uuid.UUID, batch: PredictionBatch) -> 
     the insert trigger stamps it, and sending a value would only be overwritten.
     A batch with no rows skips the insert statement entirely.
 
+    Before the write transaction opens, the session's current transaction is
+    committed. PostgreSQL defines ``now()`` as the instant the *transaction*
+    started, and the caller's SELECTs (the builder reads history and fixtures)
+    opened that transaction before this call; without the commit the trigger
+    would stamp a row built across Madrid midnight with the earlier instant.
+    The limit is honest: a single statement that itself straddles midnight can
+    still be stamped with the instant it began, and the full fix needs a forward
+    migration on ``0003``, which this module may not add.
+
     Args:
         session: the session that writes the rows.
         run_id: the running run the rows belong to.
@@ -123,6 +132,11 @@ def write_batch(session: Session, run_id: uuid.UUID, batch: PredictionBatch) -> 
             the transaction was rolled back, leaving the run ``running`` for the
             caller to fail.
     """
+    # End the read transaction the caller's SELECTs opened, so the write below
+    # runs in its own and the insert trigger's ``now()`` is the instant of the
+    # insert rather than the instant the reads began.
+    session.commit()
+
     with _transaction(session):
         run = _running_run(session, run_id)
         n_inserted = _insert_rows(session, run_id, batch)

@@ -260,6 +260,60 @@ def test_the_store_path_writes_one_run_and_the_second_call_inserts_nothing(
 
 
 @pytest.mark.integration
+def test_an_interruption_fails_the_run_and_stores_no_prediction(
+    migrated_engine: MigratedDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An interrupted batch must not leave the run ``running`` for ever.
+
+    ``KeyboardInterrupt`` is not an ``Exception``, so the ordinary guard does not
+    see it; the run opened before the batch was built must still reach ``failed``
+    while the interrupt itself leaves the command.
+    """
+    _store_matches(migrated_engine)
+
+    def interrupt(*args: object, **kwargs: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(predict, "build_predictions", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        main(["predict", "--models", "home_win"])
+
+    with migrated_engine.factories() as session:
+        runs = list(session.scalars(select(PredictionRun)))
+        assert [run.status for run in runs] == ["failed"]
+        assert "KeyboardInterrupt" in (runs[0].error or "")
+        assert session.scalar(select(func.count()).select_from(Prediction)) == 0
+
+
+@pytest.mark.integration
+def test_a_failed_batch_leaves_the_run_failed_and_stores_no_prediction(
+    migrated_engine: MigratedDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _store_matches(migrated_engine)
+
+    def refuse(session: object, run_id: object, batch: object) -> object:
+        raise ValueError("synthetic store failure")
+
+    monkeypatch.setattr(predict, "write_batch", refuse)
+
+    code = main(["predict", "--models", "home_win"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "predict: ValueError: synthetic store failure" in captured.err
+
+    with migrated_engine.factories() as session:
+        runs = list(session.scalars(select(PredictionRun)))
+        assert [run.status for run in runs] == ["failed"]
+        assert "synthetic store failure" in (runs[0].error or "")
+        assert session.scalar(select(func.count()).select_from(Prediction)) == 0
+
+
+@pytest.mark.integration
 def test_the_report_prints_a_valid_document_before_and_after_a_batch(
     migrated_engine: MigratedDatabase,
     capsys: pytest.CaptureFixture[str],

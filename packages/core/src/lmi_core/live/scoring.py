@@ -129,13 +129,14 @@ def live_metrics(
     scores on any date.
 
     ``models`` aggregates the ``scored`` rows per ``(model, model_version)``,
-    each on its own match set. ``common`` re-scores every model on the matches
-    all of them predicted, which is the only fair comparison, and is ``None``
-    when no match is shared or nothing was scored. ``market_reference``
-    recomputes the market from the stored decimal odds of the scored matches,
-    through :func:`lmi_core.modeling.market.remove_margin`; it was not stored
-    before kickoff, so a reader must compare it with ``common`` rather than with
-    a model's own scored set. ``counts`` describes every evaluated row.
+    each on its own match set. ``common`` re-scores every model name on the
+    matches all of them predicted, which is the only fair comparison, and is
+    ``None`` when no match is shared or nothing was scored. ``market_reference``
+    recomputes the market from the stored decimal odds, through
+    :func:`lmi_core.modeling.market.remove_margin`, on exactly the shared match
+    set ``common`` reports rather than on a wider one: it was not stored before
+    kickoff, so the two numbers are only comparable when they cover the same
+    matches. ``counts`` describes every evaluated row.
 
     Args:
         evaluated: the rows returned by :func:`evaluate`.
@@ -158,6 +159,7 @@ def live_metrics(
     for row in scored:
         by_model[(row.model, row.model_version)].append(row)
 
+    shared = _shared_matches(by_model)
     models = tuple(
         ModelMetrics(model=model, model_version=version, scores=_metric_scores(rows))
         for (model, version), rows in sorted(by_model.items(), key=_model_key)
@@ -166,8 +168,8 @@ def live_metrics(
     return LiveMetricsResponse(
         evaluated_as_of=today,
         models=models,
-        common=_common(by_model),
-        market_reference=_market_reference(scored, odds_by_match),
+        common=_common(by_model, shared),
+        market_reference=_market_reference(scored, odds_by_match, shared),
         counts=_counts(evaluated),
     )
 
@@ -260,27 +262,49 @@ def _model_key(entry: tuple[tuple[str, str], Sequence[EvaluatedPrediction]]) -> 
     return (_MODEL_ORDER.get(model, len(MODEL_NAMES)), version)
 
 
+def _shared_matches(
+    by_model: Mapping[tuple[str, str], Sequence[EvaluatedPrediction]],
+) -> set[int]:
+    """Return the matches every scored model name predicted.
+
+    The set of one name is the union of its versions' matches. :func:`evaluate`
+    keeps one scored row per ``(match_id, model)``, so two versions of one model
+    occupy disjoint match sets: intersecting per version would empty a
+    comparison the names do share. A model name without a scored row contributes
+    no set and is therefore excluded, which is what drops the market model when
+    it forecast nothing.
+    """
+    by_name: dict[str, set[int]] = defaultdict(set)
+    for (model, _version), rows in by_model.items():
+        by_name[model].update(row.match_id for row in rows)
+    shared: set[int] | None = None
+    for ids in by_name.values():
+        shared = set(ids) if shared is None else shared & ids
+    return set() if shared is None else shared
+
+
 def _common(
     by_model: Mapping[tuple[str, str], Sequence[EvaluatedPrediction]],
+    shared: set[int],
 ) -> CommonSubset | None:
     """Return the shared-match metrics, or ``None`` when there are none.
 
-    A model without a scored row contributes no set and is therefore excluded,
-    which is what drops the market model when it forecast nothing.
+    ``shared`` is the per-model-name intersection of :func:`_shared_matches`, so
+    the entries compare model names, never versions. Each entry stays keyed by
+    ``(model, model_version)`` and only covers the shared matches: two versions
+    of one model are never pooled, and a version with no row in ``shared`` is
+    omitted rather than scored on an empty set.
     """
-    shared: set[int] | None = None
-    for rows in by_model.values():
-        ids = {row.match_id for row in rows}
-        shared = ids if shared is None else shared & ids
     if not shared:
         return None
     members = tuple(
         ModelMetrics(
             model=model,
             model_version=version,
-            scores=_metric_scores([row for row in rows if row.match_id in shared]),
+            scores=_metric_scores(rows),
         )
-        for (model, version), rows in sorted(by_model.items(), key=_model_key)
+        for (model, version), all_rows in sorted(by_model.items(), key=_model_key)
+        if (rows := [row for row in all_rows if row.match_id in shared])
     )
     return CommonSubset(match_count=len(shared), models=members)
 
@@ -288,18 +312,20 @@ def _common(
 def _market_reference(
     scored: Sequence[EvaluatedPrediction],
     odds_by_match: Mapping[int, NDArray[np.float64]],
+    shared: set[int],
 ) -> MarketReference | None:
-    """Return the market benchmark on the scored matches that carry odds.
+    """Return the market benchmark on the shared cohort, where odds exist.
 
-    The reference covers the union of the scored matches, so it never scores a
-    match some model could not have predicted; the matches without a usable
-    price are counted in ``matches_without_odds`` instead.
+    The reference is scored on exactly the match set ``common`` reports, not on
+    a wider one, so the two numbers compare the same matches. The shared matches
+    without a usable price are counted in ``matches_without_odds`` rather than
+    dropped silently, and the reference is ``None`` when it covers no match.
     """
     results = {row.match_id: row.result for row in scored}
     probabilities: list[NDArray[np.float64]] = []
     outcomes: list[int] = []
     matches_without_odds = 0
-    for match_id in sorted(results):
+    for match_id in sorted(shared):
         odds = odds_by_match.get(match_id)
         if odds is None:
             matches_without_odds += 1

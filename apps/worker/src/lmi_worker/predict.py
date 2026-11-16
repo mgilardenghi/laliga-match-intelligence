@@ -208,6 +208,13 @@ def _store(args: argparse.Namespace, session: Session, as_of: datetime.date) -> 
         _mark_failed(session, run_id, error=text)
         print(f"predict: {text}", file=sys.stderr)
         return 1
+    except BaseException as error:
+        # An interruption is not an Exception, so it would skip the guard above
+        # and leave the committed run ``running`` for ever. Record it, then let
+        # the original exception out unchanged: the process still exits non-zero
+        # and the traceback keeps its frames.
+        _mark_failed(session, run_id, error=_error_text(error))
+        raise
 
     _print_counts(batch, inserted)
     print(
@@ -279,7 +286,7 @@ def _mark_failed(session: Session, run_id: uuid.UUID, *, error: str) -> None:
         logger.info("could not mark run %s as failed", run_id)
 
 
-def _error_text(error: Exception) -> str:
+def _error_text(error: BaseException) -> str:
     """Return the diagnostic of ``error`` that may be stored and printed.
 
     An :class:`~sqlalchemy.exc.IntegrityError` keeps its message: the live

@@ -10,8 +10,8 @@ scenario reads both from one PostgreSQL statement.
 """
 
 import uuid
-from datetime import date, timedelta
-from typing import Any
+from datetime import date, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 from live_support import (  # noqa: F401
@@ -25,7 +25,7 @@ from live_support import (  # noqa: F401
 from lmi_core.live import data as live_data
 from lmi_core.live import store
 from lmi_core.live.store import WriteResult
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -174,6 +174,71 @@ def test_a_second_write_of_the_same_as_of_inserts_nothing(database: Database) ->
     assert _prediction_count(engine, first_run) == 2
     assert _prediction_count(engine, second_run) == 0
     assert _run_row(engine, second_run).n_existing == 2
+
+
+@pytest.mark.integration
+def test_a_partially_conflicting_batch_inserts_only_the_new_row(database: Database) -> None:  # noqa: F811
+    engine = database.engine
+    _, today, tomorrow = madrid_dates(engine)
+    shared_match = _fixture(database, kickoff_date=tomorrow, index=1)
+    new_match = _fixture(database, kickoff_date=tomorrow + timedelta(days=1), index=2)
+
+    with Session(engine) as session:
+        first_run = store.start_run(session, as_of=today, horizon_days=7, code_version="test")
+        first = store.write_batch(
+            session,
+            first_run,
+            make_prediction_batch(as_of=today, match_ids=[shared_match]),
+        )
+        second_run = store.start_run(session, as_of=today, horizon_days=7, code_version="test")
+        second = store.write_batch(
+            session,
+            second_run,
+            make_prediction_batch(as_of=today, match_ids=[shared_match, new_match]),
+        )
+
+    assert first == WriteResult(n_inserted=1, n_existing=0, n_no_forecast=0)
+    assert second == WriteResult(n_inserted=1, n_existing=1, n_no_forecast=0)
+    assert _prediction_count(engine, first_run) == 1
+    assert _prediction_count(engine, second_run) == 1
+    with engine.connect() as connection:
+        ownership = connection.execute(
+            text("SELECT match_id, run_id FROM predictions ORDER BY match_id")
+        ).all()
+    # The conflicting row keeps belonging to the run that wrote it, and only the
+    # new key carries the second run.
+    assert [(int(match_id), run_id) for match_id, run_id in ownership] == [
+        (shared_match, first_run),
+        (new_match, second_run),
+    ]
+
+
+@pytest.mark.integration
+def test_the_insert_is_stamped_after_the_read_transaction_ends(database: Database) -> None:  # noqa: F811
+    """``created_at`` belongs to the write transaction, not to the earlier read.
+
+    PostgreSQL defines ``now()`` as the instant the current transaction started,
+    so a ``write_batch`` that reused the caller's read transaction would stamp
+    the row with the instant captured here. The write must start its own
+    transaction, which makes the stamp strictly later.
+    """
+    engine = database.engine
+    _, today, tomorrow = madrid_dates(engine)
+    match_id = _fixture(database, kickoff_date=tomorrow, index=1)
+    batch = make_prediction_batch(as_of=today, match_ids=[match_id])
+
+    with Session(engine) as session:
+        run_id = store.start_run(session, as_of=today, horizon_days=7, code_version="test")
+        read_instant = cast(datetime, session.scalar(select(func.now())))
+        store.write_batch(session, run_id, batch)
+
+    with engine.connect() as connection:
+        created_at: datetime = connection.execute(
+            text("SELECT created_at FROM predictions WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        ).scalar_one()
+
+    assert created_at > read_instant
 
 
 @pytest.mark.integration

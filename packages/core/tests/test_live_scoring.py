@@ -237,7 +237,9 @@ def test_live_metrics_market_reference_uses_the_stored_odds() -> None:
     assert reference.model_version == make_model("market", seed=0).version
     assert reference.stored_before_kickoff is False
     assert reference.match_count == 1
-    assert reference.matches_without_odds == 1
+    # The match 2 odds are all NaN and match 2 is outside the shared cohort, so
+    # it is not part of the reference at all.
+    assert reference.matches_without_odds == 0
 
     probabilities = remove_margin(np.array([[2.0, 3.5, 4.0]], dtype=np.float64))
     results = np.array([0], dtype=np.int8)
@@ -246,6 +248,89 @@ def test_live_metrics_market_reference_uses_the_stored_odds() -> None:
     assert reference.scores.brier == brier(probabilities, results)
     assert reference.scores.rps == rps(probabilities, results)
     assert reference.scores.accuracy == accuracy(probabilities, results)
+
+
+def test_live_metrics_compares_model_names_when_one_has_two_versions() -> None:
+    rows = [
+        _row(match_id=1, model="home_win", model_version="v1", match_status="played", result="H"),
+        _row(match_id=2, model="home_win", model_version="v2", match_status="played", result="D"),
+        _row(match_id=1, model="base_rate", match_status="played", result="H"),
+        _row(match_id=2, model="base_rate", match_status="played", result="D"),
+    ]
+
+    metrics = live_metrics(evaluate(rows), {}, today=date(2026, 5, 25))
+
+    # Two versions of one model occupy disjoint match sets, but the name covers
+    # both matches, so the shared set is the name intersection, not the empty
+    # intersection over versions.
+    assert metrics.common is not None
+    assert metrics.common.match_count == 2
+    assert [
+        (entry.model, entry.model_version, entry.scores.n_matches)
+        for entry in metrics.common.models
+    ] == [("home_win", "v1", 1), ("home_win", "v2", 1), ("base_rate", "test-1", 2)]
+
+    # A version with no row in the shared set is omitted instead of pooling with
+    # its sibling or being scored on an empty set.
+    outside = [
+        _row(match_id=1, model="home_win", model_version="v1", match_status="played", result="H"),
+        _row(match_id=3, model="home_win", model_version="v2", match_status="played", result="A"),
+        _row(match_id=1, model="base_rate", match_status="played", result="H"),
+        _row(match_id=2, model="base_rate", match_status="played", result="D"),
+    ]
+
+    partial = live_metrics(evaluate(outside), {}, today=date(2026, 5, 25))
+
+    assert partial.common is not None
+    assert partial.common.match_count == 1
+    assert [
+        (entry.model, entry.model_version, entry.scores.n_matches)
+        for entry in partial.common.models
+    ] == [("home_win", "v1", 1), ("base_rate", "test-1", 1)]
+
+
+def test_the_market_reference_is_scored_on_the_common_cohort() -> None:
+    # home_win scored matches {1, 2} and base_rate scored {1}, so the shared
+    # cohort is {1} even though match 2 carries odds.
+    evaluated = evaluate(_scored_rows())
+    odds = {
+        1: np.array([2.0, 3.5, 4.0], dtype=np.float64),
+        2: np.array([1.8, 3.6, 4.5], dtype=np.float64),
+    }
+
+    metrics = live_metrics(evaluated, odds, today=date(2026, 5, 25))
+
+    reference = metrics.market_reference
+    assert reference is not None
+    assert metrics.common is not None
+    assert metrics.common.match_count == 1
+    assert reference.match_count == reference.scores.n_matches == 1
+    # Match 2 has odds and is outside the cohort, so it is neither scored nor
+    # counted as missing a price.
+    assert reference.matches_without_odds == 0
+    probabilities = remove_margin(np.array([[2.0, 3.5, 4.0]], dtype=np.float64))
+    results = np.array([0], dtype=np.int8)
+    assert reference.scores.log_loss == log_loss(probabilities, results)
+
+    # A shared match without a usable price is counted there, not dropped.
+    both_matches = [
+        _row(match_id=1, model="home_win", match_status="played", result="H"),
+        _row(match_id=2, model="home_win", match_status="played", result="D"),
+        _row(match_id=1, model="base_rate", match_status="played", result="H"),
+        _row(match_id=2, model="base_rate", match_status="played", result="D"),
+    ]
+    partial_odds = {
+        1: np.array([2.0, 3.5, 4.0], dtype=np.float64),
+        2: np.array([np.nan, np.nan, np.nan], dtype=np.float64),
+    }
+
+    partial = live_metrics(evaluate(both_matches), partial_odds, today=date(2026, 5, 25))
+
+    assert partial.common is not None
+    assert partial.common.match_count == 2
+    assert partial.market_reference is not None
+    assert partial.market_reference.match_count == 1
+    assert partial.market_reference.matches_without_odds == 1
 
 
 def test_live_metrics_without_scored_rows_reports_only_counts() -> None:
