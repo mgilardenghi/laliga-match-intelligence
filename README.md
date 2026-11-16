@@ -134,7 +134,7 @@ The empty states of the pages name these commands themselves (`make ingest`, `ma
 - `/performance` - the backtest metrics per model and season and the live predictions against the market (`?subset=all|common`).
 - `/dev/charts` - the chart gallery, exposed only when `LMI_DEV_PAGES=1`.
 
-The team focus page at `/focus/[teamId]` is delivered by a separate M5 task. [docs/dashboard.md](docs/dashboard.md) covers the read path, the shell, the routes and the browser tests in more detail.
+[docs/dashboard.md](docs/dashboard.md) covers the read path, the shell, the routes and the browser tests in more detail.
 
 ## Commands
 
