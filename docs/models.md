@@ -221,9 +221,21 @@ run. Per-match backtest predictions are not stored.
 - The stored run also records the fixed and simulated fixture counts, the
   withdrawn count and the last complete matchday, plus a data fingerprint and
   the model version and configuration.
-- Deferred: the per-fixture win, draw and loss probabilities and the next-match
-  detail are `null` today, because the simulator does not store them yet. They
-  are not available.
+- Per-fixture win, draw and loss probabilities are model-exact. They come from
+  that fixture's `(11, 11)` scoreline grid: the sum of the cells with more home
+  goals, the trace for a draw and the sum of the cells with more away goals,
+  each normalised by the sum of the three. They add up to one and carry no
+  sampling noise.
+- The next-match detail is stored as integer counts from the run's own draws,
+  for every team with a simulated fixture: how many runs reached each of the
+  three outcomes of its next fixture, and how many of those also ended in the
+  title, the European places and the relegation places, plus the summed final
+  points. The API divides them.
+- "Next match" means the first simulated fixture in `(kickoff_date, id)` order,
+  the same order the API lists remaining fixtures in.
+- An outcome that no run reached is stored as a zero row, not left out.
+- A run that predates revision `0004` has no detail rows, so those fields stay
+  null for it.
 
 ## Where each parameter lives
 
