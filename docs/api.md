@@ -349,8 +349,12 @@ the season code, so two reads of one history serve the same list.
 **The position.** `position` is the club's place in that season's table as the
 [standings endpoint](#get-v1standings) ranks it: the team set is every club that
 appears as a side of any match of the season, and the counted results are the
-played ones. The two endpoints therefore cannot disagree about a table, and a
-club the table does not rank keeps a `null` instead of a borrowed place.
+played ones. Both endpoints rank a season with the same function over the same
+kind of input, so for one stored state of a season they cannot place a club
+differently; a club the table does not rank keeps a `null` instead of a
+borrowed place. Two requests are still two reads of a stored state that can
+move between them, and a club that changes place after a result is stored is a
+change of the data rather than a disagreement about the rule.
 
 **The averages.** `points_pg`, `goals_for_pg` and `goals_against_pg` divide by
 `played` and are always known for a listed season. Every other average is taken

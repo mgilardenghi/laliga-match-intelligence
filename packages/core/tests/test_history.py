@@ -348,6 +348,33 @@ def test_a_season_without_a_played_match_is_left_out() -> None:
     assert history.largest_drop == ()
 
 
+def test_a_drop_spans_an_omitted_season_between_two_played_ones() -> None:
+    history = summarise(
+        [
+            season("2021-22", 2021, 20, []),
+            season("2022-23", 2022, 20, [played(0, 2)]),
+            season("2020-21", 2020, 1, [played(2, 0)]),
+        ]
+    )
+
+    # 2021-22 is left out because the club played nothing, so the adjacent
+    # listed seasons are 2020-21 and 2022-23 and the comparison spans the gap.
+    # A rule that only compared seasons whose start years are consecutive would
+    # find no pair at all here and report no decline, which is the regression
+    # this case pins: adjacency is over the seasons the club played, not over
+    # the calendar. The win is 3 points from 2 goals for and none against; the
+    # loss is none from 2 against 2, so goals against worsened
+    # (earlier - later = 0 - 2 = -2.0) like the other two metrics.
+    assert [line.season for line in history.seasons] == ["2020-21", "2022-23"]
+    assert history.largest_drop == (
+        MetricDrop(metric="points_pg", from_season="2020-21", to_season="2022-23", delta=-3.0),
+        MetricDrop(
+            metric="goals_against_pg", from_season="2020-21", to_season="2022-23", delta=-2.0
+        ),
+        MetricDrop(metric="goals_for_pg", from_season="2020-21", to_season="2022-23", delta=-2.0),
+    )
+
+
 def test_no_season_gives_an_empty_history() -> None:
     assert summarise([]) == TeamHistory(seasons=(), largest_drop=())
 
