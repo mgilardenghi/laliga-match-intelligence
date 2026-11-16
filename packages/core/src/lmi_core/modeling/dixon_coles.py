@@ -581,7 +581,8 @@ def _clipped_exp(eta: NDArray[np.float64]) -> NDArray[np.float64]:
     An extreme but finite parameter vector would otherwise overflow to ``inf``,
     and an ``inf`` rate turns the objective and the gradient into ``inf`` and
     ``nan``. The clip never binds inside the range a fit reaches, so no fitted
-    number moves.
+    number moves. Beyond the clip the analytic gradient is no longer the
+    derivative of the clipped objective; it only keeps the values finite there.
     """
     return np.exp(np.minimum(eta, _MAX_EXP_ARGUMENT))
 
