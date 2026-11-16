@@ -39,7 +39,12 @@ every ``Exception`` from the claimed work, rolls it back and records the row
 not catch or convert that exception; there is no ``try`` around ``execute_run``.
 The daily task runs its simulation in-process through the same function, so the
 same guarantee holds there, and the cycle reports the failed run in its own log
-line and exit code.
+line and exit code. That guarantee covers a soft limit raised inside the claimed
+simulation work only: if the daily soft limit fires during the ingest or
+prediction step, that step's own ``except Exception`` contains it as a logged
+step failure and the cycle continues until the hard limit kills the process; a
+soft limit raised inside the claim or the failure bookkeeping can leave a run
+``running`` until the stale window recovers it.
 
 The recorded text comes from the exception rather than from this module: the
 timeout handler raises it with no message, so ``execute_run`` stores what
