@@ -16,6 +16,13 @@ and a failed forecast must not cost the simulation.
    match, in this process. The daily cycle is already a worker process, so
    queueing the run from inside it would add a message that can be lost.
 
+Run as the Celery task, the cycle is called with ``escalate=True``: a transient
+database failure (by :func:`lmi_core.db.errors.is_transient_db_error`) and a
+Celery soft time limit then leave the cycle instead of becoming a logged step
+failure, so the task can retry the whole idempotent cycle or fail at its soft
+limit. A network failure of the ingest step and every deterministic failure stay
+contained in both modes.
+
 The exit code follows the other commands: 0 when the prediction and simulation
 steps succeeded, 1 when either failed, 2 when the database configuration is
 incomplete. The ingest step only contributes a log line. No line ever carries a
@@ -33,15 +40,17 @@ from collections.abc import Sequence
 from typing import Final
 
 import httpx
+from celery.exceptions import SoftTimeLimitExceeded
 from lmi_core.clock import madrid_today
 from lmi_core.config import get_settings
+from lmi_core.db.errors import is_transient_db_error
 from lmi_core.db.models import Match, Season, SimulationRun
 from lmi_core.db.session import make_engine, session_factory
 from lmi_core.simulation import DEFAULT_SEED, Qualification
 from lmi_core.simulation.service import create_run, execute_run
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from lmi_worker import http
@@ -70,7 +79,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     return run_daily_cycle()
 
 
-def run_daily_cycle(*, today: datetime.date | None = None, fetcher: Fetcher | None = None) -> int:
+def run_daily_cycle(
+    *,
+    today: datetime.date | None = None,
+    fetcher: Fetcher | None = None,
+    escalate: bool = False,
+) -> int:
     """Run the three steps of the daily cycle and return the process exit code.
 
     Args:
@@ -79,6 +93,9 @@ def run_daily_cycle(*, today: datetime.date | None = None, fetcher: Fetcher | No
             does; a test can pin it.
         fetcher: the download function of the ingest step. ``None`` builds one
             HTTP client for the whole step; a test supplies a fake.
+        escalate: re-raise a transient database failure and a soft time limit
+            instead of containing them, as the Celery task needs. The command
+            line keeps the default and its exit codes.
 
     Returns:
         0 when the prediction and simulation steps succeeded, 1 when either
@@ -95,11 +112,13 @@ def run_daily_cycle(*, today: datetime.date | None = None, fetcher: Fetcher | No
 
     try:
         factory = session_factory(engine)
-        _ingest(engine, as_of, fetcher)
-        predicted = _predict(factory, as_of)
-        simulated = _simulate(factory, as_of)
+        _ingest(engine, as_of, fetcher, escalate=escalate)
+        predicted = _predict(factory, as_of, escalate=escalate)
+        simulated = _simulate(factory, as_of, escalate=escalate)
         return 0 if predicted and simulated else 1
-    except SQLAlchemyError:
+    except SQLAlchemyError as error:
+        if _must_escalate(error, escalate=escalate):
+            raise
         # The driver text can carry the connection URL, so only the failure kind
         # is logged.
         logger.error("daily: cannot reach the database")
@@ -108,7 +127,23 @@ def run_daily_cycle(*, today: datetime.date | None = None, fetcher: Fetcher | No
         engine.dispose()
 
 
-def _ingest(engine: Engine, day: datetime.date, fetcher: Fetcher | None) -> None:
+def _must_escalate(error: BaseException, *, escalate: bool) -> bool:
+    """Return whether ``error`` must leave the cycle instead of being contained.
+
+    Only in ``escalate`` mode, and only for a soft time limit or a transient
+    database failure; a network failure of the ingest step is not a database
+    failure and stays contained.
+    """
+    if not escalate:
+        return False
+    if isinstance(error, SoftTimeLimitExceeded):
+        return True
+    return isinstance(error, DBAPIError) and is_transient_db_error(error)
+
+
+def _ingest(
+    engine: Engine, day: datetime.date, fetcher: Fetcher | None, *, escalate: bool = False
+) -> None:
     """Ingest the season in progress; a failure logs one line and returns."""
     try:
         jobs = plan_jobs(season=current_season(day).code, today=day)
@@ -129,6 +164,8 @@ def _ingest(engine: Engine, day: datetime.date, fetcher: Fetcher | None) -> None
             if client is not None:
                 client.close()
     except Exception as error:
+        if _must_escalate(error, escalate=escalate):
+            raise
         logger.warning("daily ingest: %s", _failure_text(error))
         return
 
@@ -137,12 +174,16 @@ def _ingest(engine: Engine, day: datetime.date, fetcher: Fetcher | None) -> None
     logger.info("daily ingest: %d succeeded, %d failed", succeeded, failed)
 
 
-def _predict(factory: sessionmaker[Session], as_of: datetime.date) -> bool:
+def _predict(
+    factory: sessionmaker[Session], as_of: datetime.date, *, escalate: bool = False
+) -> bool:
     """Store the live predictions of ``as_of`` and report whether it worked."""
     try:
         with factory() as session:
             stored = store_predictions(session, as_of=as_of, trigger="schedule")
     except Exception as error:
+        if _must_escalate(error, escalate=escalate):
+            raise
         logger.warning("daily predict: %s", _failure_text(error))
         return False
     logger.info(
@@ -154,7 +195,9 @@ def _predict(factory: sessionmaker[Session], as_of: datetime.date) -> bool:
     return True
 
 
-def _simulate(factory: sessionmaker[Session], as_of: datetime.date) -> bool:
+def _simulate(
+    factory: sessionmaker[Session], as_of: datetime.date, *, escalate: bool = False
+) -> bool:
     """Run one live simulation of the latest season and report whether it worked."""
     try:
         with factory() as session:
@@ -170,6 +213,8 @@ def _simulate(factory: sessionmaker[Session], as_of: datetime.date) -> bool:
                 kind="live",
             )
     except (ValueError, SQLAlchemyError) as error:
+        if _must_escalate(error, escalate=escalate):
+            raise
         logger.warning("daily simulate: %s", _failure_text(error))
         return False
 

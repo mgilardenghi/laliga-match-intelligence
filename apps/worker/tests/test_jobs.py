@@ -28,6 +28,7 @@ from lmi_core.modeling.elo import ModelFitError
 from lmi_core.modeling.types import History
 from lmi_core.simulation import Qualification
 from lmi_core.simulation.service import STALE_AFTER, create_run
+from lmi_worker import daily as daily_module
 from lmi_worker import jobs
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -83,7 +84,7 @@ def test_tasks_carry_time_limits_and_retry_only_transient_errors() -> None:
     ):
         assert task.soft_time_limit == soft_limit
         assert task.time_limit == hard_limit
-        assert task.autoretry_for == jobs.TRANSIENT_ERRORS
+        assert task.autoretry_for == (jobs.TransientJobError,)
         assert task.max_retries == 2
         assert task.retry_backoff is True
         assert task.retry_backoff_max == 60
@@ -402,3 +403,69 @@ def _mark_finished(engine: Engine, run_id: uuid.UUID, *, status: str) -> None:
 def _execute(engine: Engine, statement: str, run_id: uuid.UUID, **parameters: int | str) -> None:
     with engine.begin() as connection:
         connection.execute(text(statement), {"run_id": run_id, **parameters})
+
+
+class _DriverError(Exception):
+    """A stand-in for a psycopg error: only the ``sqlstate`` attribute matters."""
+
+    def __init__(self, sqlstate: str | None) -> None:
+        super().__init__("driver text that must not reach a log")
+        self.sqlstate = sqlstate
+
+
+def _operational(sqlstate: str | None) -> OperationalError:
+    return OperationalError("SELECT 1", {}, _DriverError(sqlstate))
+
+
+class _Engine:
+    def dispose(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize("sqlstate", [None, "08006", "57P03", "40P01"])
+def test_a_transient_database_failure_becomes_the_retried_error(
+    monkeypatch: pytest.MonkeyPatch, sqlstate: str | None
+) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise _operational(sqlstate)
+
+    monkeypatch.setattr(jobs, "make_engine", lambda _settings: _Engine())
+    monkeypatch.setattr(jobs, "get_settings", lambda: None)
+    monkeypatch.setattr(jobs, "session_factory", lambda _engine: None)
+    monkeypatch.setattr(jobs, "execute_run", fail)
+
+    with pytest.raises(jobs.TransientJobError) as caught:
+        jobs.run_simulation_task(str(uuid.uuid4()))
+    assert isinstance(caught.value.__cause__, OperationalError)
+    assert "driver text" not in str(caught.value)
+
+
+@pytest.mark.parametrize("sqlstate", ["28P01", "3D000"])
+def test_a_deterministic_database_failure_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch, sqlstate: str
+) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise _operational(sqlstate)
+
+    monkeypatch.setattr(jobs, "make_engine", lambda _settings: _Engine())
+    monkeypatch.setattr(jobs, "get_settings", lambda: None)
+    monkeypatch.setattr(jobs, "session_factory", lambda _engine: None)
+    monkeypatch.setattr(jobs, "execute_run", fail)
+
+    with pytest.raises(OperationalError):
+        jobs.run_simulation_task(str(uuid.uuid4()))
+
+
+def test_the_daily_task_escalates_a_transient_failure_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+
+    def cycle(*, escalate: bool = False) -> int:
+        calls.append(escalate)
+        raise _operational("08006")
+
+    monkeypatch.setattr(daily_module, "run_daily_cycle", cycle)
+    with pytest.raises(jobs.TransientJobError):
+        jobs.run_daily_task()
+    assert calls == [True]
