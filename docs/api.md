@@ -554,7 +554,7 @@ Ask for a run of the season simulator.
 | `season` | string | the season that starts latest among the seasons with a match | Season code. An unknown code is a `404`. |
 | `as_of_date` | date (`YYYY-MM-DD`) | the Madrid date | Last date whose played matches count as fixed results. Later than the Madrid date is a `422`. |
 | `n_runs` | integer | `10000` | `1000`–`50000`. A value outside the range is a `422`. |
-| `seed` | integer | `0` | `>= 0`. A value below it is a `422`. |
+| `seed` | integer | `0` | `0`–`9223372036854775807`, the range of the stored column. A value outside it is a `422`. |
 
 The answer is **`202`**, not `201`: the row is stored but nothing has been
 simulated yet, and `status` is `queued` until a worker claims it. The `Location`
