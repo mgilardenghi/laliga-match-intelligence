@@ -452,8 +452,8 @@ function LiveReport(props: { readonly data: LiveData }): ReactElement {
       {data.counts.n_rows === 0 ? (
         <EmptyState title="No predictions stored yet" command="make predict">
           <p>
-            The worker stores one forecast per model and matchday before
-            kickoff, and none is stored for the season ingestion loaded last.
+            The worker stores one forecast per match and model before kickoff,
+            and none is stored for the season the API serves.
           </p>
         </EmptyState>
       ) : data.models.length === 0 ? (
