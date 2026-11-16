@@ -207,7 +207,7 @@ function BacktestReport(props: {
   return (
     <>
       <dl className={styles.pairs}>
-        <dt className={styles.term}>Matched scored</dt>
+        <dt className={styles.term}>Matches scored</dt>
         <dd className={styles.value}>{formatCount(data.run.n_matches)}</dd>
         <dt className={styles.term}>From year</dt>
         <dd className={styles.value}>{formatCount(data.run.from_year)}</dd>
