@@ -76,6 +76,12 @@
   color: var(--accent);
 }
 
+.focusLink {
+  align-self: center;
+  color: var(--accent);
+  font-size: 0.875rem;
+}
+
 /* A section is a flex item of `.page`; its automatic minimum width must not be
    the intrinsic width of its table or chart, or the page grows sideways. */
 .section {

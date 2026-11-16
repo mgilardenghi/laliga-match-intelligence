@@ -10,8 +10,13 @@ export type SparklineHighlight = { readonly from: number; readonly to: number };
 export type SparklineProps = {
   readonly metric: string;
   readonly seasons: readonly string[];
-  readonly values: readonly number[];
-  readonly highlight?: SparklineHighlight;
+  /** One value per season; `null` marks a season with no value and breaks the line. */
+  readonly values: readonly (number | null)[];
+  /**
+   * The segment to highlight. Omitted: the largest decline of the series is
+   * highlighted. `null`: nothing is highlighted (the caller publishes no drop).
+   */
+  readonly highlight?: SparklineHighlight | null;
   readonly unit?: string;
   readonly id?: string;
   readonly title?: string;
@@ -26,14 +31,23 @@ const PLOT_TOP = 30;
 const PLOT_BOTTOM = 118;
 const HEIGHT = 146;
 
-function largestDrop(values: readonly number[]): SparklineHighlight | undefined {
+function isValue(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function largestDrop(values: readonly (number | null)[]): SparklineHighlight | undefined {
   if (values.length < 2) {
     return undefined;
   }
   let from = -1;
   let drop = 0;
   for (let index = 0; index < values.length - 1; index += 1) {
-    const change = values[index + 1] - values[index];
+    const before = values[index];
+    const after = values[index + 1];
+    if (!isValue(before) || !isValue(after)) {
+      continue;
+    }
+    const change = after - before;
     // Only a real decline is a drop: an increasing or flat series has none.
     if (change < drop) {
       drop = change;
@@ -65,7 +79,7 @@ export function Sparkline(props: SparklineProps): ReactElement {
     );
   }
 
-  const finiteValues = values.filter((value) => Number.isFinite(value));
+  const finiteValues = values.filter(isValue);
   const minimum = finiteValues.length > 0 ? Math.min(...finiteValues) : 0;
   const maximum = finiteValues.length > 0 ? Math.max(...finiteValues) : 1;
   const spread = maximum - minimum;
@@ -74,8 +88,8 @@ export function Sparkline(props: SparklineProps): ReactElement {
   const xScale = bandScale(seasons.length, [PLOT_LEFT, PLOT_RIGHT], 0.1);
 
   const selected = (() => {
-    const candidate = highlight ?? largestDrop(values);
-    if (candidate === undefined) {
+    const candidate = highlight === undefined ? largestDrop(values) : highlight;
+    if (candidate === undefined || candidate === null) {
       return undefined;
     }
     const low = Math.max(0, Math.min(candidate.from, candidate.to));
@@ -83,10 +97,37 @@ export function Sparkline(props: SparklineProps): ReactElement {
     return high > low ? { from: low, to: high } : undefined;
   })();
 
-  const points = values.map((value, index) => ({
-    x: xScale.center(index),
-    y: yScale.scale(value),
-  }));
+  const points = values.map((value, index) =>
+    isValue(value) ? { x: xScale.center(index), y: yScale.scale(value) } : null,
+  );
+  // Runs of consecutive seasons with a value: a missing season breaks the line.
+  const runs: { x: number; y: number }[][] = [];
+  let current: { x: number; y: number }[] = [];
+  for (const point of points) {
+    if (point === null) {
+      if (current.length > 0) {
+        runs.push(current);
+      }
+      current = [];
+    } else {
+      current.push(point);
+    }
+  }
+  if (current.length > 0) {
+    runs.push(current);
+  }
+  const firstIndex = points.findIndex((point) => point !== null);
+  let lastIndex = -1;
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    if (points[index] !== null) {
+      lastIndex = index;
+      break;
+    }
+  }
+  const firstPoint = firstIndex >= 0 ? points[firstIndex] : null;
+  const lastPoint = lastIndex > firstIndex ? points[lastIndex] : null;
+  const fromPoint = selected === undefined ? null : points[selected.from];
+  const toPoint = selected === undefined ? null : points[selected.to];
 
   return (
     <ChartFigure
@@ -97,7 +138,7 @@ export function Sparkline(props: SparklineProps): ReactElement {
         columns: ["Season", "Value"],
         rows: seasons.map((season, index) => [
           season,
-          `${formatNumber(values[index] ?? 0)}${unit ?? ""}`,
+          isValue(values[index]) ? `${formatNumber(values[index] as number)}${unit ?? ""}` : "—",
         ]),
       }}
       note={note}
@@ -111,36 +152,41 @@ export function Sparkline(props: SparklineProps): ReactElement {
       >
         <title id={ids.titleId}>{title}</title>
         <desc id={ids.descId}>{description ?? defaultDescription}</desc>
-        {points.length > 1 ? (
-          <polyline
-            points={points.map((point) => `${point.x} ${point.y}`).join(" ")}
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ stroke: "var(--accent, #0072b2)", strokeWidth: 1.6 }}
-          />
-        ) : null}
-        {points.map((point, index) => (
-          <circle
-            key={`point-${index}`}
-            cx={point.x}
-            cy={point.y}
-            r={2.2}
-            style={{ fill: "var(--accent, #0072b2)" }}
-          />
-        ))}
-        {selected !== undefined && points[selected.from] !== undefined && points[selected.to] !== undefined ? (
+        {runs
+          .filter((run) => run.length > 1)
+          .map((run, index) => (
+            <polyline
+              key={`run-${index}`}
+              points={run.map((point) => `${point.x} ${point.y}`).join(" ")}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ stroke: "var(--accent, #0072b2)", strokeWidth: 1.6 }}
+            />
+          ))}
+        {points.map((point, index) =>
+          point === null ? null : (
+            <circle
+              key={`point-${index}`}
+              cx={point.x}
+              cy={point.y}
+              r={2.2}
+              style={{ fill: "var(--accent, #0072b2)" }}
+            />
+          ),
+        )}
+        {selected !== undefined && fromPoint != null && toPoint != null ? (
           <g>
             <line
-              x1={points[selected.from].x}
-              y1={points[selected.from].y}
-              x2={points[selected.to].x}
-              y2={points[selected.to].y}
+              x1={fromPoint.x}
+              y1={fromPoint.y}
+              x2={toPoint.x}
+              y2={toPoint.y}
               strokeLinecap="round"
               style={{ stroke: "var(--zone-relegation, #d55e00)", strokeWidth: 3.4 }}
             />
             <text
-              x={(points[selected.from].x + points[selected.to].x) / 2}
+              x={(fromPoint.x + toPoint.x) / 2}
               y={14}
               textAnchor="middle"
               className={styles.axisText}
@@ -150,24 +196,24 @@ export function Sparkline(props: SparklineProps): ReactElement {
             </text>
           </g>
         ) : null}
-        {points.length > 0 ? (
+        {firstPoint !== null ? (
           <text
-            x={points[0].x}
-            y={Math.max(PLOT_TOP - 4, points[0].y - 7)}
+            x={firstPoint.x}
+            y={Math.max(PLOT_TOP - 4, firstPoint.y - 7)}
             textAnchor="start"
             className={styles.endLabel}
           >
-            {`${formatNumber(values[0])}${unit ?? ""}`}
+            {`${formatNumber(values[firstIndex] as number)}${unit ?? ""}`}
           </text>
         ) : null}
-        {points.length > 1 ? (
+        {lastPoint !== null ? (
           <text
-            x={points[points.length - 1].x}
-            y={Math.min(PLOT_BOTTOM - 2, points[points.length - 1].y + 13)}
+            x={lastPoint.x}
+            y={Math.min(PLOT_BOTTOM - 2, lastPoint.y + 13)}
             textAnchor="end"
             className={styles.endLabel}
           >
-            {`${formatNumber(values[values.length - 1])}${unit ?? ""}`}
+            {`${formatNumber(values[lastIndex] as number)}${unit ?? ""}`}
           </text>
         ) : null}
         {seasons.length > 0 ? (

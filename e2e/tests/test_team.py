@@ -296,6 +296,22 @@ def test_the_focus_button_stores_the_club_and_focus_redirects_to_it(
 
 
 @pytest.mark.loaded
+def test_the_focus_link_opens_this_clubs_focus_view(page: Page, dashboard_url: str) -> None:
+    """Guard the link to the focus view: it names this club and the page renders."""
+    team_id, club = _first_club(page, dashboard_url)
+
+    link = page.get_by_role("link", name="Open focus view")
+    expect(link).to_have_count(1)
+    expect(link).to_have_attribute(
+        "href", re.compile(rf"^/focus/{team_id}(\?season=\d{{4}}-\d{{2}})?$")
+    )
+
+    link.click()
+    page.wait_for_url(re.compile(rf"/focus/{team_id}"))
+    expect(page.get_by_role("heading", level=1)).to_contain_text(club)
+
+
+@pytest.mark.loaded
 @pytest.mark.parametrize("hostile", HOSTILE_REDIRECTS)
 def test_a_hostile_redirect_never_leaves_the_dashboard(
     page: Page, dashboard_url: str, hostile: str
