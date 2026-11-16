@@ -14,10 +14,14 @@ def season_not_found(code: str) -> HTTPException:
     """Return the 404 error for a season ``code`` that is not stored.
 
     It returns the error instead of raising it so the caller raises it on the
-    line that detected the miss, where the condition is visible. The message
-    quotes the code the client sent, which is the client's own input.
+    line that detected the miss, where the condition is visible.
+
+    ``code`` stays in the signature because the callers name the miss with it,
+    and it is deliberately not echoed: a 404 detail is fixed app-authored text
+    and never repeats client input. The sentence says which kind of thing is
+    unknown, which is all the client needs to act on.
     """
-    return HTTPException(status_code=404, detail=f"Season '{code}' not found")
+    return HTTPException(status_code=404, detail="Season not found")
 
 
 @router.get("")
