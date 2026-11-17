@@ -1,6 +1,6 @@
 /**
- * The team focus page: one club's season, opening on the header and its five
- * streamed sections.
+ * The team focus page: one club's season, opening on its story and the four
+ * sections that explain it.
  *
  * The route is `/focus/[teamId]` and the page owns no navigation of its own: the
  * layout supplies the `main` landmark, the footer and the API status line, so
@@ -9,34 +9,30 @@
  * `?teamId=` -- the page turns that into a redirect so the address bar and the
  * page always name the same club.
  *
- * Everything below the header streams: each section reads its own data and
- * renders its own empty or problem state, so one failed request cannot take the
- * rest of the page down.
+ * Everything below the header streams: the story card and each section read
+ * their own data and render their own empty or problem state, so one failed
+ * request cannot take the rest of the page down. The section nav points at the
+ * wrapper of each boundary rather than at the section itself, because an anchor
+ * has to resolve while its section is still a skeleton.
  */
 import { notFound, redirect } from "next/navigation";
 import { Suspense, type ReactElement } from "react";
 
 import { SeasonSelect, TeamSelect, type SeasonOption } from "@/components/shell";
 import { EmptyState, ProblemState, SectionSkeleton } from "@/components/states";
+import { HowToRead, SectionNav, type HowToReadItem, type SectionNavItem } from "@/components/ui";
 import { get } from "@/lib/api";
 import { setFocusTeam } from "@/lib/focus-actions";
-import {
-  EM_DASH,
-  formatCount,
-  formatPercent,
-  formatPoints,
-  formatSigned,
-} from "@/lib/format";
 import { firstValue, parseSeason, type SearchParams } from "@/lib/params";
 
 import type { TeamFocus } from "./data";
+import { DiagnosisSection, SECTION_LABEL as DIAGNOSIS_LABEL } from "./diagnosis-section";
 import {
   NextMatchSection,
   SECTION_LABEL as NEXT_MATCH_LABEL,
 } from "./next-match-section";
-import { PointsSection, SECTION_LABEL as POINTS_LABEL } from "./points-section";
 import { RaceSection, SECTION_LABEL as RACE_LABEL } from "./race-section";
-import { SplitsSection, SECTION_LABEL as SPLITS_LABEL } from "./splits-section";
+import { SECTION_LABEL as STORY_LABEL, StorySection } from "./story-section";
 import { TrendSection, SECTION_LABEL as TREND_LABEL } from "./trend-section";
 import styles from "./page.module.css";
 
@@ -46,6 +42,44 @@ type FocusPageProps = {
   readonly params: Promise<{ readonly teamId: string }>;
   readonly searchParams: Promise<SearchParams>;
 };
+
+/** The anchor ids the section nav points at, in the order the page prints them. */
+const NAV_SECTIONS: readonly SectionNavItem[] = [
+  { id: "diagnosis", label: DIAGNOSIS_LABEL },
+  { id: "race", label: RACE_LABEL },
+  { id: "next", label: NEXT_MATCH_LABEL },
+  { id: "trend", label: TREND_LABEL },
+];
+
+/**
+ * The reading guide the page closes with.
+ *
+ * The four terms are the page's own vocabulary, and every definition is a rule
+ * of the API rather than a count of this dataset, so the guide does not go stale
+ * when the season moves on.
+ */
+const HOW_TO_READ: readonly HowToReadItem[] = [
+  {
+    term: "Market expected points",
+    definition:
+      "For each played match the pre-closing odds give a win, draw and loss chance, and 3 × the win chance plus the draw chance is what the market thought the match was worth. Summed over a season, the total is what a club with these prices was expected to earn.",
+  },
+  {
+    term: "Relegation chance",
+    definition:
+      "The share of stored simulation runs in which the club finishes in the relegation places, with every remaining fixture simulated from the model's stored probabilities.",
+  },
+  {
+    term: "Survival line",
+    definition:
+      "The median final points total of the highest relegated place over the completed seasons the relegation race counts, which is what staying up has usually cost.",
+  },
+  {
+    term: "Swing",
+    definition:
+      "What the club's stored probabilities would be if its next match ended in a win, a draw or a loss, each read from the simulated runs that produced that result and compared with the same run's numbers for the season as it stands.",
+  },
+];
 
 /** The path this page serves, used for the selectors and the cookie form. */
 function focusPath(teamId: number): string {
@@ -92,11 +126,13 @@ function seasonOptions(
 }
 
 /**
- * The page heading, rendered on every path so a reader always knows which club
- * and which season they are looking at.
+ * The page heading, rendered on every path so a reader always knows which page
+ * they are looking at.
  *
  * The club name is unknown when the focus read itself failed, and the heading
- * then names the page rather than a club it cannot name.
+ * then names the page rather than a club it cannot name. The eyebrow names the
+ * season once the page has resolved one, because the heading above the sections
+ * describes that season and no other.
  */
 function PageHeading(props: {
   readonly teamName: string | null;
@@ -105,74 +141,11 @@ function PageHeading(props: {
   const { teamName, season } = props;
   return (
     <header className={styles.header}>
-      <h1 className={styles.title}>{teamName ?? "Team focus"}</h1>
-      <p className={styles.intro}>
-        {season === null
-          ? "One club's season: its table row, the market's expected points and, when a simulation is stored, the projected finish."
-          : `The ${season} season of one club: its table row, the market's expected points and, when a simulation is stored, the projected finish.`}
+      <p className={styles.eyebrow}>
+        {season === null ? "Team focus" : `Team focus · ${season}`}
       </p>
+      <h1 className={styles.title}>{teamName ?? "Team focus"}</h1>
     </header>
-  );
-}
-
-type OutlookTilesProps = {
-  readonly standing: TeamFocus["standing"];
-  readonly outlook: TeamFocus["outlook"];
-};
-
-/**
- * The outlook tiles: what the table says now and what the simulation expects.
- *
- * A value the API does not know is an em dash and never a zero, so a missing
- * simulation cannot read as a season of no points and no risk.
- */
-function OutlookTiles(props: OutlookTilesProps): ReactElement {
-  const { standing, outlook } = props;
-
-  return (
-    <dl className={styles.tiles}>
-      <div className={styles.tile}>
-        <dt className={styles.term}>Position</dt>
-        <dd className={styles.value}>{formatCount(standing?.position)}</dd>
-      </div>
-      <div className={styles.tile}>
-        <dt className={styles.term}>Points</dt>
-        <dd className={styles.value}>{formatCount(standing?.points)}</dd>
-      </div>
-      <div className={styles.tile}>
-        <dt className={styles.term}>Goal difference</dt>
-        <dd className={styles.value}>{formatSigned(standing?.goal_difference)}</dd>
-      </div>
-      <div className={styles.tile}>
-        <dt className={styles.term}>Expected points</dt>
-        <dd className={styles.value}>
-          {outlook === null ? EM_DASH : formatPoints(outlook.expected_points)}
-          <span className={styles.range}>
-            {outlook === null
-              ? `${EM_DASH} range`
-              : `5th–95th percentile ${formatCount(outlook.points_p05)}–${formatCount(outlook.points_p95)} points`}
-          </span>
-        </dd>
-      </div>
-      <div className={styles.tile}>
-        <dt className={styles.term}>P(title)</dt>
-        <dd className={styles.value}>{formatPercent(outlook?.p_title)}</dd>
-      </div>
-      <div className={styles.tile}>
-        <dt className={styles.term}>P(UCL)</dt>
-        <dd className={styles.value}>{formatPercent(outlook?.p_ucl)}</dd>
-      </div>
-      <div className={styles.tile}>
-        <dt className={styles.term}>P(Europe)</dt>
-        <dd className={styles.value}>{formatPercent(outlook?.p_europe)}</dd>
-      </div>
-      <div className={styles.tile}>
-        <dt className={styles.term}>P(relegation)</dt>
-        <dd className={styles.value}>
-          {formatPercent(outlook?.p_relegation)}
-        </dd>
-      </div>
-    </dl>
   );
 }
 
@@ -288,7 +261,7 @@ export default async function FocusPage(
     );
   }
 
-  const focus = focusResult.data;
+  const focus: TeamFocus = focusResult.data;
   // The season shown and passed on is the one the API resolved, not the raw
   // query value: a request without `?season=` still renders a season.
   const season = focus.season;
@@ -308,12 +281,8 @@ export default async function FocusPage(
   return (
     <div className={styles.main}>
       <header className={styles.header}>
+        <p className={styles.eyebrow}>{`Team focus · ${season}`}</p>
         <h1 className={styles.title}>{focus.team.name}</h1>
-        <p className={styles.intro}>
-          The {season} season of {focus.team.name}: its table row, the points the
-          market expected and, when a simulation is stored, the projected
-          finish.
-        </p>
         <div className={styles.controls}>
           <SeasonSelect options={options} value={season} path={path} />
           {teamsResult.ok ? (
@@ -334,41 +303,57 @@ export default async function FocusPage(
         </div>
       </header>
 
-      <OutlookTiles standing={focus.standing} outlook={focus.outlook} />
-      {focus.outlook === null ? (
-        <p className={styles.note}>
-          No simulation is stored for the {season} season, so every projected
-          tile above is unknown. <code>make simulate</code> stores one.
-        </p>
-      ) : null}
-
-      <Suspense fallback={<SectionSkeleton label={POINTS_LABEL} />}>
-        <PointsSection teamId={teamId} season={season} seasonOptions={options} />
-      </Suspense>
-      <Suspense
-        fallback={<SectionSkeleton label={SPLITS_LABEL} rows={4} />}
-      >
-        <SplitsSection teamId={teamId} season={season} seasonOptions={options} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton label={TREND_LABEL} rows={2} />}>
-        <TrendSection teamId={teamId} />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton label={RACE_LABEL} rows={4} />}>
-        <RaceSection
-          teamId={teamId}
-          season={season}
-          teamName={focus.team.name}
+      <Suspense fallback={<SectionSkeleton label={STORY_LABEL} rows={3} />}>
+        <StorySection
           outlook={focus.outlook}
-        />
-      </Suspense>
-      <Suspense fallback={<SectionSkeleton label={NEXT_MATCH_LABEL} />}>
-        <NextMatchSection
-          teamId={teamId}
           season={season}
-          teamName={focus.team.name}
-          upcoming={focus.upcoming}
+          splits={focus.splits}
+          standing={focus.standing}
+          teamId={teamId}
         />
       </Suspense>
+
+      <SectionNav sections={NAV_SECTIONS} />
+
+      <div className={styles.anchor} id="diagnosis">
+        <Suspense
+          fallback={<SectionSkeleton label={DIAGNOSIS_LABEL} rows={4} />}
+        >
+          <DiagnosisSection
+            season={season}
+            seasonOptions={options}
+            teamId={teamId}
+          />
+        </Suspense>
+      </div>
+      <div className={styles.anchor} id="race">
+        <Suspense fallback={<SectionSkeleton label={RACE_LABEL} rows={4} />}>
+          <RaceSection
+            outlook={focus.outlook}
+            season={season}
+            teamId={teamId}
+            teamName={focus.team.name}
+          />
+        </Suspense>
+      </div>
+      <div className={styles.anchor} id="next">
+        <Suspense fallback={<SectionSkeleton label={NEXT_MATCH_LABEL} />}>
+          <NextMatchSection
+            outlook={focus.outlook}
+            season={season}
+            teamId={teamId}
+            teamName={focus.team.name}
+            upcoming={focus.upcoming}
+          />
+        </Suspense>
+      </div>
+      <div className={styles.anchor} id="trend">
+        <Suspense fallback={<SectionSkeleton label={TREND_LABEL} rows={2} />}>
+          <TrendSection teamId={teamId} />
+        </Suspense>
+      </div>
+
+      <HowToRead items={HOW_TO_READ} />
     </div>
   );
 }

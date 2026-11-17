@@ -246,20 +246,48 @@ function TrendFigure(props: {
   );
 }
 
+/**
+ * The four metrics the section shows outright.
+ *
+ * The rest stay behind one disclosure: a reader who wants the whole history can
+ * open it, and a phone is not asked to scroll past ten sparklines to reach the
+ * next section. The order here is the order the grid prints them.
+ */
+const HEADLINE_KEYS: readonly string[] = [
+  "position",
+  "points_pg",
+  "goals_for_pg",
+  "goals_against_pg",
+];
+
 /** The grid of figures, for a club with at least one played season. */
 function TrendBody(props: { readonly history: TeamHistory }): ReactElement {
   const { history } = props;
+  const first = history.seasons[0]?.season ?? "";
+  const last = history.seasons[history.seasons.length - 1]?.season ?? "";
+  const headline = METRICS.filter((metric) => HEADLINE_KEYS.includes(metric.key));
+  const others = METRICS.filter((metric) => !HEADLINE_KEYS.includes(metric.key));
 
   return (
     <>
       <p className={styles.note}>
-        {`One sparkline per metric over the ${formatCount(history.seasons.length)} seasons ${history.team.name} played, oldest first. A season the club did not play, or without a recorded value, is a gap in the line; the highlighted segment is the steepest drop the API published for that metric. A lower league position is a better finish, so the position line is read the other way round.`}
+        {`Every La Liga season of ${history.team.name} from ${first} to ${last}`}
       </p>
       <div className={styles.trendGrid}>
-        {METRICS.map((metric) => (
+        {headline.map((metric) => (
           <TrendFigure history={history} key={metric.key} metric={metric} />
         ))}
       </div>
+      <details className={styles.disclosure}>
+        <summary className={styles.summary}>
+          {`All metrics (${formatCount(others.length)} more)`}
+        </summary>
+        <div className={styles.trendGrid}>
+          {others.map((metric) => (
+            <TrendFigure history={history} key={metric.key} metric={metric} />
+          ))}
+        </div>
+      </details>
     </>
   );
 }

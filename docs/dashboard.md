@@ -52,7 +52,7 @@ the one fact the client still has, and it ties the screen to the server log.
 | `/teams` | The clubs of one season (`?season=`) and the picker that stores the focus team (`?pick=focus`). |
 | `/teams/[teamId]` | One club's season (`?season=`): season at a glance, home and away split, for and against, results, next fixtures and the focus form. Empty states name `make ingest` and `make simulate`. |
 | `/focus` | Resolves the focus team and redirects to `/focus/<teamId>`; it renders nothing itself. |
-| `/focus/[teamId]` | The team focus page: season diagnosis, the multi-season trend, the relegation race and the next-match preview (MVP specification, section 6). |
+| `/focus/[teamId]` | The team focus page (MVP specification, section 6): a story card that states the season in one sentence and beside it four headline tiles, then the season diagnosis, the relegation race, the next match with what each result would change, the multi-season trend, and a `How to read this page` block. The sticky section bar links to the four sections, and every metric carries a help control. |
 | `/performance` | The backtest metrics per model and season and the live predictions against the market (`?subset=all\|common`). Empty states name `make backtest` and `make predict`. |
 | `/dev/charts` | The chart gallery, behind `LMI_DEV_PAGES=1`. |
 
@@ -133,6 +133,15 @@ cookie when `GET /v1/teams/{id}` answers for it; otherwise the exact name in
 team, and `/focus` sends the reader to `/teams?pick=focus` instead of guessing.
 The teams index stores the choice through a Server Action, which sets the cookie
 for a year.
+
+The story card at the top of `/focus/[teamId]` states the season in one sentence.
+`apps/web/app/focus/[teamId]/story.ts` holds its rules: the band is the first
+match of relegation 0.10, title 0.10, Champions League 0.25 and Europe 0.25, and
+a clause appears only when its sample supports it — a priced match count equal to
+the matches played, or both venues with at least three matches and a gap of at
+least 0.75 points per match. A number the API does not have renders as an em
+dash and never as zero, and every section reads the run its own payload names
+rather than the season's latest run, so no page compares two simulations.
 
 ## Commands
 
