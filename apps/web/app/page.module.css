@@ -98,54 +98,53 @@
   line-height: 1.5;
 }
 
-/* A circled i drawn from a border and a letter, so the hint's mark renders in
-   every font stack; the page's stack has no glyph for the ⓘ character and drew
-   a missing-glyph box in its place. The letter comes from the rule below rather
-   than the markup, so the paragraph's text reads as prose for a reader and for
-   the screen reader that hears the hidden word after it. */
-.infoMark {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.8rem;
-  height: 0.8rem;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  vertical-align: -0.05em;
-}
-
-.infoMark::after {
-  font-size: 0.5625rem;
-  font-weight: 700;
-  line-height: 1;
-  content: "i";
-}
-
-/* The shared help control draws one character, and the page's font stack has no
-   glyph for it, so every metric header reached a reader as a missing-glyph box.
-   This page draws its own mark over the control's own span: the circle and the
-   letter come from here, the accessible name stays the component's. Scoped to
-   this page's headers and phone rows, so other pages keep the component as it
-   was written. */
+/* A circled i drawn by geometry rather than by a character: the page's font
+   stack has no glyph for the ⓘ character and drew a missing-glyph box in its
+   place. The dot and the stem are drawn here, so the mark renders at any font,
+   and the paragraph's text stays prose for a reader and for the screen reader
+   that hears the hidden word after it. */
+.infoMark,
 .metricHead summary > span,
 .listMetricTerm summary > span {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 0.8rem;
-  height: 0.8rem;
+  width: 0.8125rem;
+  height: 0.8125rem;
   border: 1px solid currentColor;
   border-radius: 999px;
+  /* The shared control draws one character in this span; the mark replaces it. */
   font-size: 0;
+  vertical-align: -0.1em;
 }
 
+.infoMark::before,
+.infoMark::after,
+.metricHead summary > span::before,
+.metricHead summary > span::after,
+.listMetricTerm summary > span::before,
+.listMetricTerm summary > span::after {
+  position: absolute;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+  transform: translateX(-50%);
+}
+
+/* The dot of the i, and the gap that keeps it a letter rather than a bar. */
+.infoMark::before,
+.metricHead summary > span::before,
+.listMetricTerm summary > span::before {
+  bottom: 7px;
+  height: 2px;
+}
+
+.infoMark::after,
 .metricHead summary > span::after,
 .listMetricTerm summary > span::after {
-  font-size: 0.5625rem;
-  font-weight: 700;
-  line-height: 1;
-  content: "i";
+  bottom: 2px;
+  height: 4px;
 }
 
 /* The selector keeps the width of its own control instead of stretching across

@@ -45,8 +45,12 @@ RANKED_ITEM = re.compile(r"^(?P<club>.+?) (?P<chance><1%|>99%|\d+%)$")
 # The clause a ranked sentence closes with once it stops listing clubs.
 RANKED_TAIL = re.compile(r" (?:Nobody else reaches \d+%\.|\d+ more clubs? reach(?:es)? \d+%\.)$")
 # The sure part of the Champions League card, which precedes its contenders.
-CL_SURE_PART = re.compile(r"^.+? in at least \d+% of seasons\. ?")
+CL_SURE_PART = re.compile(
+    r"^(?P<clubs>.+?) reach(?:es)? the top \d+ in at least \d+% of seasons\. ?"
+)
 CONTENDING = "Contending: "
+# The separator `joinNames` writes before the last of several names.
+NAME_JOIN = re.compile(r", | and ")
 
 # The column keys of the header row, in the order the table draws them. The
 # default width is the laptop view; `?columns=all` adds the result breakdown and
@@ -359,6 +363,29 @@ def _chance_band(
     return certain, ambiguous
 
 
+def _printed_chance(written: str) -> tuple[float, float]:
+    """Return a written chance as the interval of percentages it stands for.
+
+    A card writes a whole percentage and names both ends (`<1%`, `>99%`), so each
+    written chance covers a range rather than one number, and a check against it
+    has to allow for that range.
+    """
+    if written == "<1%":
+        return (0.0, 1.0)
+    if written == ">99%":
+        return (99.0, 100.0)
+    value = float(written.removesuffix("%"))
+    return (value - 0.5, value + 0.5)
+
+
+def _sure_clubs(sentence: str) -> list[str]:
+    """Return the clubs a Champions League card names as all but certain."""
+    match = CL_SURE_PART.match(sentence)
+    if match is None:
+        return []
+    return NAME_JOIN.split(match.group("clubs"))
+
+
 def _assert_shortlist(
     named: list[tuple[str, str]],
     chances: dict[str, float],
@@ -375,15 +402,28 @@ def _assert_shortlist(
     order fails here.
     """
     certain, ambiguous = _chance_band(chances, minimum, maximum)
-    for club, _ in named:
+    for club, written in named:
         assert club in chances, f"{what} names {club!r}, which has no {what} chance"
         assert club in certain or club in ambiguous, (
             f"{what} names {club!r} at {chances[club]}%, outside the band its sentence claims"
         )
-    printed = [chances[club] for club, _ in named]
-    assert printed == sorted(printed, reverse=True), (
+        # The written chance is the table's chance at the card's own precision, so
+        # a card that names the right club with the wrong number fails here.
+        low, high = _printed_chance(written)
+        assert low - 0.05 <= chances[club] <= high + 0.05, (
+            f"{what} writes {club!r} at {written} where the table shows {chances[club]}%"
+        )
+    written_chances = [chances[club] for club, _ in named]
+    assert written_chances == sorted(written_chances, reverse=True), (
         f"{what} lists {[club for club, _ in named]} in an order the table does not "
-        f"support: {printed} against {chances}"
+        f"support: {written_chances} against {chances}"
+    )
+    # A card names as many clubs as its band holds, up to its cap: it may not
+    # quietly drop a club that qualifies, however near a threshold that club is.
+    available = len(certain) + len(ambiguous)
+    assert len(named) == min(available, cap), (
+        f"{what} names {len(named)} clubs where {min(available, cap)} of the "
+        f"{available} clubs in its band fit"
     )
     if ambiguous:
         return
@@ -645,6 +685,23 @@ def test_glance_shortlists_match_the_table_chances(page: Page, dashboard_url: st
         "the Champions League card",
     )
 
+    # The clubs it calls all but certain are the clubs the table's Top column
+    # puts there, in the table's order: the sentence may not invent a certainty
+    # the run does not store, and may not leave a certain club out.
+    ucl_chances = _chance_by_club(table, "ucl")
+    sure_clubs = _sure_clubs(ucl)
+    for club in sure_clubs:
+        assert club in ucl_chances, f"the sure clause names {club!r}, which has no chance"
+        assert ucl_chances[club] >= 94.5, f"the sure clause names {club!r} at {ucl_chances[club]}%"
+    certain_sure = [club for club, chance in ucl_chances.items() if chance >= 95.05]
+    assert sure_clubs == [club for club in certain_sure if club in sure_clubs], (
+        f"the sure clause names {sure_clubs} where the run's certain clubs are "
+        f"{certain_sure}, in that order"
+    )
+    assert set(certain_sure) <= set(sure_clubs), (
+        f"the sure clause leaves out {sorted(set(certain_sure) - set(sure_clubs))}"
+    )
+
     # The relegation card: every club at 10% or more, the top four named.
     relegation_named = [] if relegation.startswith("No club goes down") else _ranked(relegation)
     _assert_shortlist(
@@ -836,6 +893,10 @@ def test_phone_layout_fits_390(page: Page, dashboard_url: str, simulated: bool) 
         summary = rows.nth(index).locator("summary").first
         for cell in ("pos", "club", "pts"):
             expect(summary.locator(f'[data-cell="{cell}"]')).to_have_count(1)
+        # A cell that exists but holds nothing would pass a count alone.
+        for cell in ("pos", "club", "pts"):
+            text = summary.locator(f'[data-cell="{cell}"]').inner_text().strip()
+            assert text != "", f"row {index} renders an empty {cell} cell"
         expect(summary.locator("svg title")).to_have_text(FORM_TITLE)
 
         # The zone is colour and a name: the row's own attribute, and the name a
