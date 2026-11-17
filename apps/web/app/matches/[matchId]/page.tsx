@@ -93,6 +93,24 @@ const BASELINE_MODELS: readonly Prediction["model"][] = ["base_rate", "home_win"
 /** One side of a club's per-match line. */
 type StatSide = keyof SeasonStats["per_match"];
 
+/** Table order of stored forecasts: the fitted models first, in the order the
+ * header reads them, then the market and the two baselines they must beat. */
+const MODEL_ORDER: readonly string[] = [
+  "dixon_coles",
+  "elo",
+  "market",
+  "base_rate",
+  "home_win",
+];
+
+function byModelOrder<T extends { model: string }>(rows: readonly T[]): T[] {
+  const rank = (model: string): number => {
+    const index = MODEL_ORDER.indexOf(model);
+    return index === -1 ? MODEL_ORDER.length : index;
+  };
+  return [...rows].sort((left, right) => rank(left.model) - rank(right.model));
+}
+
 /** The metrics of the profile, in the order the design lists them. */
 const PROFILE_METRICS: readonly {
   readonly label: string;
@@ -816,7 +834,7 @@ export default async function MatchPage(
                 </tr>
               </thead>
               <tbody>
-                {standing.map((prediction) => (
+                {byModelOrder(standing).map((prediction) => (
                   <ModelRow
                     key={prediction.prediction_id}
                     prediction={prediction}
