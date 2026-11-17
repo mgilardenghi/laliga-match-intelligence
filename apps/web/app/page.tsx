@@ -317,7 +317,7 @@ export default async function HomePage(
               reader as a missing-glyph box. The mark is decorative; the
               visually hidden word keeps the sentence readable aloud. */}
           <span aria-hidden="true" className={styles.infoMark} />
-          <span className={styles.visuallyHidden}>{"info "}</span>
+          <span className={styles.visuallyHidden}>info</span>{" "}
           on a header for its definition.
         </p>
         {run === null ? null : <Legend items={legendItems} />}

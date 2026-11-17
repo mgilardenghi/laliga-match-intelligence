@@ -44,7 +44,7 @@ type SequentialPaint = {
 // a token and its fallback staying identical.
 const SEQUENTIAL_COLOURS: readonly SequentialPaint[] = [
   { fill: "var(--seq-0, #f0f4f9)", fallback: "#f0f4f9" },
-  { fill: "var(--seq-1, #dbe9f6)", fallback: "#dbe9f6" },
+  { fill: "var(--seq-1, #c6dbef)", fallback: "#c6dbef" },
   { fill: "var(--seq-2, #9ecae1)", fallback: "#9ecae1" },
   { fill: "var(--seq-3, #6baed6)", fallback: "#6baed6" },
   { fill: "var(--seq-4, #3f8fc4)", fallback: "#3f8fc4" },
