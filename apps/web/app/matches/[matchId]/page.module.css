@@ -1,11 +1,10 @@
 /*
- * The match page: the fixture header, its sections, the two tables and the
- * mirrored profile chart.
+ * The match page: the fixture header, its sections, the tables and the charts.
  *
  * Only this page's own layout lives here. The heading, the charts, the states
  * and the formatters come from the shared modules, so a change to those is never
- * repeated here. Every colour is a token from globals.css; the chart's two fills
- * and its league tick are marks, and they clear 3:1 in both themes.
+ * repeated here. Every colour is a token from globals.css; the chart's fills and
+ * its league tick are marks, and they clear 3:1 in both themes.
  */
 
 .main {
@@ -25,35 +24,106 @@
 .header {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 .title {
   font-size: clamp(1.5rem, 4vw, 2rem);
   letter-spacing: -0.02em;
   line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
-/* The kickoff date, the source's local time, the status and the matchday link
-   read as one line on a wide screen and as a stack on a narrow one. */
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
+.homeName {
+  color: var(--side-home);
+}
+
+.awayName {
+  color: var(--side-away);
+}
+
+.vs {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.lead {
+  max-width: 48rem;
+  line-height: 1.6;
+}
+
+.range {
+  max-width: 48rem;
   color: var(--muted);
   font-size: 0.875rem;
+  line-height: 1.5;
 }
 
-.result {
+.resultForecast {
+  max-width: 48rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* The home line, the kickoff and the away line: one row on a wide screen and a
+   stack on a phone. */
+.headerGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.headerSide {
+  min-width: 0;
+}
+
+.headerSideAway {
+  text-align: right;
+}
+
+.sideLabel {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.standingLine {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.headerCentre {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  text-align: center;
+}
+
+.centreMeta {
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.centreStatus {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .score {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .section {
@@ -63,19 +133,23 @@
   min-width: 0;
 }
 
+.headingRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  min-width: 0;
+}
+
 .sectionTitle {
   font-size: 1.15rem;
+  overflow-wrap: anywhere;
 }
 
 .subTitle {
   font-size: 0.95rem;
   color: var(--muted);
-}
-
-.lead {
-  max-width: 48rem;
-  color: var(--muted);
-  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .note {
@@ -84,14 +158,28 @@
   line-height: 1.5;
 }
 
-/* The charts stack in one column: each is a figure with its own caption and
-   data table, so a second column would make a two-up comparison of numbers that
-   have different scales. */
-.charts {
-  display: flex;
-  flex-direction: column;
+.marketNote {
+  font-style: normal;
+}
+
+/* Form and head-to-head are two cards, side by side where the width allows and
+   stacked on a phone. */
+.cardGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   min-width: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
 }
 
 .formBlock {
@@ -108,7 +196,7 @@
 
 .table {
   width: 100%;
-  min-width: 20rem;
+  min-width: 0;
   border-collapse: collapse;
   color: var(--text);
 }
@@ -125,6 +213,7 @@
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: middle;
+  overflow-wrap: anywhere;
 }
 
 .headCell {
@@ -133,23 +222,167 @@
   font-weight: 600;
 }
 
-/* The labelled column travels with the reader while the table scrolls
-   sideways, so a number is never separated from the row it belongs to. The
-   background is opaque for the same reason. */
-.stickyColumn {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background: var(--background);
+/* Numeric cells keep their number on one line and a fixed width, so a row of
+   percentages never wraps in the middle of a value. */
+.numericCell {
+  width: 4.5rem;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.modelCell {
+  min-width: 0;
+  font-weight: 400;
+}
+
+.modelLabel {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.modelSub {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* The unlabelled stacked bar of one model row: the widths are the stored
+   probabilities, and the table keeps the exact numbers beside it. */
+.modelBar {
+  display: flex;
+  height: 0.35rem;
+  margin-top: 0.35rem;
+  overflow: hidden;
+  border-radius: 0.175rem;
+  background: var(--border);
+}
+
+.modelBarHome,
+.modelBarDraw,
+.modelBarAway {
+  flex: 0 0 auto;
+  height: 100%;
+}
+
+.modelBarHome {
+  background: var(--side-home);
+}
+
+.modelBarDraw {
+  background: var(--side-draw);
+}
+
+.modelBarAway {
+  background: var(--side-away);
+}
+
+/* A baseline is a simple rule, not a model, so its row is quiet. */
+.baselineRow {
+  color: var(--muted);
+}
+
+/* The head-to-head record: three shares of the meetings, then their labels. */
+.recordPlot {
+  max-width: 40rem;
+  min-width: 0;
+}
+
+.recordTrack {
+  display: flex;
+  height: 1.5rem;
+  overflow: hidden;
+  border-radius: 0.25rem;
+  background: var(--border);
+}
+
+.recordSegment {
+  flex-basis: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.recordHome {
+  background: var(--side-home);
+}
+
+.recordDraw {
+  background: var(--side-draw);
+}
+
+.recordAway {
+  background: var(--side-away);
+}
+
+.recordLabels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.recordLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.recordSwatch {
+  flex: 0 0 auto;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 0.125rem;
+}
+
+.meetings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-left: 1.1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.meetings li {
+  overflow-wrap: anywhere;
+}
+
+.meetingsDetails {
+  font-size: 0.875rem;
+}
+
+.meetingsDetails summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.matchCell {
+  overflow-wrap: anywhere;
 }
 
 .nowrap {
   white-space: nowrap;
 }
 
-/* The profile chart. Text uses the page's text tokens and the marks use the
-   accent, the first categorical series and the muted token; the league tick is
-   a mark, so it needs 3:1 and not 4.5:1. */
+.resultLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.resultHelp {
+  display: flex;
+}
+
 /* The chart is drawn at its natural size: the component gives the SVG the
    pixel width and height of its own `viewBox`, so the rendered scale is exactly
    1 and no label inside it is ever scaled. */
@@ -166,7 +399,6 @@
   overflow-x: auto;
 }
 
-.chartRowLabel,
 .chartLabel {
   fill: var(--text);
   font-size: 12px;
@@ -182,12 +414,12 @@
   stroke-width: 1;
 }
 
-.chartOwn {
-  fill: var(--accent);
+.chartHome {
+  fill: var(--side-home);
 }
 
-.chartAgainst {
-  fill: var(--cat-1);
+.chartAway {
+  fill: var(--side-away);
 }
 
 .chartLeague {
@@ -208,4 +440,16 @@
   stroke: var(--background);
   stroke-width: 3px;
   stroke-linejoin: round;
+}
+
+@media (min-width: 640px) {
+  .headerGrid {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 900px) {
+  .cardGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
