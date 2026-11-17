@@ -45,14 +45,17 @@ export type MirroredBarsProps = {
 const WIDTH = 300;
 const PLOT_LEFT = 44;
 const PLOT_RIGHT = 256;
-const VALUE_GAP = 5;
 const CENTRE = (PLOT_LEFT + PLOT_RIGHT) / 2;
 const HALF_WIDTH = CENTRE - PLOT_LEFT;
-// A row holds its 12 px label on top and the bar pair below it.
-const ROW_HEIGHT = 40;
+// A row holds its 12 px label on top, the bar pair below it, and the printed
+// value under the outer end of each bar: the value sits in its own lane, so the
+// league tick crossing the bar band can never cut through the digits.
+const ROW_HEIGHT = 52;
 const LABEL_OFFSET = 8;
-const BAR_OFFSET = 18;
+const BAR_OFFSET = 16;
 const BAR_HEIGHT = 14;
+const VALUE_OFFSET = BAR_OFFSET + BAR_HEIGHT + 10;
+const VALUE_GAP = 5;
 const TOP = 26;
 const BOTTOM = 10;
 
@@ -110,7 +113,7 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
           {rows.map((row, index) => {
             const rowTop = TOP + index * ROW_HEIGHT;
             const y = rowTop + BAR_OFFSET;
-            const centreY = y + BAR_HEIGHT / 2;
+            const valueY = rowTop + VALUE_OFFSET;
             // Each row is scaled to its own largest value, so a row of goals and
             // a row of shots both use the width they need.
             const scale = linearScale([0, niceMax(largest(row))], [0, HALF_WIDTH]);
@@ -182,7 +185,7 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
                     number stays legible where the two meet. */}
                 <text
                   x={CENTRE - leftWidth - VALUE_GAP}
-                  y={centreY}
+                  y={valueY}
                   textAnchor="end"
                   dominantBaseline="central"
                   className={styles.chartValue}
@@ -191,7 +194,7 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
                 </text>
                 <text
                   x={CENTRE + rightWidth + VALUE_GAP}
-                  y={centreY}
+                  y={valueY}
                   textAnchor="start"
                   dominantBaseline="central"
                   className={styles.chartValue}
