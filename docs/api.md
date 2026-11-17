@@ -732,7 +732,8 @@ when the run holds no row for the club. A `null` is unknown, never zero.
 **Two measurements, not a contradiction.** `p_outcome` is the simulated
 frequency of a result, not a model probability, so it may differ slightly --
 about half a percentage point at 10 000 runs -- from the model probability in
-`remaining_fixtures[0].p_win`, `p_draw` and `p_loss` for the same fixture. They
+the `p_win`, `p_draw` and `p_loss` of the `remaining_fixtures` entry whose match id is
+`next_match.match_id`. They
 are two measurements of the same match, not a contradiction: the frequency is
 what the run's samples produced, while the fixture triple is the model's
 probability of the fixture.

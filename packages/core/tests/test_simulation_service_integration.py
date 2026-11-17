@@ -925,8 +925,9 @@ def test_detail_rows_stay_within_the_storage_bound(database: Database) -> None:
     assert len(fixtures) + len(next_matches) <= 440
 
 
+@pytest.mark.parametrize("as_of_days", [24, 28], ids=["between-matchdays", "on-a-kickoff-date"])
 def test_a_postponed_fixture_is_simulated_but_never_named_the_next_match(
-    database: Database,
+    database: Database, as_of_days: int
 ) -> None:
     """A scheduled fixture dated before the as-of date is not a club's next match.
 
@@ -948,7 +949,7 @@ def test_a_postponed_fixture_is_simulated_but_never_named_the_next_match(
         teams=teams,
         specs=list(reversed(specs)),
     )
-    as_of = start + datetime.timedelta(days=24)
+    as_of = start + datetime.timedelta(days=as_of_days)
 
     run_id, _ = _request_run(database, as_of)
     simulation_service.execute_run(database.sessions, run_id)
@@ -962,6 +963,8 @@ def test_a_postponed_fixture_is_simulated_but_never_named_the_next_match(
     assert {team_id: min(ids) for team_id, ids in stored_ids_by_team.items()} == expected
     assert all(len(ids) == 1 for ids in stored_ids_by_team.values())
 
+    # A fixture dated exactly on the as-of date is eligible (the rule is >=), which
+    # the second case checks: its clubs name that fixture, not a later one.
     # The guard has teeth only while a postponed fixture exists and is simulated:
     # the fourth matchday is dated before the as-of date and every club plays it.
     postponed = {
