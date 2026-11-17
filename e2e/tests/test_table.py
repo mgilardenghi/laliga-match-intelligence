@@ -1002,7 +1002,9 @@ def test_the_heatmap_hint_shows_exactly_where_the_grid_scrolls(
     it the hint stays while the grid still has to scroll.
     """
     page.set_viewport_size({"width": width, "height": 900})
-    page.goto(dashboard_url)
+    page.goto(dashboard_url, wait_until="networkidle")
+    # A late font swap can move the grid by a pixel at the tightest width.
+    page.evaluate("() => document.fonts.ready.then(() => true)")
     region = page.locator("[data-heatmap-scroll]")
     expect(region).to_have_count(1)
     scrolls = region.evaluate("(element) => element.scrollWidth > element.clientWidth + 1")
