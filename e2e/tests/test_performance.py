@@ -1209,7 +1209,9 @@ def test_the_live_section_reports_no_scored_rows_without_a_played_forecast(
 
     counts = _live_counts(page)
     assert counts["Scored"] == "0", (
-        f"the live report scores {counts['Scored']} rows before a fixture is flipped"
+        f"the live report scores {counts['Scored']} rows before a fixture is flipped; a "
+        "previous run may have died with its fixtures flipped to played, so reset the "
+        "throwaway stack with `make e2e-down` and load it again with `make e2e-data`"
     )
     assert int(counts["Pending"]) > 0, (
         "the live report holds no pending forecast, so its unscored state is not tested"

@@ -10,6 +10,7 @@ database to do it.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 """The repository root, where the Compose files live."""
+
+THROWAWAY_PROJECT = re.compile(r"lmi-e2e(-[a-z0-9][a-z0-9_-]*)?")
+"""The Compose project names a browser test may write to."""
 
 
 def psql(sql: str) -> str:
@@ -26,10 +30,15 @@ def psql(sql: str) -> str:
     guard validates, and it is passed as an argument, never through a shell.
     """
     project = os.environ.get("E2E_PROJECT", "lmi-e2e")
-    # The developer's own stack is the Compose project `lmi`; this helper writes,
-    # so it refuses that name even though the Makefile guard already does.
-    if project.lower() == "lmi":
-        pytest.fail("E2E_PROJECT names the developer stack `lmi`; refusing to write to it")
+    # This helper writes, and a test can be run without `make`, so the Makefile
+    # guard is not enough. An empty project name makes Compose fall back to the
+    # `name: lmi` of docker-compose.yml, which is the developer's own stack. Only
+    # the throwaway family (`lmi-e2e`, `lmi-e2e-u2`, ...) is accepted.
+    if THROWAWAY_PROJECT.fullmatch(project) is None:
+        pytest.fail(
+            f"E2E_PROJECT {project!r} is not a throwaway project name "
+            "(lmi-e2e or lmi-e2e-<suffix>); refusing to write to it"
+        )
     command = [
         "docker",
         "compose",
