@@ -23,7 +23,6 @@ import { MetricHelp } from "@/components/ui";
 import {
   EM_DASH,
   formatPercent,
-  formatPoints,
   formatValue,
 } from "@/lib/format";
 import { modelLabel } from "@/lib/labels";
@@ -51,6 +50,20 @@ import styles from "./page.module.css";
 
 /** The label the `<Suspense>` boundary of this section shows while it reads. */
 export const SECTION_LABEL = "Next match";
+
+/** Display order of stored forecasts: fitted models first, baselines last. */
+const MODEL_ORDER: readonly string[] = [
+  "dixon_coles",
+  "elo",
+  "market",
+  "base_rate",
+  "home_win",
+];
+
+function modelRank(model: string): number {
+  const rank = MODEL_ORDER.indexOf(model);
+  return rank === -1 ? MODEL_ORDER.length : rank;
+}
 
 /**
  * What the panel says when the stored run carries no swing for the fixture.
@@ -235,7 +248,7 @@ function SwingTable(props: {
                 "Chance of result",
                 featuredLabel(band, qualification),
                 "Change",
-                "Expected points",
+                "Expected final points",
               ].map((column, index) => (
                 <th
                   className={`${styles.cell} ${styles.headCell}${
@@ -244,7 +257,11 @@ function SwingTable(props: {
                   key={column}
                   scope="col"
                 >
-                  {column}
+                  {index === 0 ? (
+                    <span className={styles.phoneHidden}>{column}</span>
+                  ) : (
+                    column
+                  )}
                 </th>
               ))}
             </tr>
@@ -265,7 +282,7 @@ function SwingTable(props: {
                   {row.change === null ? EM_DASH : changeInPoints(row.change)}
                 </td>
                 <td className={`${styles.cell} ${styles.numeric}`}>
-                  {formatPoints(row.expectedPoints)}
+                  {formatValue(row.expectedPoints, 1)}
                 </td>
               </tr>
             ))}
@@ -302,22 +319,22 @@ function SwingTable(props: {
                   </th>
                   <td className={`${styles.cell} ${styles.numeric}`}>
                     {row.label === "Expected points"
-                      ? formatPoints(row.now)
+                      ? formatValue(row.now, 1)
                       : formatPercent(row.now)}
                   </td>
                   <td className={`${styles.cell} ${styles.numeric}`}>
                     {row.label === "Expected points"
-                      ? formatPoints(row.win)
+                      ? formatValue(row.win, 1)
                       : formatPercent(row.win)}
                   </td>
                   <td className={`${styles.cell} ${styles.numeric}`}>
                     {row.label === "Expected points"
-                      ? formatPoints(row.draw)
+                      ? formatValue(row.draw, 1)
                       : formatPercent(row.draw)}
                   </td>
                   <td className={`${styles.cell} ${styles.numeric}`}>
                     {row.label === "Expected points"
-                      ? formatPoints(row.loss)
+                      ? formatValue(row.loss, 1)
                       : formatPercent(row.loss)}
                   </td>
                 </tr>
@@ -377,8 +394,13 @@ async function NextMatchBody(
 
   const swing = raceResult.ok ? raceResult.data.next_match : null;
 
-  const firstPrediction = first.predictions[0];
-  const otherPredictions = first.predictions.slice(1);
+  // The headline bar is the main forecast (Dixon-Coles, then Elo, as on the
+  // match page), never a baseline; the rest follow behind the disclosure.
+  const ordered = [...first.predictions].sort(
+    (a, b) => modelRank(a.model) - modelRank(b.model),
+  );
+  const firstPrediction = ordered[0];
+  const otherPredictions = ordered.slice(1);
 
   return (
     <>

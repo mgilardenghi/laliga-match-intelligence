@@ -32,6 +32,7 @@ import {
   formatCount,
   formatPercent,
   formatPoints,
+  formatValue,
 } from "@/lib/format";
 import { formatMadridDate } from "@/lib/madrid";
 
@@ -307,7 +308,7 @@ function RivalsTable(props: {
                   {rival.team.name}
                 </th>
                 <td className={`${styles.cell} ${styles.numeric}`}>
-                  {formatPoints(rival.expected_points)}
+                  {formatValue(rival.expected_points, 1)}
                 </td>
                 <td className={`${styles.cell} ${styles.numeric}`}>
                   {formatPercent(rival.p_relegation)}

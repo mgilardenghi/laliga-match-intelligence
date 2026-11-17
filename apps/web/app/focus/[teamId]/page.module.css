@@ -335,13 +335,15 @@
   text-align: left;
 }
 
-/* A name wraps rather than being clipped or setting a minimum width: a club
-   name is the one cell whose content nobody can shorten. */
+/* A cell wraps between words, never inside one: "Rayo Vallecano" may take two
+   lines, "Draw" never becomes "D / ra / w". `break-word` (not `anywhere`) keeps
+   each word's width in the column's minimum, so the table sizes columns to whole
+   words and only an over-long single word is ever split. */
 .cell {
-  padding: 0.5rem 0.75rem 0.5rem 0;
+  padding: 0.5rem 0.5rem 0.5rem 0;
   border-bottom: 1px solid var(--border);
   text-align: left;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .rowHeader {
@@ -371,7 +373,40 @@
   font-size: 0.8125rem;
   font-weight: 600;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: manual;
+}
+
+/* On a phone a five-column table needs every pixel: body text drops to 14 px
+   (still inside the 11-18 px chart rule) and the gap between columns narrows,
+   so the swing table fits its card without a sideways scroll. */
+@media (max-width: 639.98px) {
+  .table {
+    font-size: 0.875rem;
+  }
+
+  .card {
+    padding: 1rem 0.75rem;
+  }
+
+  .cell {
+    padding-right: 0.25rem;
+  }
+
+  .headCell {
+    font-size: 0.75rem;
+  }
+
+  /* The rows already say Now / Win / Draw / Loss, so on a phone the "Outcome"
+     header is read by assistive technology but takes no width. */
+  .phoneHidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
 }
 
 @media (min-width: 640px) {
