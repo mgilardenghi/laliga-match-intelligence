@@ -1,10 +1,10 @@
 /*
- * The performance page: the run header, the prediction counts, the metric
+ * The performance page: the run header, the in-page sections, the metric
  * tables and the charts.
  *
- * Only this page's own layout lives here. The shell, the shared states and the
- * chart figures bring their own styles, so a change to those is never repeated
- * here. Every colour is a token from globals.css.
+ * Only this page's own layout lives here. The shell, the shared states, the
+ * UI foundation and the chart figures bring their own styles, so a change to
+ * those is never repeated here. Every colour is a token from globals.css.
  */
 
 .main {
@@ -39,6 +39,23 @@
   line-height: 1.6;
 }
 
+/* The two header sentences of a loaded run: the scope of the backtest, and the
+   one sentence the report wants read first. Both keep the measure of the intro
+   so the header reads as one block. */
+.lede {
+  max-width: 48rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.verdict {
+  max-width: 48rem;
+  color: var(--text);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 .section {
   display: flex;
   flex-direction: column;
@@ -46,12 +63,83 @@
   min-width: 0;
   padding-top: 1.25rem;
   border-top: 1px solid var(--border);
+  /* The section nav is sticky, so a fragment must stop below it rather than
+     under it. */
+  scroll-margin-top: 4rem;
 }
 
 .heading {
   font-size: 1.125rem;
   font-weight: 600;
   line-height: 1.3;
+}
+
+/* One block inside a section: the ranking, one score panel, one table. It
+   carries the same scroll offset as the section, because every one of these is
+   a fragment target of the nav above. */
+.subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  scroll-margin-top: 4rem;
+}
+
+.subheading {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* A heading with the help control that explains it. The row wraps, and an open
+   help panel takes the whole row instead of pushing the heading off centre. */
+.subheadingRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* The four headline scores. `auto-fit` with a 10rem floor gives two tiles on a
+   phone and four on a wide screen without a breakpoint of its own. */
+.scoreGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 1rem;
+  min-width: 0;
+}
+
+/* The calibration drawing is a fixed 320 px wide viewBox. The shell pads the
+   page by 1rem on each side and this page pads it by another, so a 390 px
+   viewport leaves 326 px for the card: it keeps its vertical padding and gives
+   up the horizontal padding on a phone, which fits the drawing instead of
+   scrolling it. */
+.calibrationCard {
+  padding: 0.75rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+/* The run's provenance, closed until a reader opens it: it answers how the
+   numbers were made and is not one of them. */
+.repro {
+  min-width: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 4rem;
+}
+
+.reproSummary {
+  color: var(--text);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.repro .pairs {
+  margin-top: 0.75rem;
 }
 
 .subsets {
@@ -137,18 +225,27 @@
   font-size: 0.875em;
 }
 
-/* Every wide table scrolls inside its own container rather than widening the
-   page, which keeps the chart figures below at the viewport width. */
+/* Every table still scrolls inside its own container as a last resort, but it
+   no longer needs to: see `.table`. */
 .tableWrap {
   min-width: 0;
   overflow-x: auto;
 }
 
+/* A fixed layout with no minimum width: the columns share the container, and
+   the ones a phone cannot show are dropped rather than scrolled, so a table
+   never widens the page. */
 .table {
   width: 100%;
-  min-width: 36rem;
+  table-layout: fixed;
   border-collapse: collapse;
   color: var(--text);
+}
+
+/* The model column is the one a reader scans by name, so it keeps a named
+   share of the width and the numbers share the rest. */
+.table th:first-child {
+  width: 34%;
 }
 
 .caption {
@@ -158,17 +255,39 @@
   text-align: left;
 }
 
+/* A cell holds either a number or a word. A word wraps inside its fixed column
+   instead of forcing the column wider; `.numeric` turns the wrapping off again
+   for the values. */
 .cell {
   padding: 0.5rem 0.75rem 0.5rem 0;
   border-bottom: 1px solid var(--border);
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .headCell {
   color: var(--muted);
   font-size: 0.8125rem;
   font-weight: 600;
+  white-space: normal;
+}
+
+/* The metric name and its help control, with the gap written here instead of a
+   space in the markup. The row wraps, so a narrow column puts the control under
+   the name, and an open panel takes the whole cell width. */
+.headLabel {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* An open help panel is a block inside a narrow header cell: it wraps there
+   instead of widening the cell and the table with it. */
+.headCell details > div {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .rowHeader {
@@ -180,6 +299,34 @@
 .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Hidden on a phone: the columns a 390 px viewport cannot show without
+   scrolling sideways. Their best value is repeated in the tiles above. */
+@media (max-width: 639px) {
+  .lowPriority {
+    display: none;
+  }
+}
+
+/* The sentence that says what the phone layout left out. */
+.phoneNote {
+  max-width: 48rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* Text a screen reader reads and the eye does not: the "(best)" mark of a bold
+   value has no glyph of its own. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 @media (min-width: 640px) {
@@ -196,8 +343,12 @@
     gap: 0.4rem 1.25rem;
   }
 
-  .table {
-    min-width: 40rem;
+  .calibrationCard {
+    padding: 1.25rem;
+  }
+
+  .phoneNote {
+    display: none;
   }
 }
 
