@@ -44,9 +44,37 @@
   color: var(--accent);
 }
 
+/* A circled i drawn by geometry rather than by a character: no installed font
+   is needed, so the mark renders the same on every host. */
 .metricHelpGlyph {
-  font-size: 0.75rem;
-  line-height: 1;
+  position: relative;
+  display: inline-flex;
+  width: 0.8125rem;
+  height: 0.8125rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+}
+
+.metricHelpGlyph::before,
+.metricHelpGlyph::after {
+  position: absolute;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+  transform: translateX(-50%);
+}
+
+/* The dot of the i, and the gap that keeps it a letter rather than a bar. */
+.metricHelpGlyph::before {
+  bottom: 7px;
+  height: 2px;
+}
+
+.metricHelpGlyph::after {
+  bottom: 2px;
+  height: 4px;
 }
 
 .metricHelpPanel {
