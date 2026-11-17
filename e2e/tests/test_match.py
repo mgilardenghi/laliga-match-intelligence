@@ -46,6 +46,14 @@ HEADER_SUMMARY = re.compile(
     r"rates? a draw as the most likely result|rated a draw as the most likely result)"
     r"\.( Dixon-Coles and Elo disagreed? on the most likely result\.)?$"
 )
+# The templates above allow either tense, and they allow the model names in
+# every position, so they also allow a sentence whose subject and verb disagree.
+# This pins the agreement: "The models" takes the plural verb, a named model the
+# singular one.
+WRONG_AGREEMENT = re.compile(
+    r"\bThe models (?:sees|makes|rates|leans)\b"
+    r"|\b(?:Dixon-Coles|Elo) (?:see|make|rate|lean)\b"
+)
 # The header sentence a played fixture adds: the result, and where the stored
 # forecast ranked it.
 RESULT_FORECAST = re.compile(
@@ -302,6 +310,12 @@ def test_the_header_summarises_the_main_forecast(
         f"the {state} fixture's summary uses the wrong tense: {wrong_tense} in {text!r}"
     )
 
+    disagreement = WRONG_AGREEMENT.search(text)
+    assert disagreement is None, (
+        f"the {state} fixture's summary does not agree with its subject: "
+        f"{disagreement.group(0)!r} in {text!r}"
+    )
+
     # The summary is about the main forecast, so the page draws one bar for it
     # whichever wording names the model.
     expect(_probability_figures(page)).to_have_count(1)
@@ -376,31 +390,43 @@ def test_the_head_to_head_and_profile_render(page: Page, dashboard_url: str) -> 
     href = _first_card_link(page, dashboard_url)
     page.goto(f"{dashboard_url}{href}")
 
-    totals = page.locator("table").filter(has=page.locator("caption", has_text=H2H_CAPTION))
-    expect(totals).to_have_count(1)
+    record = page.locator("#head-to-head")
+    expect(record).to_have_count(1)
+    if record.get_by_text("No previous meetings").count() == 1:
+        # Two clubs that have never met is a state the API can return, and the
+        # page states it instead of drawing an empty record. The profile below
+        # still renders, so the assertion after this branch still applies.
+        expect(
+            record.locator("table").filter(has=page.locator("caption", has_text=H2H_CAPTION))
+        ).to_have_count(0)
+    else:
+        totals = page.locator("table").filter(has=page.locator("caption", has_text=H2H_CAPTION))
+        expect(totals).to_have_count(1)
 
-    last = page.locator("table").filter(has=page.locator("caption", has_text=LAST_MEETINGS_CAPTION))
-    expect(last).to_have_count(1)
-    caption = _normalise(last.locator("caption").inner_text())
-    caption_match = LAST_MEETINGS_CAPTION.fullmatch(caption)
-    assert caption_match is not None, f"the last-meetings caption reads {caption!r}"
-    listed = int(caption_match.group(1))
-    rows = last.locator(":scope > tbody > tr")
-    assert rows.count() == listed, (
-        f"the last-meetings caption promises {listed} meetings but the table lists "
-        f"{rows.count()} rows"
-    )
-    # The design bounds the list: at least one meeting since the clubs met, and
-    # never more than the ten newest.
-    assert 1 <= listed <= MAX_LAST_MEETINGS, (
-        f"the last-meetings table lists {listed} rows, expected 1 to {MAX_LAST_MEETINGS}"
-    )
+        last = page.locator("table").filter(
+            has=page.locator("caption", has_text=LAST_MEETINGS_CAPTION)
+        )
+        expect(last).to_have_count(1)
+        caption = _normalise(last.locator("caption").inner_text())
+        caption_match = LAST_MEETINGS_CAPTION.fullmatch(caption)
+        assert caption_match is not None, f"the last-meetings caption reads {caption!r}"
+        listed = int(caption_match.group(1))
+        rows = last.locator(":scope > tbody > tr")
+        assert rows.count() == listed, (
+            f"the last-meetings caption promises {listed} meetings but the table lists "
+            f"{rows.count()} rows"
+        )
+        # The design bounds the list: at least one meeting since the clubs met, and
+        # never more than the ten newest.
+        assert 1 <= listed <= MAX_LAST_MEETINGS, (
+            f"the last-meetings table lists {listed} rows, expected 1 to {MAX_LAST_MEETINGS}"
+        )
 
-    recent = page.locator("#head-to-head ul")
-    expect(recent).to_have_count(1)
-    # The design fixes the short list to three meetings, or to all of them when
-    # the clubs met fewer times.
-    expect(recent.locator("li")).to_have_count(min(RECENT_MEETINGS, listed))
+        recent = record.locator("ul")
+        expect(recent).to_have_count(1)
+        # The design fixes the short list to three meetings, or to all of them
+        # when the clubs met fewer times.
+        expect(recent.locator("li")).to_have_count(min(RECENT_MEETINGS, listed))
 
     profiles = page.locator("figure").filter(
         has=page.locator("figcaption", has_text=PROFILE_CAPTION)

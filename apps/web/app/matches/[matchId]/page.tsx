@@ -266,12 +266,24 @@ function RefusedPage(props: { readonly problem: Problem | null }): ReactElement 
   );
 }
 
+/** A count with its noun in the right number: "1 match", "12 matches". */
+function countPhrase(
+  count: number,
+  singular: string,
+  plural: string = `${singular}s`,
+): string {
+  return `${formatCount(count)} ${count === 1 ? singular : plural}`;
+}
+
 /** The two header lines the standings read can add, or `null` for each. */
 function standingLine(row: StandingRow | null): string | null {
   if (row === null || row.played === 0) {
     return null;
   }
-  return `${ordinal(row.position)} · ${formatPoints(row.points)} pts after ${formatCount(row.played)} matches`;
+  return `${ordinal(row.position)} · ${formatPoints(row.points)} pts after ${countPhrase(
+    row.played,
+    "match",
+  )}`;
 }
 
 /**
@@ -402,7 +414,7 @@ function RecordBar(props: {
       title={title}
       description={description}
       table={{
-        caption: `The ${formatCount(record.played)} meetings of ${home} and ${away} before this fixture, counted from this fixture's home side`,
+        caption: `The ${countPhrase(record.played, "meeting")} of ${home} and ${away} before this fixture, counted from this fixture's home side`,
         columns: ["Record", `${home} wins`, "Draws", `${away} wins`],
         rows: [
           [
@@ -872,9 +884,10 @@ export default async function MatchPage(
               <p className={styles.note}>
                 {`${formatCount(side.form.points)} pts · ${formatCount(
                   side.form.goals_for,
-                )}–${formatCount(side.form.goals_against)} goals in ${formatCount(
+                )}–${formatCount(side.form.goals_against)} goals in ${countPhrase(
                   side.form.matches.length,
-                )} matches.`}
+                  "match",
+                )}.`}
               </p>
             </div>
           ))}
@@ -883,7 +896,7 @@ export default async function MatchPage(
         <section id="head-to-head" className={styles.card}>
           <div className={styles.headingRow}>
             <h2 className={styles.sectionTitle}>
-              {`Head-to-head · ${formatCount(record.played)} meetings`}
+              {`Head-to-head · ${countPhrase(record.played, "meeting")}`}
             </h2>
             <MetricHelp
               label="head-to-head record"
