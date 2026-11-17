@@ -24,7 +24,8 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
-from playwright.sync_api import Browser, Page, Response, expect
+from conftest import PlayedForecastMatch
+from playwright.sync_api import Browser, Locator, Page, Response, expect
 
 PERFORMANCE_PATH = "/performance"
 BACKTEST_SECTION = "section[aria-labelledby='backtest-heading']"
@@ -101,6 +102,22 @@ WIDE_HEIGHT = 800
 # the calibration chart are four targets on a loaded stack. Three is the floor that
 # keeps the sideways-scroll check from passing on a page that rendered nothing.
 MINIMUM_SCROLL_TARGETS = 3
+
+# The live section's own contract: its counts list, its scored table, and the two
+# models the fixture flips a stored forecast for.
+LIVE_COUNTS = "dl[aria-label='Live prediction counts']"
+LIVE_TABLE = "#live-metrics"
+LIVE_OWN_ROW = "Own rows"
+# The loader stores a row for four models on every scheduled fixture: the two
+# fitted models the fixture selects on, and the two baselines beside them. The
+# report scores each stored row on its own, so one flipped fixture adds four.
+LIVE_OWN_MODELS = ("Dixon-Coles", "Elo", "Home-win baseline", "Base rate")
+LIVE_TABLE_HEADERS = ("Model", "Match set", "Matches", "Log loss", "Brier", "RPS", "Accuracy")
+THREE_DECIMAL_SCORE = re.compile(r"^\d+\.\d{3}$")
+ONE_DECIMAL_PERCENT = re.compile(r"^\d+\.\d%$")
+LIVE_BOX_SCRIPT = (
+    "(element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth })"
+)
 
 
 def _open(page: Page, dashboard_url: str, path: str = PERFORMANCE_PATH) -> None:
@@ -1074,3 +1091,134 @@ def test_calibration_picker(page: Page, dashboard_url: str) -> None:
             f"the {name} link {href!r} drops the selected model {selected!r}, so "
             "switching the subset silently draws another model"
         )
+
+
+def _live_counts(page: Page) -> dict[str, str]:
+    """Return the live report's count list as a label to value mapping."""
+    counts = page.locator(LIVE_COUNTS)
+    expect(counts).to_have_count(1)
+    labels = [text.strip() for text in counts.locator("dt").all_text_contents()]
+    values = [text.strip() for text in counts.locator("dd").all_text_contents()]
+    assert len(labels) == len(values), (
+        f"the live counts pair {len(labels)} labels with {len(values)} values"
+    )
+    return dict(zip(labels, values, strict=True))
+
+
+def _live_cell(row: Locator, headers: list[str], column: str) -> str:
+    """Return the text of one cell of a live table row, chosen by its column name."""
+    return row.locator("th, td").nth(headers.index(column)).inner_text().strip()
+
+
+@pytest.mark.loaded
+def test_played_forecasts_score_live_rows(
+    page: Page, dashboard_url: str, played_forecast_matches: list[PlayedForecastMatch]
+) -> None:
+    """Every forecast stored for a flipped fixture turns into a scored live row."""
+    _open(page, dashboard_url)
+
+    counts = _live_counts(page)
+    # Every stored forecast of a flipped fixture becomes a scored row, and the
+    # loader stores four model rows for that fixture.
+    expected_scored = len(LIVE_OWN_MODELS) * len(played_forecast_matches)
+    assert counts["Scored"] == str(expected_scored), (
+        f"the live report scores {counts['Scored']} rows, expected {expected_scored} "
+        f"for {len(played_forecast_matches)} flipped fixtures with "
+        f"{len(LIVE_OWN_MODELS)} forecasts each"
+    )
+    assert int(counts["Pending"]) > 0, (
+        "the live report scores every stored row, so no fixture is left pending"
+    )
+
+    live = page.locator(LIVE_SECTION)
+    table = live.locator(LIVE_TABLE)
+    expect(table).to_have_count(1)
+    expect(table.locator("caption")).to_contain_text("Live metrics per model and match set")
+
+    headers = [text.strip() for text in table.locator("thead th").all_text_contents()]
+    for column in LIVE_TABLE_HEADERS:
+        assert column in headers, f"the live table has no {column!r} column: {headers!r}"
+
+    own_rows = table.locator("tbody tr").filter(
+        has=page.locator("td", has_text=re.compile(rf"^{LIVE_OWN_ROW}$"))
+    )
+    own_texts = [text.strip() for text in own_rows.all_inner_texts()]
+    assert own_rows.count() == len(LIVE_OWN_MODELS), (
+        f"the live table renders {own_rows.count()} own rows instead of "
+        f"{len(LIVE_OWN_MODELS)}: {own_texts}"
+    )
+
+    models: list[str] = []
+    for index in range(own_rows.count()):
+        row = own_rows.nth(index)
+        model = _live_cell(row, headers, "Model")
+        models.append(model)
+        assert _live_cell(row, headers, "Match set") == LIVE_OWN_ROW, (
+            f"the {model!r} row does not name the own-rows match set"
+        )
+        matches = _live_cell(row, headers, "Matches")
+        assert matches == str(len(played_forecast_matches)), (
+            f"the {model!r} row scores {matches} matches, expected {len(played_forecast_matches)}"
+        )
+        for column in ("Log loss", "Brier", "RPS"):
+            value = _live_cell(row, headers, column)
+            assert THREE_DECIMAL_SCORE.fullmatch(value), (
+                f"the {model!r} row prints {column} as {value!r}, not a three-decimal score"
+            )
+        accuracy = _live_cell(row, headers, "Accuracy")
+        assert ONE_DECIMAL_PERCENT.fullmatch(accuracy), (
+            f"the {model!r} row prints accuracy as {accuracy!r}, not a one-decimal percentage"
+        )
+
+    assert sorted(models) == sorted(LIVE_OWN_MODELS), (
+        f"the live own rows name {sorted(models)} instead of {sorted(LIVE_OWN_MODELS)}"
+    )
+
+
+@pytest.mark.loaded
+@pytest.mark.usefixtures("played_forecast_matches")
+def test_played_live_tables_fit_a_phone(page: Page, dashboard_url: str) -> None:
+    """Every live table container stays inside the phone it is read on."""
+    page.set_viewport_size({"width": PHONE_WIDTH, "height": PHONE_HEIGHT})
+    _open(page, dashboard_url)
+
+    live = page.locator(LIVE_SECTION)
+    expect(live.locator(LIVE_TABLE)).to_have_count(1)
+    containers = live.locator("div[class*='tableWrap']")
+    measured = 0
+    for index in range(containers.count()):
+        box = containers.nth(index).evaluate(LIVE_BOX_SCRIPT)
+        measured += 1
+        assert box["scrollWidth"] <= box["clientWidth"], (
+            f"live table container {index} is {box['scrollWidth']}px wide in a "
+            f"{box['clientWidth']}px box, so a phone hides part of it behind a "
+            "sideways scroll"
+        )
+    assert measured >= 1, (
+        "the live section rendered no table container, so the sideways-scroll check "
+        "measured nothing"
+    )
+
+
+@pytest.mark.loaded
+def test_the_live_section_reports_no_scored_rows_without_a_played_forecast(
+    page: Page, dashboard_url: str
+) -> None:
+    """The pending/scored split is covered the other way on the unflipped stack."""
+    _open(page, dashboard_url)
+
+    counts = _live_counts(page)
+    assert counts["Scored"] == "0", (
+        f"the live report scores {counts['Scored']} rows before a fixture is flipped; a "
+        "previous run may have died with its fixtures flipped to played, so reset the "
+        "throwaway stack with `make e2e-down` and load it again with `make e2e-data`"
+    )
+    assert int(counts["Pending"]) > 0, (
+        "the live report holds no pending forecast, so its unscored state is not tested"
+    )
+
+    live = page.locator(LIVE_SECTION)
+    expect(live.get_by_role("heading", name="No scored predictions yet", exact=True)).to_have_count(
+        1
+    )
+    expect(live.locator(LIVE_TABLE)).to_have_count(0)

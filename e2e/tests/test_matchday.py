@@ -11,13 +11,11 @@ stack with no data; the rest needs the ingested fixtures and a stored
 prediction, so they are loaded-tier tests.
 """
 
-import os
 import re
-import subprocess
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
+from db import psql
 from playwright.sync_api import Page, expect
 
 # The design fixes both bounds of a La Liga season.
@@ -189,41 +187,7 @@ def test_an_out_of_range_matchday_falls_back_to_a_valid_page(
         )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 UPCOMING_HEADING = "Upcoming fixtures"
-
-
-def _psql(sql: str) -> str:
-    """Run ``sql`` in the throwaway e2e database and return its unaligned output.
-
-    The project name comes from the same ``E2E_PROJECT`` variable the Makefile
-    guard validates, and it is passed as an argument, never through a shell.
-    """
-    project = os.environ.get("E2E_PROJECT", "lmi-e2e")
-    # The developer's own stack is the Compose project `lmi`; this helper writes,
-    # so it refuses that name even though the Makefile guard already does.
-    if project.lower() == "lmi":
-        pytest.fail("E2E_PROJECT names the developer stack `lmi`; refusing to write to it")
-    command = [
-        "docker",
-        "compose",
-        "-p",
-        project,
-        "-f",
-        "docker-compose.yml",
-        "-f",
-        "e2e/compose.e2e.yml",
-        "exec",
-        "-T",
-        "db",
-        "sh",
-        "-c",
-        'psql -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
-    ]
-    result = subprocess.run(
-        command, input=sql, capture_output=True, text=True, check=True, cwd=REPO_ROOT
-    )
-    return result.stdout
 
 
 @pytest.fixture
@@ -234,7 +198,7 @@ def upcoming_without_rounds() -> Iterator[None]:
     carries no matchday. The original rounds are read back from the update
     itself and written again afterwards, whatever the test did.
     """
-    rows = _psql(
+    rows = psql(
         """
         WITH old AS (
             SELECT id, matchday FROM matches
@@ -253,7 +217,7 @@ def upcoming_without_rounds() -> Iterator[None]:
         yield
     finally:
         values = ", ".join(f"({int(match_id)}, {int(matchday)})" for match_id, matchday in pairs)
-        _psql(
+        psql(
             "UPDATE matches AS m SET matchday = v.matchday "
             f"FROM (VALUES {values}) AS v(id, matchday) WHERE m.id = v.id;"
         )
