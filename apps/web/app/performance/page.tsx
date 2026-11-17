@@ -1010,8 +1010,11 @@ export default async function PerformancePage(
   const params = await props.searchParams;
   const activeSubset = parseSubset(params.subset);
 
-  // One round trip each, both awaited together: a failure on one section must
-  // not hide the other, and the page renders each result on its own.
+  // One round trip each, both awaited together: each section renders its own
+  // answer, and a data answer of "not found" is a state inside its section
+  // rather than a reason to hide the other one. An API that cannot answer at
+  // all -- a timeout, a network failure, a 5xx -- throws out of `get` and ends
+  // on the app's error screen, as it does for every page here.
   const [backtestResult, liveResult] = await Promise.all([
     get("/v1/model-metrics"),
     get("/v1/model-metrics/live"),

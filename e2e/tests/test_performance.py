@@ -81,6 +81,14 @@ VERDICT_TEMPLATE = re.compile(
 # A verdict states the comparison. Explaining it away with a cause is the failure
 # the template rules out.
 VERDICT_FORBIDDEN = ("because", "thanks to")
+
+# The two sentences that rank nothing: their template names no model, so they are
+# the only verdicts the table cannot corroborate.
+VERDICT_UNRANKED = ("The backtest stores no common-match scores", "Only ")
+
+# The kind the table prints for a fitted model, so a baseline or the market never
+# stands in for the model the verdict names.
+MODEL_KIND = "Model"
 MINIMUM_TEXT_PX = 11
 MAXIMUM_TEXT_PX = 18
 PHONE_WIDTH = 390
@@ -477,9 +485,102 @@ CALIBRATION_PICKER_SCRIPT = r"""
 """
 
 
+# A tile is a label and the one value under it. The grid is the only box inside the
+# scores section, so the tiles are its children and their order is the order the
+# design fixes.
+SCORE_TILES_SCRIPT = r"""
+() => {
+  const section = document.querySelector("#scores");
+  if (section === null) {
+    return null;
+  }
+  const clean = (node) =>
+    node === null ? "" : (node.textContent || "").replace(/\s+/g, " ").trim();
+  const grid = Array.from(section.children).find((child) => child.tagName === "DIV");
+  if (grid === undefined) {
+    return { count: 0, tiles: [] };
+  }
+  const tiles = Array.from(grid.children).map((tile) => {
+    // The value is the tile's own paragraph: the definition panel inside the
+    // header holds paragraphs of its own, in document order before the value.
+    const values = Array.from(tile.children).filter((child) => child.tagName === "P");
+    return {
+      label: clean(tile.querySelector("span")),
+      value: values.length === 0 ? "" : clean(values[0]),
+    };
+  });
+  return { count: tiles.length, tiles };
+}
+"""
+
+# The table marks its best cell with a `strong`, and the design repeats that value
+# in a tile, so one reading of both proves the repetition comes from the same
+# column. A marked cell is read from its own `strong`, because the cell also
+# carries the screen-reader words " (best)".
+TABLE_VALUES_SCRIPT = r"""
+() => {
+  const table = document.querySelector("#backtest-metrics");
+  if (table === null) {
+    return null;
+  }
+  const clean = (node) =>
+    node === null ? "" : (node.textContent || "").replace(/\s+/g, " ").trim();
+  const headers = Array.from(table.querySelectorAll("thead th")).map((cell) => {
+    const clone = cell.cloneNode(true);
+    Array.from(clone.querySelectorAll("details")).forEach((details) => details.remove());
+    return clean(clone);
+  });
+  const rows = Array.from(table.querySelectorAll("tbody tr"));
+  const marked = {};
+  headers.forEach((name, index) => {
+    marked[name] = rows
+      .map((row) => row.children[index])
+      .filter((cell) => cell !== undefined && cell.querySelector("strong") !== null)
+      .map((cell) => clean(cell.querySelector("strong")));
+  });
+  const cellText = (cell) => {
+    if (cell === undefined) {
+      return "";
+    }
+    const strong = cell.querySelector("strong");
+    return clean(strong === null ? cell : strong);
+  };
+  const modelIndex = headers.indexOf("Model");
+  const kindIndex = headers.indexOf("Kind");
+  const rpsIndex = headers.indexOf("RPS");
+  return {
+    headers,
+    marked,
+    rows: rows.map((row) => ({
+      model: cellText(row.children[modelIndex]),
+      kind: cellText(row.children[kindIndex]),
+      rps: cellText(row.children[rpsIndex]),
+    })),
+  };
+}
+"""
+
+
 def _single_line(text: str) -> str:
     """Collapse the whitespace the rendered markup leaves in a sentence."""
     return " ".join(text.split())
+
+
+def _best_model_row(table: dict[str, Any]) -> dict[str, str] | None:
+    """The fitted-model row the table ranks first, as the page printed it."""
+    best: dict[str, str] | None = None
+    best_score = 0.0
+    for row in table["rows"]:
+        if row["kind"] != MODEL_KIND:
+            continue
+        try:
+            score = float(row["rps"])
+        except ValueError:
+            continue
+        if best is None or score < best_score:
+            best = row
+            best_score = score
+    return best
 
 
 def _assert_section_nav_anchors_resolve(page: Page, path: str) -> None:
@@ -632,8 +733,11 @@ def test_section_nav_anchors_resolve_on_the_loaded_stack(page: Page, dashboard_u
 
 @pytest.mark.loaded
 def test_verdict_follows_template(page: Page, dashboard_url: str) -> None:
-    """The verdict is one reviewed sentence, not a free-form claim."""
-    _open(page, dashboard_url)
+    """The verdict is one reviewed sentence about the model the table ranks first."""
+    # The verdict always reads the common-match rows, so the page that shows the
+    # same rows is the one where the sentence and the table can be compared.
+    path = f"{PERFORMANCE_PATH}?subset=common"
+    _open(page, dashboard_url, path)
 
     verdict = page.locator(VERDICT_SELECTOR)
     expect(verdict).to_have_count(1)
@@ -650,6 +754,32 @@ def test_verdict_follows_template(page: Page, dashboard_url: str) -> None:
             f"the verdict {text!r} explains itself with {phrase!r}, so the sentence "
             "claims a cause the backtest cannot show"
         )
+
+    # A template match alone accepts any branch with any number in it, so the
+    # sentence is also read against the column it summarises: the model it names
+    # must be the one this page ranks first, and the score it prints must be that
+    # model's own score.
+    if text.startswith(VERDICT_UNRANKED):
+        return
+
+    table: dict[str, Any] | None = page.evaluate(TABLE_VALUES_SCRIPT)
+    assert table is not None, (
+        f"{path} ranks the models in a sentence but renders no scores table, so the "
+        "sentence has no column to agree with"
+    )
+    best = _best_model_row(table)
+    assert best is not None, (
+        f"{path} names a best model but its scores table holds no fitted-model row, so "
+        "the sentence ranks a model the page never scores"
+    )
+    assert best["model"] in text, (
+        f"the verdict {text!r} does not name {best['model']!r}, which this page ranks "
+        f"first among the fitted models at {best['rps']}"
+    )
+    assert best["rps"] in text, (
+        f"the verdict {text!r} does not print {best['rps']!r}, the score this page "
+        f"shows for {best['model']!r}"
+    )
 
 
 @pytest.mark.loaded
@@ -810,6 +940,44 @@ def test_priority_columns(page: Page, dashboard_url: str) -> None:
     # The note only makes sense while a column is missing, so it must go once the
     # columns are back.
     expect(note).to_be_hidden()
+
+
+@pytest.mark.loaded
+def test_score_tiles_show_the_table_best_values(page: Page, dashboard_url: str) -> None:
+    """Each headline number repeats the best value of the column it summarises."""
+    _open(page, dashboard_url)
+
+    tiles: dict[str, Any] | None = page.evaluate(SCORE_TILES_SCRIPT)
+    assert tiles is not None, (
+        "the page renders no scores section, so no headline number summarises the table"
+    )
+
+    labels = [tile["label"] for tile in tiles["tiles"]]
+    assert tiles["count"] == len(SCORE_COLUMNS), (
+        f"the scores section renders {tiles['count']} tiles ({labels}) instead of the "
+        f"{len(SCORE_COLUMNS)} the design fixes, so a reader loses a headline number"
+    )
+    assert labels == list(SCORE_COLUMNS), (
+        f"the scores section heads its tiles {labels} instead of {list(SCORE_COLUMNS)}, "
+        "so a tile stands over the wrong column"
+    )
+
+    table: dict[str, Any] | None = page.evaluate(TABLE_VALUES_SCRIPT)
+    assert table is not None, (
+        "the page renders tiles without the scores table they summarise, so a reader "
+        "cannot check a headline number"
+    )
+
+    for tile in tiles["tiles"]:
+        marked = table["marked"].get(tile["label"], [])
+        assert len(marked) == 1, (
+            f"the {tile['label']} column marks {len(marked)} best values instead of one, "
+            "so the tile above it has no single value to repeat"
+        )
+        assert tile["value"] == marked[0], (
+            f"the {tile['label']} tile reads {tile['value']!r} while the table marks "
+            f"{marked[0]!r} as the best value of that column"
+        )
 
 
 @pytest.mark.loaded
