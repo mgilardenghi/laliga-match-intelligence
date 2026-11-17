@@ -1189,7 +1189,7 @@ def test_played_live_tables_fit_a_phone(page: Page, dashboard_url: str) -> None:
     for index in range(containers.count()):
         box = containers.nth(index).evaluate(LIVE_BOX_SCRIPT)
         measured += 1
-        assert box["scrollWidth"] <= box["clientWidth"] + 1, (
+        assert box["scrollWidth"] <= box["clientWidth"], (
             f"live table container {index} is {box['scrollWidth']}px wide in a "
             f"{box['clientWidth']}px box, so a phone hides part of it behind a "
             "sideways scroll"
