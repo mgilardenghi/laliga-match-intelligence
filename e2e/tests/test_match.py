@@ -24,6 +24,7 @@ the design itself fixes.
 import re
 
 import pytest
+from conftest import PlayedForecastMatch
 from playwright.sync_api import Locator, Page, expect
 
 MATCH_URL = re.compile(r"/matches/\d+$")
@@ -68,7 +69,6 @@ NO_PRICE_NOTE = (
 PLAYED = "Played"
 SCHEDULED = "Scheduled"
 FIRST_MATCHDAY = 1
-SEARCHED_MATCHDAYS = 3
 MAX_LAST_MEETINGS = 10
 RECENT_MEETINGS = 3
 PHONE_WIDTH = 390
@@ -139,32 +139,22 @@ def _open_state_fixture(page: Page, dashboard_url: str, state: str) -> str:
     return href
 
 
-def _played_fixture_with_forecast(page: Page, dashboard_url: str) -> str:
-    """Open a played fixture that carries a stored Dixon-Coles or Elo forecast.
+def _open_played_forecast(
+    page: Page, dashboard_url: str, matches: list[PlayedForecastMatch]
+) -> str:
+    """Open one fixture the fixture flipped to played, and return its URL.
 
-    The header's forecast sentences only exist when the main model was stored, and
-    the loaded dataset forecasts fixtures still to come: a played round has no
-    stored row. The test therefore walks the played cards of the first rounds and
-    uses the first fixture that has one, and skips with the reason when the
-    dataset holds none, instead of asserting on a page that honestly says so.
+    The fixture fails when the dataset holds too few candidates, so an empty list
+    here is a failure rather than a page to skip: the played header sentences
+    must be exercised, not silently passed over.
     """
-    candidates: list[str] = []
-    for matchday in range(FIRST_MATCHDAY, FIRST_MATCHDAY + SEARCHED_MATCHDAYS):
-        page.goto(f"{dashboard_url}/matchday?matchday={matchday}")
-        cards = page.locator("article").filter(has_text=PLAYED)
-        for index in range(cards.count()):
-            href = cards.nth(index).get_by_role("link").first.get_attribute("href")
-            if href is not None and MATCH_URL.search(href) and href not in candidates:
-                candidates.append(href)
-    for href in candidates:
-        page.goto(f"{dashboard_url}{href}")
-        if page.locator("header p strong").count() >= 1:
-            return href
-    pytest.skip(
-        "no played fixture in the loaded dataset carries a stored Dixon-Coles or "
-        "Elo forecast: the loader predicts the fixtures still to come, so the "
-        "played header sentences cannot be exercised on this stack"
+    assert matches, (
+        "the played-forecast fixture yielded no fixture, so this test has no "
+        "played match with a stored forecast to open"
     )
+    url = f"{dashboard_url}/matches/{matches[0].match_id}"
+    page.goto(url)
+    return url
 
 
 def _probability_figures(page: Page) -> Locator:
@@ -276,11 +266,12 @@ def test_a_played_match_shows_the_pre_match_view_and_the_result(
 @pytest.mark.loaded
 @pytest.mark.parametrize("state", ["played", "scheduled"])
 def test_the_header_summarises_the_main_forecast(
-    page: Page, dashboard_url: str, state: str
+    page: Page, dashboard_url: str, state: str, request: pytest.FixtureRequest
 ) -> None:
     """The header states one model's forecast, in the tense the fixture's state uses."""
     if state == "played":
-        _played_fixture_with_forecast(page, dashboard_url)
+        matches = request.getfixturevalue("played_forecast_matches")
+        _open_played_forecast(page, dashboard_url, matches)
     else:
         _open_state_fixture(page, dashboard_url, state)
 
@@ -323,10 +314,10 @@ def test_the_header_summarises_the_main_forecast(
 
 @pytest.mark.loaded
 def test_a_played_match_compares_the_stored_forecast_with_the_result(
-    page: Page, dashboard_url: str
+    page: Page, dashboard_url: str, played_forecast_matches: list[PlayedForecastMatch]
 ) -> None:
     """The header says where the stored forecast ranked the result it got."""
-    _played_fixture_with_forecast(page, dashboard_url)
+    _open_played_forecast(page, dashboard_url, played_forecast_matches)
 
     matches = [text for text in _texts(page.locator("header p")) if RESULT_FORECAST.fullmatch(text)]
     assert len(matches) == 1, (
