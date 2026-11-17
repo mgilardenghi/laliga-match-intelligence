@@ -5,15 +5,35 @@
  * API: the table is the stored standings and the projection is the latest
  * succeeded simulation, never a value recomputed in the browser. The shell owns
  * the `main` landmark and the API status line, so this page renders neither.
+ *
+ * The loaded path is a sequence of sections a reader can jump between: the race
+ * at a glance, the table, the projected finish and a guide to the numbers. Each
+ * section exists only when the read behind it succeeded, and the section nav
+ * lists exactly the sections that rendered.
  */
-import type { ReactElement } from "react";
+import Link from "next/link";
+import type { ReactElement, ReactNode } from "react";
 
 import { EmptyState, ProblemState } from "@/components/states";
-import { get, type Problem } from "@/lib/api";
+import {
+  HowToRead,
+  Legend,
+  SectionNav,
+  type HowToReadItem,
+  type LegendItem,
+  type SectionNavItem,
+} from "@/components/ui";
+import { get, type GetData, type Problem } from "@/lib/api";
+import { formatCount } from "@/lib/format";
+import { modelLabel } from "@/lib/labels";
 import { parseSeason, type SearchParams } from "@/lib/params";
 
+import { parseColumns, type ColumnsView } from "./_table/columns";
+import { pct0, rankByChance } from "./_table/derive";
 import { ProjectionSection } from "./_table/projection-section";
+import { RaceGlance } from "./_table/race-glance";
 import { SeasonPicker, seasonOptions } from "./_table/season-picker";
+import { StandingsList } from "./_table/standings-list";
 import { StandingsTable } from "./_table/standings-table";
 import styles from "./page.module.css";
 
@@ -23,6 +43,8 @@ type HomePageProps = {
   readonly searchParams: Promise<SearchParams>;
 };
 
+type Projection = GetData<"/v1/simulations/latest">;
+
 /**
  * The heading of the page, rendered on every path so a reader always knows
  * which page they are on, even when neither read below it succeeded.
@@ -30,18 +52,101 @@ type HomePageProps = {
  * It is a plain block and not a `<header>` element: the shell already owns the
  * document's one header, and a second one here would be a duplicate landmark
  * candidate rather than a new region.
+ *
+ * The loaded path passes the season it drew, the line about the run and the
+ * season selector, so the selector sits beside the text on a laptop and wraps
+ * under it on a phone. Every other path keeps today's intro and renders the
+ * selector itself, below the heading.
  */
-function PageHeading(): ReactElement {
+function PageHeading(props: {
+  readonly seasonText?: string | null;
+  readonly subline?: string | null;
+  readonly controls?: ReactNode;
+}): ReactElement {
+  const { seasonText = null, subline = null, controls } = props;
   return (
-    <div className={styles.heading}>
-      <h1 className={styles.title}>LaLiga Match Intelligence</h1>
-      <p className={styles.intro}>
-        The current La Liga table, recomputed from stored results, and — when a
-        simulation exists — the projected finish from the latest succeeded
-        Monte Carlo run.
-      </p>
+    <div className={styles.headingRow}>
+      <div className={styles.headingText}>
+        <h1 className={styles.title}>LaLiga Match Intelligence</h1>
+        {seasonText === null ? (
+          <p className={styles.intro}>
+            The current La Liga table, recomputed from stored results, and — when
+            a simulation exists — the projected finish from the latest succeeded
+            Monte Carlo run.
+          </p>
+        ) : (
+          <>
+            <p className={styles.seasonLine}>{seasonText}</p>
+            {subline === null ? null : (
+              <p className={styles.subline}>{subline}</p>
+            )}
+          </>
+        )}
+      </div>
+      {controls === undefined ? null : (
+        <div className={styles.headingControls}>{controls}</div>
+      )}
     </div>
   );
+}
+
+/**
+ * Return the line under the season: what the table counts and, with a run, what
+ * the projection rests on.
+ *
+ * The last complete matchday is nullable in the API, so its clause appears only
+ * when the run stored a number; a run without one does not claim an unknown
+ * round.
+ */
+function sublineOf(
+  standings: GetData<"/v1/standings">,
+  projection: Projection | null,
+): string {
+  const resultWord = standings.matches_counted === 1 ? "result" : "results";
+  const counted = `After ${formatCount(standings.matches_counted)} ${resultWord}`;
+  if (projection === null) {
+    return counted;
+  }
+  const { run } = projection;
+  const matchday =
+    typeof run.last_complete_matchday === "number"
+      ? ` (last complete matchday ${run.last_complete_matchday})`
+      : "";
+  return `${counted} · projection from ${formatCount(
+    run.n_runs,
+  )} simulated seasons as of ${run.as_of_date}${matchday}`;
+}
+
+/**
+ * Return the reading guide of a run, in the order the page reads.
+ *
+ * The third item explains the chances through the club the run is most certain
+ * about, so the percentage is tied to the seasons it counts rather than to a
+ * claim about the squad. All text is read from the stored run; nothing here
+ * describes a model the API did not name.
+ */
+function guideOf(projection: Projection): HowToReadItem[] {
+  const { run, table } = projection;
+  const ucl = run.qualification.ucl_positions;
+  const leader = rankByChance(table, (row) => row.p_relegation)[0];
+  return [
+    {
+      term: "The simulation",
+      definition: `Each remaining fixture gets score probabilities from the ${modelLabel(run.model)} model; the season is played out ${formatCount(run.n_runs)} times.`,
+    },
+    {
+      term: "Final pts",
+      definition: "The average final total; it includes today's points.",
+    },
+    {
+      term: `Title · Top ${ucl} · Relegated`,
+      definition: `A chance counts seasons, not strength: ${
+        leader.team.name
+      }'s ${pct0(leader.p_relegation)} relegated means it went down in ${Math.round(
+        leader.p_relegation * 100,
+      )} of every 100 simulated seasons.`,
+    },
+  ];
 }
 
 export default async function HomePage(
@@ -49,6 +154,7 @@ export default async function HomePage(
 ): Promise<ReactElement> {
   const params = await props.searchParams;
   const requestedSeason = parseSeason(params.season);
+  const columnsView: ColumnsView = parseColumns(params.columns);
 
   const [seasonsResult, standingsResult] = await Promise.all([
     get("/v1/seasons"),
@@ -129,7 +235,7 @@ export default async function HomePage(
   const simulationResult = await get("/v1/simulations/latest", {
     query: { season: standings.season },
   });
-  const projection =
+  const projection: Projection | null =
     simulationResult.ok && simulationResult.data.table.length > 0
       ? simulationResult.data
       : null;
@@ -141,24 +247,96 @@ export default async function HomePage(
     ? null
     : simulationResult.problem;
 
+  const run = projection === null ? null : projection.run;
+  const qualification = run === null ? null : run.qualification;
+  const ucl = qualification === null ? 0 : qualification.ucl_positions;
+  const europe = qualification === null ? 0 : qualification.europe_positions;
+  const relegation =
+    qualification === null ? 0 : qualification.relegation_positions;
+
+  // Every target below exists on this path, and the nav names only those: a
+  // season without a run has no race and no reading guide to jump to.
+  const sections: SectionNavItem[] = [
+    ...(run === null
+      ? []
+      : [{ id: "race", label: "Race at a glance" }]),
+    { id: "table", label: "Table" },
+    { id: "projection", label: "Projection" },
+    ...(run === null ? [] : [{ id: "how-to-read", label: "How to read" }]),
+  ];
+
+  const legendItems: LegendItem[] =
+    run === null
+      ? []
+      : [
+          { token: "zone-ucl", label: `Champions League (top ${ucl})` },
+          ...(europe > ucl
+            ? [
+                {
+                  token: "zone-europe" as const,
+                  label: `Europe (places ${ucl + 1}–${europe})`,
+                },
+              ]
+            : []),
+          { token: "zone-relegation", label: `Relegation (bottom ${relegation})` },
+        ];
+
+  // The switch keeps the season, so widening the table never loses the season
+  // the reader arrived on.
+  const seasonQuery = encodeURIComponent(standings.season);
+  const columnsHref =
+    columnsView === "all"
+      ? `/?season=${seasonQuery}`
+      : `/?columns=all&season=${seasonQuery}`;
+
   return (
     <div className={styles.main}>
-      <PageHeading />
-      <SeasonPicker options={options} value={selectorValue} />
+      <PageHeading
+        controls={<SeasonPicker options={options} value={selectorValue} />}
+        seasonText={`La Liga ${standings.season}`}
+        subline={sublineOf(standings, projection)}
+      />
+      <SectionNav sections={sections} />
+      {projection === null ? null : (
+        <RaceGlance projection={projection} standings={standings} />
+      )}
       <section
-        aria-labelledby="current-table-heading"
-        className={styles.section}
+        aria-labelledby="table-heading"
+        className={`${styles.anchor} ${styles.section}`}
+        id="table"
       >
-        <h2 id="current-table-heading" className={styles.sectionTitle}>
-          Current table
+        <h2 className={styles.sectionTitle} id="table-heading">
+          {run === null
+            ? "Current table"
+            : "Table and end-of-season chances"}
         </h2>
-        <StandingsTable standings={standings} projection={projection} />
+        <p className={styles.hint}>
+          Sorted by points. Tap{" "}
+          {/* A circled i drawn by the stylesheet, not the ⓘ character: the page's
+              font stack has no glyph for U+24D8, so the character reaches a
+              reader as a missing-glyph box. The mark is decorative; the
+              visually hidden word keeps the sentence readable aloud. */}
+          <span aria-hidden="true" className={styles.infoMark} />
+          <span className={styles.visuallyHidden}>{"info "}</span>
+          on a header for its definition.
+        </p>
+        {run === null ? null : <Legend items={legendItems} />}
+        <Link className={styles.columnsLink} href={columnsHref}>
+          {columnsView === "all" ? "Fewer columns" : "All columns"}
+        </Link>
+        <StandingsTable
+          columnsView={columnsView}
+          projection={projection}
+          standings={standings}
+        />
+        <StandingsList projection={projection} standings={standings} />
       </section>
       <section
-        aria-labelledby="projected-finish-heading"
-        className={styles.section}
+        aria-labelledby="projection-heading"
+        className={`${styles.anchor} ${styles.section}`}
+        id="projection"
       >
-        <h2 id="projected-finish-heading" className={styles.sectionTitle}>
+        <h2 className={styles.sectionTitle} id="projection-heading">
           Projected finish
         </h2>
         {projectionRejected ? (
@@ -192,6 +370,11 @@ export default async function HomePage(
           </EmptyState>
         )}
       </section>
+      {projection === null ? null : (
+        <div className={styles.anchor} id="how-to-read">
+          <HowToRead items={guideOf(projection)} />
+        </div>
+      )}
     </div>
   );
 }

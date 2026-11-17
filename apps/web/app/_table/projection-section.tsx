@@ -6,6 +6,11 @@
  * read the stored points quantiles and the real points the run started from.
  * No threshold is drawn on the points chart, because no API field defines one:
  * a line there would be this page's opinion, not the run's answer.
+ *
+ * The heatmap keeps its own fixed-width scroller, so below the desktop width it
+ * is composed inside one local scroll region with a visible hint. The region is
+ * focusable and named: a keyboard reader can scroll the grid sideways without
+ * first scrolling the page.
  */
 import type { ReactElement } from "react";
 
@@ -52,13 +57,9 @@ export function ProjectionSection(
 
   return (
     <div className={styles.charts}>
-      <PositionHeatmap
-        teams={table.map((row) => row.team.name)}
-        positions={table.map((row) => row.position_probabilities)}
-        qualification={qualification}
-        title={`Projected finishing positions, ${season}`}
-        note={runNote(run)}
-      />
+      <h3 className={styles.chartTitle}>
+        From today&apos;s points to the expected finish
+      </h3>
       <IntervalBars
         rows={table.map((row) => ({
           team: row.team.name,
@@ -70,8 +71,30 @@ export function ProjectionSection(
           current: row.current.points,
         }))}
         title={`Projected final points, ${season}`}
-        note={`${runNote(run)} Diamonds mark current points; the table above carries each club's expected final points.`}
+        note={`${runNote(
+          run,
+        )} The diamond is current points; the centre mark is the median; the table's Final pts is the mean.`}
       />
+      <h3 className={styles.chartTitle}>Where each club can finish</h3>
+      <p className={styles.heatmapHint}>
+        This grid is wider than a phone: swipe it sideways for every position.
+        Each club&apos;s likeliest finishes are also in its table row.
+      </p>
+      <div
+        aria-label="Where each club can finish, a sideways scroll region for every position"
+        className={styles.heatmapRegion}
+        data-heatmap-scroll
+        role="group"
+        tabIndex={0}
+      >
+        <PositionHeatmap
+          teams={table.map((row) => row.team.name)}
+          positions={table.map((row) => row.position_probabilities)}
+          qualification={qualification}
+          title={`Projected finishing positions, ${season}`}
+          note={runNote(run)}
+        />
+      </div>
     </div>
   );
 }
