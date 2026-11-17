@@ -874,7 +874,10 @@ _MID_WORD_BREAKS = """() => {
         range.setEnd(node, i + 1);
         const rect = range.getBoundingClientRect();
         if (rect.width === 0) { continue; }
-        if (previousTop !== null && Math.abs(rect.top - previousTop) > 2) {
+        // A line may end after a hyphen ("Dixon-" / "Coles"); that is a
+        // normal break opportunity, not a split word.
+        const afterHyphen = i > 0 && text[i - 1] === '-';
+        if (previousTop !== null && !afterHyphen && Math.abs(rect.top - previousTop) > 2) {
           broken.push(`${text.trim()} (at "${text.slice(0, i)}|")`);
           break;
         }
