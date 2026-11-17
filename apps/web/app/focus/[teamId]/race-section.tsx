@@ -21,10 +21,12 @@ import type { ReactElement } from "react";
 import {
   IntervalBars,
   LineChart,
+  niceMax,
   type IntervalBarRow,
   type LineSeries,
 } from "@/components/charts";
 import { EmptyState, ProblemState } from "@/components/states";
+import { MetricHelp } from "@/components/ui";
 import {
   EM_DASH,
   formatCount,
@@ -40,6 +42,7 @@ import {
   type SimulationDetail,
   type TeamFocus,
 } from "./data";
+import { ordinal, qualificationLabels, type Qualification } from "./story";
 import styles from "./page.module.css";
 
 /** The label the `<Suspense>` boundary of this section shows while it reads. */
@@ -53,6 +56,12 @@ export const SECTION_LABEL = "Relegation race";
  * read against the club's own worst stored run, not against its latest one.
  */
 const COLLAPSED_BELOW = 0.01;
+
+/** How many runs the history chart needs before it is worth drawing. */
+const HISTORY_MINIMUM_RUNS = 3;
+
+/** How many of the remaining fixtures the section shows before the disclosure. */
+const FIXTURES_SHOWN = 3;
 
 export type RaceSectionProps = {
   readonly teamId: number;
@@ -71,25 +80,6 @@ type RaceRival = RelegationRace["rivals"][number];
 
 /** One fixture the club still has to play. */
 type RemainingFixture = RelegationRace["remaining_fixtures"][number];
-
-/** Return `value` with its English ordinal suffix (`17` is `17th`). */
-function ordinal(value: number): string {
-  const tens = value % 100;
-  if (tens >= 11 && tens <= 13) {
-    return `${formatCount(value)}th`;
-  }
-  const units = value % 10;
-  if (units === 1) {
-    return `${formatCount(value)}st`;
-  }
-  if (units === 2) {
-    return `${formatCount(value)}nd`;
-  }
-  if (units === 3) {
-    return `${formatCount(value)}rd`;
-  }
-  return `${formatCount(value)}th`;
-}
 
 /** The subject club's row of one history point, or undefined when it is absent. */
 function pointRow(
@@ -148,10 +138,14 @@ function RelegationHistory(props: {
     }),
   }));
 
-  const singleRun =
-    points.length === 1
-      ? " One run is stored so far, so the history is a single point; it grows as further runs are stored."
-      : "";
+  // The axis stops at 100 %, because a probability cannot pass it, and at a
+  // round number just above the largest plotted value, so a race of small
+  // chances is not flattened against the top of the plot.
+  const plottedValues = series
+    .flatMap((entry) => entry.values)
+    .filter((value): value is number => value !== null);
+  const top = Math.min(1, niceMax(Math.max(...plottedValues)));
+
   const cut =
     plotted.length < last.teams.length
       ? ` The chart draws ${formatCount(plotted.length)} of the ${formatCount(last.teams.length)} clubs of the run: ${teamName} and the first four others.`
@@ -164,9 +158,26 @@ function RelegationHistory(props: {
       description={`The stored relegation probability of each club of the last run, one point per as-of date of a succeeded simulation of the ${season} season, in date order.`}
       xLabels={points.map((point) => point.as_of_date)}
       yLabel="P(relegation)"
+      domain={[0, top]}
       series={series}
-      note={`A point comes from the latest succeeded run of its as-of date, so the line is the series of final answers and not a series of attempts.${singleRun}${cut}`}
+      note={`A point comes from the latest succeeded run of its as-of date, so the line is the series of final answers and not a series of attempts.${cut}`}
     />
+  );
+}
+
+/**
+ * The sentence the section shows instead of a history of one or two runs.
+ *
+ * A line through one point is a dot, and a line through two is a guess about
+ * the trend between them: the section says how many runs are stored and leaves
+ * the chart out until the series can show a change.
+ */
+function HistoryPending(props: { readonly stored: number }): ReactElement {
+  const { stored } = props;
+  return (
+    <p className={styles.note}>
+      {`The probability-over-time chart appears once three runs are stored; ${formatCount(stored)} stored so far.`}
+    </p>
   );
 }
 
@@ -205,9 +216,9 @@ function ProjectedPoints(props: {
   if (rows.length === 0) {
     return (
       <p className={styles.note}>
-        The stored simulation holds no row for this club or its rivals, so
-        there are no projected points to plot. The threshold and the tables
-        below still read from the stored run and the season.
+        The stored simulation holds no row for this club or its rivals, so there
+        are no projected points to plot. The threshold and the tables below
+        still read from the stored run and the season.
       </p>
     );
   }
@@ -224,13 +235,28 @@ function ProjectedPoints(props: {
   );
 }
 
+/** The card heading and its definition, side by side and never nested. */
+function CardHead(props: {
+  readonly label: string;
+  readonly definition: string;
+}): ReactElement {
+  const { label, definition } = props;
+  return (
+    <div className={styles.cardHead}>
+      <h3 className={styles.cardTitle}>{label}</h3>
+      <MetricHelp definition={definition} label={label} />
+    </div>
+  );
+}
+
 /** The rivals' stored numbers, one row per club of the race. */
 function RivalsTable(props: {
   readonly rivals: readonly RaceRival[];
   readonly teamId: number;
   readonly season: string;
+  readonly qualification: Qualification | null;
 }): ReactElement {
-  const { rivals, teamId, season } = props;
+  const { rivals, teamId, season, qualification } = props;
 
   if (rivals.length === 0) {
     return (
@@ -241,6 +267,8 @@ function RivalsTable(props: {
       </p>
     );
   }
+
+  const labels = qualificationLabels(qualification);
 
   return (
     <div className={styles.tableWrap}>
@@ -257,50 +285,36 @@ function RivalsTable(props: {
               className={`${styles.cell} ${styles.headCell} ${styles.numeric}`}
               scope="col"
             >
-              Current points
+              Expected
             </th>
             <th
               className={`${styles.cell} ${styles.headCell} ${styles.numeric}`}
               scope="col"
             >
-              Expected points
-            </th>
-            <th
-              className={`${styles.cell} ${styles.headCell} ${styles.numeric}`}
-              scope="col"
-            >
-              P(relegation)
-            </th>
-            <th
-              className={`${styles.cell} ${styles.headCell} ${styles.numeric}`}
-              scope="col"
-            >
-              Projected points p05-p95
+              {`P(${labels.relegation})`}
             </th>
           </tr>
         </thead>
         <tbody>
-          {rivals.map((rival) => (
-            <tr key={rival.team.id}>
-              <th className={`${styles.cell} ${styles.rowHeader}`} scope="row">
-                {rival.team.id === teamId
-                  ? `${rival.team.name} (this club)`
-                  : rival.team.name}
-              </th>
-              <td className={`${styles.cell} ${styles.numeric}`}>
-                {formatCount(rival.current_points)}
-              </td>
-              <td className={`${styles.cell} ${styles.numeric}`}>
-                {formatPoints(rival.expected_points)}
-              </td>
-              <td className={`${styles.cell} ${styles.numeric}`}>
-                {formatPercent(rival.p_relegation)}
-              </td>
-              <td className={`${styles.cell} ${styles.numeric}`}>
-                {`${formatPoints(rival.points_p05)}–${formatPoints(rival.points_p95)}`}
-              </td>
-            </tr>
-          ))}
+          {rivals.map((rival) => {
+            const own = rival.team.id === teamId;
+            return (
+              <tr
+                className={own ? styles.subjectRow : undefined}
+                key={rival.team.id}
+              >
+                <th className={`${styles.cell} ${styles.rowHeader}`} scope="row">
+                  {rival.team.name}
+                </th>
+                <td className={`${styles.cell} ${styles.numeric}`}>
+                  {formatPoints(rival.expected_points)}
+                </td>
+                <td className={`${styles.cell} ${styles.numeric}`}>
+                  {formatPercent(rival.p_relegation)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -308,59 +322,85 @@ function RivalsTable(props: {
 }
 
 /**
- * The probabilities of one remaining fixture.
+ * The three probabilities of one remaining fixture.
  *
  * The contract declares the three fields nullable because the per-fixture
- * simulation is not stored yet; the cell says so rather than printing three
- * dashes that would read as a model that priced the fixture at nothing.
+ * simulation is not stored yet; the row then says so in one cell instead of
+ * printing three dashes that would read as a model that priced the fixture at
+ * nothing.
  */
-function fixtureProbabilities(fixture: RemainingFixture): string {
+function FixtureProbabilities(props: {
+  readonly fixture: RemainingFixture;
+}): ReactElement {
+  const { fixture } = props;
   if (
     fixture.p_win === null &&
     fixture.p_draw === null &&
     fixture.p_loss === null
   ) {
-    return "model probabilities not available yet";
+    return (
+      <td className={styles.cell} colSpan={3}>
+        model probabilities not available yet
+      </td>
+    );
   }
-  return `W ${formatPercent(fixture.p_win)}, D ${formatPercent(fixture.p_draw)}, L ${formatPercent(fixture.p_loss)}`;
+  return (
+    <>
+      <td className={`${styles.cell} ${styles.numeric}`}>
+        {formatPercent(fixture.p_win)}
+      </td>
+      <td className={`${styles.cell} ${styles.numeric}`}>
+        {formatPercent(fixture.p_draw)}
+      </td>
+      <td className={`${styles.cell} ${styles.numeric}`}>
+        {formatPercent(fixture.p_loss)}
+      </td>
+    </>
+  );
 }
 
-/** The fixtures the club still has to play, with what is known about each. */
+/** The fixture column: the opponent, and the day, venue and table place. */
+function FixtureCell(props: {
+  readonly fixture: RemainingFixture;
+  readonly teamId: number;
+}): ReactElement {
+  const { fixture, teamId } = props;
+  const match = fixture.match;
+  const opponent =
+    match.home_team.id === teamId ? match.away_team.name : match.home_team.name;
+  const position =
+    fixture.opponent_position === null
+      ? EM_DASH
+      : `${ordinal(fixture.opponent_position)} in table`;
+  return (
+    <th className={`${styles.cell} ${styles.rowHeader}`} scope="row">
+      <span className={styles.fixtureName}>{opponent}</span>
+      <span className={styles.fixtureMeta}>
+        {`${formatMadridDate(match.kickoff_date)} · ${
+          fixture.venue === "home" ? "Home" : "Away"
+        } · ${position}`}
+      </span>
+    </th>
+  );
+}
+
+/** One fixtures table: the next few, or all of them behind a disclosure. */
 function FixturesTable(props: {
   readonly fixtures: readonly RemainingFixture[];
   readonly teamId: number;
-  readonly season: string;
+  readonly caption: string;
 }): ReactElement {
-  const { fixtures, teamId, season } = props;
-
-  if (fixtures.length === 0) {
-    return (
-      <p className={styles.note}>
-        The club has no further fixture in this season, so there is no run-in to
-        price.
-      </p>
-    );
-  }
-
+  const { fixtures, teamId, caption } = props;
   return (
     <div className={styles.tableWrap}>
       <table className={styles.table}>
-        <caption className={styles.caption}>
-          {`Remaining fixtures, ${season}`}
-        </caption>
+        <caption className={styles.caption}>{caption}</caption>
         <thead>
           <tr>
-            {[
-              "Date",
-              "Matchday",
-              "Opponent",
-              "Venue",
-              "Opponent position",
-              "Model probabilities",
-            ].map((column, index) => (
+            {["Fixture", "Win", "Draw", "Loss"].map((column, index) => (
               <th
                 className={`${styles.cell} ${styles.headCell}${
-                  index === 1 || index === 4 ? ` ${styles.numeric}` : ""
+                  index === 0 ? "" : ` ${styles.numeric}`
                 }`}
                 key={column}
                 scope="col"
@@ -371,37 +411,64 @@ function FixturesTable(props: {
           </tr>
         </thead>
         <tbody>
-          {fixtures.map((fixture) => {
-            const match = fixture.match;
-            const opponent =
-              match.home_team.id === teamId
-                ? match.away_team.name
-                : match.home_team.name;
-            return (
-              <tr key={match.id}>
-                <td className={styles.cell}>
-                  {formatMadridDate(match.kickoff_date)}
-                </td>
-                <td className={`${styles.cell} ${styles.numeric}`}>
-                  {formatCount(match.matchday)}
-                </td>
-                <td className={styles.cell}>{opponent}</td>
-                <td className={styles.cell}>
-                  {fixture.venue === "home" ? "Home" : "Away"}
-                </td>
-                <td className={`${styles.cell} ${styles.numeric}`}>
-                  {fixture.opponent_position === null
-                    ? EM_DASH
-                    : formatCount(fixture.opponent_position)}
-                </td>
-                <td className={styles.cell}>
-                  {fixtureProbabilities(fixture)}
-                </td>
-              </tr>
-            );
-          })}
+          {fixtures.map((fixture) => (
+            <tr key={fixture.match.id}>
+              <FixtureCell fixture={fixture} teamId={teamId} />
+              <FixtureProbabilities fixture={fixture} />
+            </tr>
+          ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** The fixtures the club still has to play, with their model probabilities. */
+function NextFixtures(props: {
+  readonly fixtures: readonly RemainingFixture[];
+  readonly teamId: number;
+  readonly teamName: string;
+  readonly season: string;
+}): ReactElement {
+  const { fixtures, teamId, teamName, season } = props;
+
+  if (fixtures.length === 0) {
+    return (
+      <p className={styles.note}>
+        The club has no further fixture in this season, so there is no run-in to
+        price.
+      </p>
+    );
+  }
+
+  const shown = fixtures.slice(0, FIXTURES_SHOWN);
+  const caption = `Remaining fixtures, ${season}: next ${formatCount(
+    shown.length,
+  )} of ${formatCount(fixtures.length)}`;
+
+  return (
+    <div className={styles.card}>
+      <CardHead
+        definition={`The model probability of each result of a remaining fixture, read from the club's side: a win is ${teamName} winning wherever it plays. The probabilities come from the latest succeeded simulation run of the season, so a fixture the run did not store has none.`}
+        label="Next fixtures"
+      />
+      <FixturesTable
+        caption={caption}
+        fixtures={shown}
+        teamId={teamId}
+      />
+      {fixtures.length > FIXTURES_SHOWN ? (
+        <details className={styles.disclosure}>
+          <summary className={styles.summary}>
+            {`Show all ${formatCount(fixtures.length)} remaining fixtures`}
+          </summary>
+          <FixturesTable
+            caption={`All remaining fixtures, ${season}`}
+            fixtures={fixtures}
+            teamId={teamId}
+          />
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -416,29 +483,38 @@ function FixturesTable(props: {
  */
 function CollapsedRace(props: {
   readonly race: RelegationRace;
+  readonly simulation: SimulationDetail | null;
   readonly teamId: number;
   readonly teamName: string;
   readonly season: string;
   readonly outlook: TeamFocus["outlook"];
 }): ReactElement {
-  const { race, teamId, teamName, season, outlook } = props;
+  const { race, simulation, teamId, teamName, season, outlook } = props;
   const last = race.series.points[race.series.points.length - 1];
   const row = last === undefined ? undefined : pointRow(last, teamId);
 
   const pTitle = row?.p_title ?? outlook?.p_title;
   const pUcl = row?.p_ucl ?? outlook?.p_ucl;
   const pEurope = row?.p_europe ?? outlook?.p_europe;
+  const qualification =
+    simulation === null ? null : simulation.run.qualification;
 
   return (
     <>
       <p className={styles.note}>
         {`Not in the relegation race: no stored run put ${teamName} above ${formatPercent(COLLAPSED_BELOW)} to go down, so the section draws no probability line. Its stored outlook is P(title) ${formatPercent(pTitle)}, P(UCL) ${formatPercent(pUcl)} and P(Europe) ${formatPercent(pEurope)}.`}
       </p>
-      <RivalsTable rivals={race.rivals} season={season} teamId={teamId} />
-      <FixturesTable
+      <RivalsTable
+        qualification={qualification}
+        rivals={race.rivals}
+        season={season}
+        teamId={teamId}
+      />
+      <NextFixtures
         fixtures={race.remaining_fixtures}
         season={season}
         teamId={teamId}
+        teamName={teamName}
       />
     </>
   );
@@ -455,6 +531,7 @@ function RaceBody(props: {
 }): ReactElement {
   const { race, simulation, teamId, teamName, season, outlook } = props;
   const points = race.series.points;
+  const qualification = simulation.run.qualification;
 
   if (points.length === 0) {
     return (
@@ -484,6 +561,7 @@ function RaceBody(props: {
         outlook={outlook}
         race={race}
         season={season}
+        simulation={simulation}
         teamId={teamId}
         teamName={teamName}
       />
@@ -492,18 +570,34 @@ function RaceBody(props: {
 
   return (
     <>
-      <RelegationHistory
-        points={points}
+      <div className={styles.card}>
+        <CardHead
+          definition="The projected final points total of the clubs nearest the drop in the stored simulation. The thin bar spans the 5th to 95th percentile of simulated totals, the thick bar the interquartile range, the tick the median and the diamond the points already earned. The survival line is the median final total of the last club to stay up over the completed seasons."
+          label="Projected finish"
+        />
+        <ProjectedPoints race={race} season={season} simulation={simulation} />
+      </div>
+      {points.length >= HISTORY_MINIMUM_RUNS ? (
+        <RelegationHistory
+          points={points}
+          season={season}
+          teamId={teamId}
+          teamName={teamName}
+        />
+      ) : (
+        <HistoryPending stored={points.length} />
+      )}
+      <RivalsTable
+        qualification={qualification}
+        rivals={race.rivals}
         season={season}
         teamId={teamId}
-        teamName={teamName}
       />
-      <ProjectedPoints race={race} season={season} simulation={simulation} />
-      <RivalsTable rivals={race.rivals} season={season} teamId={teamId} />
-      <FixturesTable
+      <NextFixtures
         fixtures={race.remaining_fixtures}
         season={season}
         teamId={teamId}
+        teamName={teamName}
       />
     </>
   );

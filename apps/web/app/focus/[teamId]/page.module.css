@@ -1,10 +1,16 @@
 /*
- * The team focus page: the club header, the outlook tiles and the streamed
+ * The team focus page: the club header, the story card and the streamed
  * sections that share this module.
  *
  * Only this page's own layout lives here. The shell, the shared states and the
  * chart figures bring their own styles, so a change to those is never repeated
  * here. Every colour is a token from globals.css.
+ *
+ * Wide content is contained, never hidden: a table that cannot fit its column
+ * scrolls inside `.tableWrap` and a chart draws inside its figure, so nothing
+ * here sets a minimum width that would push a phone's page sideways. Only a
+ * numeric cell refuses to wrap, because a number broken across two lines stops
+ * being comparable with the cell above it.
  */
 
 .main {
@@ -24,19 +30,22 @@
 .header {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
+}
+
+/* The line above the club name: which page this is, and which season. */
+.eyebrow {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .title {
   font-size: clamp(1.5rem, 4vw, 2rem);
   letter-spacing: -0.02em;
   line-height: 1.15;
-}
-
-.intro {
-  max-width: 48rem;
-  color: var(--muted);
-  line-height: 1.6;
 }
 
 /* The two selectors and the cookie form keep their own width instead of
@@ -74,45 +83,39 @@
   color: var(--accent);
 }
 
-/* The outlook tiles: every tile is one term and its value, so the block stays
-   one description list however the tiles wrap. */
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  gap: 0.75rem;
+/* The target of a section-nav link. The scroll margin clears the sticky bar, so
+   the heading of a section is not scrolled underneath it, and the block stays a
+   flex item that cannot widen the page while its section streams in. */
+.anchor {
+  display: block;
   min-width: 0;
+  scroll-margin-top: 4.5rem;
 }
 
-.tile {
+/* The story card: the page's opening sentence and the four numbers behind it. */
+.storyCard {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.75rem;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1.25rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: 1rem;
   background: var(--surface);
 }
 
-.term {
-  color: var(--muted);
-  font-size: 0.8125rem;
+.storyHeading {
+  font-size: clamp(1.125rem, 3.4vw, 1.5rem);
   font-weight: 600;
-}
-
-.value {
-  margin: 0;
-  font-size: 1.125rem;
-  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
-/* The p05-p95 interval under the mean expected points, so the range reads as a
-   qualifier of the number above it and not as a second total. */
-.range {
-  display: block;
-  color: var(--muted);
-  font-size: 0.8125rem;
-  font-weight: 400;
+.storyTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 .note {
@@ -137,12 +140,169 @@
   line-height: 1.3;
 }
 
-/* A panel inside a section, smaller than the section heading it sits under. */
-.subheading {
-  margin-top: 0.25rem;
+/* The cards of a section: as many columns as the column can hold at a readable
+   width, and one column on a phone. */
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  min-width: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+/* A card that spans the grid: the points line needs the room. */
+.wideCard {
+  grid-column: 1 / -1;
+}
+
+/* The heading of a card and its definition, side by side. The help is a sibling
+   of the heading and never a child of it: a heading that contains a control
+   stops being a heading for a screen reader's outline. */
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.cardTitle {
   font-size: 0.9375rem;
   font-weight: 600;
   line-height: 1.3;
+}
+
+.cardNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* The local points-per-match bars of the diagnosis cards. */
+.splitBars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.splitRow {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr) 4rem;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.splitLabel {
+  color: var(--text);
+}
+
+.splitTrack {
+  display: block;
+  height: 0.625rem;
+  border-radius: 0.3125rem;
+  background: var(--border);
+}
+
+.splitBar {
+  display: block;
+  height: 0.625rem;
+  border-radius: 0.3125rem;
+  background: var(--accent);
+}
+
+.splitValue {
+  text-align: right;
+}
+
+.splitScale {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* The points card: the line and its legend side by side once there is room. */
+.pointsBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+
+.legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.legendRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.legendTerm {
+  font-weight: 600;
+}
+
+.legendValue {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A disclosure that keeps a secondary chart or table out of the first read. */
+.disclosure {
+  min-width: 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.summary {
+  padding: 0.25rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.summary:hover {
+  color: var(--accent);
+}
+
+/* The heading of the next fixture: the two clubs, as the fixture page names it. */
+.fixtureTitle {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* The opponent, with the day, venue and table place under it. */
+.fixtureName {
+  display: block;
+}
+
+.fixtureMeta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 /* The multi-season trend: one sparkline per metric. The columns are as wide as
@@ -150,7 +310,7 @@
    narrow viewport instead of shrinking the lines into noise. */
 .trendGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
   gap: 1rem;
   min-width: 0;
 }
@@ -164,7 +324,6 @@
 
 .table {
   width: 100%;
-  min-width: 32rem;
   border-collapse: collapse;
   color: var(--text);
 }
@@ -176,28 +335,43 @@
   text-align: left;
 }
 
+/* A name wraps rather than being clipped or setting a minimum width: a club
+   name is the one cell whose content nobody can shorten. */
 .cell {
   padding: 0.5rem 0.75rem 0.5rem 0;
   border-bottom: 1px solid var(--border);
   text-align: left;
-  white-space: nowrap;
-}
-
-.headCell {
-  color: var(--muted);
-  font-size: 0.8125rem;
-  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .rowHeader {
   font-weight: 600;
 }
 
+/* The club the page is about, in its own table. */
+.subjectRow {
+  font-weight: 700;
+}
+
 /* Numbers line up by their digits, so a reader compares a column of averages
-   rather than a column of word shapes. */
+   rather than a column of word shapes. A number never wraps: a value split
+   across two lines cannot be compared with the row above it. */
 .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A column header is a phrase, not a number: it wraps inside its column so a
+   five-column table fits a phone without dropping the word that names it. It
+   comes after `.numeric` on purpose, so this rule wins the shared property for
+   a header cell that also carries `numeric`. */
+.headCell {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 @media (min-width: 640px) {
@@ -209,8 +383,9 @@
     font-size: 1.25rem;
   }
 
-  .table {
-    min-width: 36rem;
+  .pointsBody {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    align-items: start;
   }
 }
 
