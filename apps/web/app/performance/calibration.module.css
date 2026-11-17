@@ -1,0 +1,83 @@
+/*
+ * The calibration panels of the performance page.
+ *
+ * The drawing is fixed-size: the SVG is given the pixel width and height of its
+ * own `viewBox`, so every size here is the size the reader sees. The scroller
+ * takes a narrower viewport than the plot instead of widening the page, and the
+ * picker wraps rather than overflowing on a phone.
+ */
+
+.scroller {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.svg {
+  display: block;
+}
+
+/* The outline of one outcome panel and the diagonal it carries: the diagonal is
+   the line of perfect calibration, so a point on it means a predicted
+   probability that the outcome happened that often. */
+.panel {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.diagonal {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.heading {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tick {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.dot {
+  fill: var(--accent);
+  opacity: 0.75;
+}
+
+/* One link per model that holds a bin. Wrapping keeps the row inside a phone
+   viewport, and the current model is marked in the markup so the style follows
+   the attribute rather than a second class. */
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pickerLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.pickerLink:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pickerLink[aria-current="true"] {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+}

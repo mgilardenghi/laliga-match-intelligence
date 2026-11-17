@@ -139,6 +139,9 @@ export function Sparkline(props: SparklineProps): ReactElement {
   if (current.length > 0) {
     runs.push(current);
   }
+  // A series of whole numbers (a league position, a count) prints as whole
+  // numbers ("19", not "19.00"); any fractional value keeps two decimals.
+  const digits = values.every((value) => !isValue(value) || Number.isInteger(value)) ? 0 : 2;
   const firstIndex = points.findIndex((point) => point !== null);
   let lastIndex = -1;
   for (let index = points.length - 1; index >= 0; index -= 1) {
@@ -178,7 +181,7 @@ export function Sparkline(props: SparklineProps): ReactElement {
         columns: ["Season", "Value"],
         rows: seasons.map((season, index) => [
           season,
-          isValue(values[index]) ? `${formatNumber(values[index] as number)}${unit ?? ""}` : "—",
+          isValue(values[index]) ? `${formatNumber(values[index] as number, digits)}${unit ?? ""}` : "—",
         ]),
       }}
       note={note}
@@ -246,7 +249,7 @@ export function Sparkline(props: SparklineProps): ReactElement {
                 transform: valueLabelTransform("start", firstPoint.y),
               }}
             >
-              {`${formatNumber(values[firstIndex] as number)}${unit ?? ""}`}
+              {`${formatNumber(values[firstIndex] as number, digits)}${unit ?? ""}`}
             </span>
           ) : null}
           {lastPoint !== null ? (
@@ -258,7 +261,7 @@ export function Sparkline(props: SparklineProps): ReactElement {
                 transform: valueLabelTransform("end", lastPoint.y),
               }}
             >
-              {`${formatNumber(values[lastIndex] as number)}${unit ?? ""}`}
+              {`${formatNumber(values[lastIndex] as number, digits)}${unit ?? ""}`}
             </span>
           ) : null}
         </div>

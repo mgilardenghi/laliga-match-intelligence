@@ -1,0 +1,118 @@
+/*
+ * The model ranking of the performance page.
+ *
+ * The bars are HTML rather than SVG marks, so a bar, its model name and its
+ * score stay in the reading order. Every colour is a token from globals.css and
+ * every text-bearing element sets its own size: the figure's caption and note
+ * belong to the shared chart shell, and nothing here relies on inheriting it.
+ */
+
+/* The axis line above the bars: the two ends of the scale and its middle. It
+   wraps instead of widening the figure, so three parts still read on a phone. */
+.axis {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.15rem 0.75rem;
+  min-width: 0;
+  margin: 0 0 0.5rem;
+}
+
+.axisEnd,
+.axisMiddle {
+  min-width: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.axisEnd {
+  color: var(--muted);
+}
+
+.axisMiddle {
+  color: var(--text);
+}
+
+/* One row: the model, the bar with its track, and the score. The label and the
+   value keep a fixed share of the row so the bars of two rows start and end at
+   the same place, and the track takes what is left. */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 7rem) minmax(0, 1fr) 3.5rem;
+  align-items: center;
+  column-gap: 0.5rem;
+  min-width: 0;
+}
+
+.model {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* A full model name wraps inside its own column instead of pushing the bar
+   track narrower than the row can hold. */
+.name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.kind {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.plot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+/* The track has no width of its own: it fills the column the row gives it, so
+   the bar length is the only pixel measurement on the row. */
+.track {
+  min-width: 0;
+  height: 0.7rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.offScale {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.value {
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  text-align: right;
+}
