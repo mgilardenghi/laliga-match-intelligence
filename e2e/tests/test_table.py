@@ -991,6 +991,32 @@ def test_phone_layout_fits_390(page: Page, dashboard_url: str, simulated: bool) 
 
 
 @pytest.mark.loaded
+@pytest.mark.parametrize("width", [600, 768, 900, 959, 960, 1024, 1280])
+def test_the_heatmap_hint_shows_exactly_where_the_grid_scrolls(
+    page: Page, dashboard_url: str, width: int
+) -> None:
+    """A scroll region has its hint, and a region that fits does not need one.
+
+    The hint is dropped from 60rem (960 px). Just above that width the grid must
+    fit its region, or a reader would scroll sideways with no word about it; below
+    it the hint stays while the grid still has to scroll.
+    """
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(dashboard_url)
+    region = page.locator("[data-heatmap-scroll]")
+    expect(region).to_have_count(1)
+    scrolls = region.evaluate("(element) => element.scrollWidth > element.clientWidth + 1")
+    hint = page.get_by_text("This grid is wider than a phone", exact=False)
+    if scrolls:
+        expect(hint).to_be_visible()
+    else:
+        assert width >= 900, f"the heatmap fits at {width} px, narrower than expected"
+    if width >= 960:
+        assert not scrolls, f"the heatmap scrolls at {width} px, where its hint is hidden"
+        expect(hint).to_be_hidden()
+
+
+@pytest.mark.loaded
 def test_phone_list_text_sizes(page: Page, dashboard_url: str) -> None:
     """Guard the phone row type: every summary text stays on the readable scale."""
     page.set_viewport_size({"width": PHONE_WIDTH, "height": PHONE_HEIGHT})

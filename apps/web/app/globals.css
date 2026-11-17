@@ -49,7 +49,7 @@
      (components/charts/contrast.ts), so a token must keep its fallback's value;
      the chart gallery test checks every label for 4.5:1 in both themes. */
   --seq-0: #f0f4f9;
-  --seq-1: #dbe9f6;
+  --seq-1: #c6dbef;
   --seq-2: #9ecae1;
   --seq-3: #6baed6;
   --seq-4: #3f8fc4;
