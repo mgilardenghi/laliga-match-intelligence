@@ -787,19 +787,19 @@ export default async function MatchPage(
                     Model
                   </th>
                   <th
-                    className={`${styles.cell} ${styles.headCell} ${styles.numericCell}`}
+                    className={`${styles.cell} ${styles.headCell} ${styles.numericCell} ${styles.numericHead}`}
                     scope="col"
                   >
                     {home}
                   </th>
                   <th
-                    className={`${styles.cell} ${styles.headCell} ${styles.numericCell}`}
+                    className={`${styles.cell} ${styles.headCell} ${styles.numericCell} ${styles.numericHead}`}
                     scope="col"
                   >
                     Draw
                   </th>
                   <th
-                    className={`${styles.cell} ${styles.headCell} ${styles.numericCell}`}
+                    className={`${styles.cell} ${styles.headCell} ${styles.numericCell} ${styles.numericHead}`}
                     scope="col"
                   >
                     {away}
@@ -1004,13 +1004,13 @@ export default async function MatchPage(
                         Metric
                       </th>
                       <th
-                        className={`${styles.cell} ${styles.headCell} ${styles.numericCell}`}
+                        className={`${styles.cell} ${styles.headCell} ${styles.numericCell} ${styles.numericHead}`}
                         scope="col"
                       >
                         {home}
                       </th>
                       <th
-                        className={`${styles.cell} ${styles.headCell} ${styles.numericCell}`}
+                        className={`${styles.cell} ${styles.headCell} ${styles.numericCell} ${styles.numericHead}`}
                         scope="col"
                       >
                         {away}

@@ -158,18 +158,21 @@ export function MirroredBars(props: MirroredBarsProps): ReactElement {
                 ) : null}
                 {leagueOffset === null ? null : (
                   <>
+                    {/* The tick is drawn across the bar band only: it marks
+                        the league value on the same axis as the bar, and it
+                        never reaches into the row above or the caption. */}
                     <line
                       x1={CENTRE - leagueOffset}
-                      y1={y - 2}
+                      y1={y}
                       x2={CENTRE - leagueOffset}
-                      y2={y + BAR_HEIGHT + 2}
+                      y2={y + BAR_HEIGHT}
                       className={styles.chartLeague}
                     />
                     <line
                       x1={CENTRE + leagueOffset}
-                      y1={y - 2}
+                      y1={y}
                       x2={CENTRE + leagueOffset}
-                      y2={y + BAR_HEIGHT + 2}
+                      y2={y + BAR_HEIGHT}
                       className={styles.chartLeague}
                     />
                   </>

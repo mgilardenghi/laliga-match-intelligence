@@ -231,6 +231,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A numeric column is headed by a club name, not by a number, so its heading
+   wraps instead of widening the column: three fixed numeric columns leave a
+   phone's card enough room for the model label beside them. */
+.numericHead {
+  white-space: normal;
+  /* `break-word` only breaks a word that cannot fit the column, so a club name
+     wraps between its words and a single-word name stays whole where it can. */
+  overflow-wrap: break-word;
+}
+
 .modelCell {
   min-width: 0;
   font-weight: 400;
@@ -388,6 +398,11 @@
    1 and no label inside it is ever scaled. */
 .chartSvg {
   display: block;
+  /* Centred in its scroller: the drawing is 300 px at its natural size, so on a
+     wide screen an auto margin keeps it from hanging off the left edge of a
+     full-width card. It collapses to zero when the drawing is wider than the
+     card, which leaves the sideways scroll to the scroller. */
+  margin: 0 auto;
 }
 
 /* The scroller owns the horizontal overflow of a drawing wider than a phone.
@@ -438,7 +453,7 @@
      zero line passes behind it. */
   paint-order: stroke;
   stroke: var(--background);
-  stroke-width: 3px;
+  stroke-width: 4px;
   stroke-linejoin: round;
 }
 
