@@ -139,6 +139,13 @@ export function LineChart(props: LineChartProps): ReactElement {
   const yScale = linearScale([yMin, yMax], [PLOT_UNITS, 0]);
   const xScale = bandScale(xLabels.length, [0, PLOT_UNITS], 0.15);
   const yTicks = yScale.ticks(4);
+  // Enough decimals that neighbouring ticks never print the same text: a
+  // 0.02 step needs two ("0.18", "0.20"), not one ("0.2", "0.2").
+  const yTickStep = yTicks.length > 1 ? Math.abs(yTicks[1] - yTicks[0]) : 1;
+  const yTickDigits =
+    yTickStep > 0 && yTickStep < 1
+      ? Math.min(4, Math.ceil(-Math.log10(yTickStep) - 1e-9))
+      : 0;
 
   // The emphasised series takes the accent; the others take the categorical
   // palette in the order they appear, so no counter has to be threaded through
@@ -154,7 +161,14 @@ export function LineChart(props: LineChartProps): ReactElement {
     return SERIES_COLOURS[categoricalOrder.indexOf(index)] ?? MUTED_COLOUR;
   });
 
-  const xTickStep = Math.max(1, Math.ceil(xLabels.length / 6));
+  // Three x labels at most (first, middle, last): with end labels beside it
+  // the plot can be as narrow as ~160 px on a phone, and three season labels
+  // ("2007-08") fit there without running into each other.
+  const xTickIndices = new Set(
+    xLabels.length <= 3
+      ? xLabels.map((_, index) => index)
+      : [0, Math.round((xLabels.length - 1) / 2), xLabels.length - 1],
+  );
   const unitText = [yLabel, valueSuffix !== undefined ? `(${valueSuffix})` : undefined]
     .filter((part): part is string => part !== undefined && part.length > 0)
     .join(" ");
@@ -274,7 +288,7 @@ export function LineChart(props: LineChartProps): ReactElement {
                 className={styles.lineAxisTick}
                 style={{ top: `${clampPercent(yScale.scale(tick))}%` }}
               >
-                {formatNumber(tick, tick % 1 === 0 ? 0 : 1)}
+                {formatNumber(tick, yTickDigits)}
               </span>
             ))}
           </div>
@@ -366,7 +380,7 @@ export function LineChart(props: LineChartProps): ReactElement {
           <span aria-hidden="true" />
           <div className={styles.tickTrack}>
             {xLabels.map((label, index) =>
-              index % xTickStep === 0 ? (
+              xTickIndices.has(index) ? (
                 <span
                   key={`x-tick-${label}-${index}`}
                   className={styles.tickLabel}
