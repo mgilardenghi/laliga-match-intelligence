@@ -83,8 +83,10 @@ VERDICT_TEMPLATE = re.compile(
 VERDICT_FORBIDDEN = ("because", "thanks to")
 
 # The two sentences that rank nothing: their template names no model, so they are
-# the only verdicts the table cannot corroborate.
+# the only verdicts the table cannot corroborate. Both reach the same closing words,
+# which is what stops an unranked prefix from carrying a ranking behind it.
 VERDICT_UNRANKED = ("The backtest stores no common-match scores", "Only ")
+VERDICT_UNRANKED_ENDING = "so the page does not rank the models."
 
 # The kind the table prints for a fitted model, so a baseline or the market never
 # stands in for the model the verdict names.
@@ -566,21 +568,26 @@ def _single_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _best_model_row(table: dict[str, Any]) -> dict[str, str] | None:
-    """The fitted-model row the table ranks first, as the page printed it."""
-    best: dict[str, str] | None = None
-    best_score = 0.0
+def _best_model_rows(table: dict[str, Any]) -> list[dict[str, str]]:
+    """Every fitted-model row the table shows at its lowest RPS.
+
+    The table prints three decimals while the page ranks on the underlying scores,
+    so two models whose scores round to the same text are both candidates: the page
+    may name either, and a check that picked one would invent an order the rendered
+    table cannot show.
+    """
+    scored: list[tuple[float, dict[str, str]]] = []
     for row in table["rows"]:
         if row["kind"] != MODEL_KIND:
             continue
         try:
-            score = float(row["rps"])
+            scored.append((float(row["rps"]), row))
         except ValueError:
             continue
-        if best is None or score < best_score:
-            best = row
-            best_score = score
-    return best
+    if not scored:
+        return []
+    lowest = min(score for score, _ in scored)
+    return [row for score, row in scored if score == lowest]
 
 
 def _assert_section_nav_anchors_resolve(page: Page, path: str) -> None:
@@ -757,28 +764,40 @@ def test_verdict_follows_template(page: Page, dashboard_url: str) -> None:
 
     # A template match alone accepts any branch with any number in it, so the
     # sentence is also read against the column it summarises: the model it names
-    # must be the one this page ranks first, and the score it prints must be that
-    # model's own score.
+    # must be one of the models this page shows at its lowest score, and the score
+    # it prints must be that model's own score.
     if text.startswith(VERDICT_UNRANKED):
+        assert text.endswith(VERDICT_UNRANKED_ENDING), (
+            f"the verdict {text!r} starts like a sentence that ranks nothing but does "
+            f"not end on {VERDICT_UNRANKED_ENDING!r}, so a ranking hides behind the "
+            "prefix of a sentence that claims there is none"
+        )
         return
+
+    assert text.endswith("."), (
+        f"the verdict {text!r} does not end its sentence, so a template prefix can "
+        "carry any claim after it"
+    )
 
     table: dict[str, Any] | None = page.evaluate(TABLE_VALUES_SCRIPT)
     assert table is not None, (
         f"{path} ranks the models in a sentence but renders no scores table, so the "
         "sentence has no column to agree with"
     )
-    best = _best_model_row(table)
-    assert best is not None, (
+    candidates = _best_model_rows(table)
+    assert candidates, (
         f"{path} names a best model but its scores table holds no fitted-model row, so "
         "the sentence ranks a model the page never scores"
     )
-    assert best["model"] in text, (
-        f"the verdict {text!r} does not name {best['model']!r}, which this page ranks "
-        f"first among the fitted models at {best['rps']}"
+    named = [row for row in candidates if row["model"] in text]
+    assert named, (
+        f"the verdict {text!r} names none of the fitted models this page shows at its "
+        f"lowest score ({', '.join(row['model'] for row in candidates)}), so it ranks "
+        "a model the table does not"
     )
-    assert best["rps"] in text, (
-        f"the verdict {text!r} does not print {best['rps']!r}, the score this page "
-        f"shows for {best['model']!r}"
+    assert named[0]["rps"] in text, (
+        f"the verdict {text!r} does not print {named[0]['rps']!r}, the score this page "
+        f"shows for {named[0]['model']!r}"
     )
 
 
@@ -970,13 +989,16 @@ def test_score_tiles_show_the_table_best_values(page: Page, dashboard_url: str) 
 
     for tile in tiles["tiles"]:
         marked = table["marked"].get(tile["label"], [])
-        assert len(marked) == 1, (
-            f"the {tile['label']} column marks {len(marked)} best values instead of one, "
-            "so the tile above it has no single value to repeat"
+        assert marked, (
+            f"the {tile['label']} column marks no best value, so the tile above it "
+            "repeats a value the table never states"
         )
-        assert tile["value"] == marked[0], (
+        # A tie marks every model that shares the best value, and the page marks a
+        # tie on purpose, so a tied column is a pass as long as every marked cell
+        # states the number the tile repeats.
+        assert set(marked) == {tile["value"]}, (
             f"the {tile['label']} tile reads {tile['value']!r} while the table marks "
-            f"{marked[0]!r} as the best value of that column"
+            f"{sorted(set(marked))!r} as the best value of that column"
         )
 
 
