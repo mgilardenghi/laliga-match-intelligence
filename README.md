@@ -124,14 +124,14 @@ The empty states of the pages name these commands themselves (`make ingest`, `ma
 
 ## Dashboard
 
-- `/` - the current table of a season (`?season=`), with the position heatmap and the projected columns and points intervals when a simulation is stored.
+- `/` - the current table of a season (`?season=`): the race at a glance, the table with end-of-season chances, and the projection (points intervals and position heatmap) when a simulation is stored; a list layout on a phone.
 - `/matchday` - the next matchday's fixtures (`?matchday=`) with the stored model probabilities per fixture.
-- `/matches/[matchId]` - one match: the pre-match probabilities next to the market-implied ones, both clubs' form, the head-to-head record, the match statistics and both clubs' season profiles.
+- `/matches/[matchId]` - one match: a one-sentence reading of the main forecast, every stored pre-kickoff forecast and the market price when stored, both clubs' form, the head-to-head record, the season profile and the result once played.
 - `/teams` - the clubs of a season (`?season=`), with the control that stores the focus team.
 - `/teams/[teamId]` - one club's season (`?season=`): season at a glance, home and away split, for and against, results and next fixtures.
 - `/focus` - resolves the focus team and redirects to `/focus/<teamId>`; it renders nothing itself.
 - `/focus/[teamId]` - the team focus page: season diagnosis, the multi-season trend, the relegation race and the next-match preview (MVP specification, section 6).
-- `/performance` - the backtest metrics per model and season and the live predictions against the market (`?subset=all|common`).
+- `/performance` - the backtest as a report (verdict, RPS ranking, scores, season-by-season RPS, calibration) and the live predictions against the market (`?subset=all|common`, `?calibration=<model>`).
 - `/dev/charts` - the chart gallery, exposed only when `LMI_DEV_PAGES=1`.
 
 [docs/dashboard.md](docs/dashboard.md) covers the read path, the shell, the routes and the browser tests in more detail.
