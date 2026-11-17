@@ -280,6 +280,25 @@ export default function ChartGalleryPage(): ReactElement {
         />
       </section>
 
+      <section className={styles.section} aria-labelledby="score-heading">
+        <h2 id="score-heading" className={styles.heading}>
+          Score by season
+        </h2>
+        <LineChart
+          id="dev-score-by-season"
+          title="Ranked probability score by season"
+          description="A model's ranked probability score in each of six seasons, on a narrow axis between 0.16 and 0.24 where one decimal would print the same tick text twice."
+          note="A fixture for the axis: the y ticks step by 0.02 and the six season labels share a phone-width plot."
+          domain={[0.16, 0.24]}
+          xLabels={["2018-19", "2019-20", "2020-21", "2021-22", "2022-23", "2023-24"]}
+          series={[
+            { name: "Dixon-Coles", values: [0.2, 0.19, 0.21, 0.18, 0.2, 0.17], emphasis: true },
+            { name: "Elo", values: [0.23, 0.22, 0.24, 0.21, 0.22, 0.2] },
+          ]}
+          yLabel="Score"
+        />
+      </section>
+
       <section className={styles.section} aria-labelledby="relegation-heading">
         <h2 id="relegation-heading" className={styles.heading}>
           Relegation risk
@@ -389,6 +408,21 @@ export default function ChartGalleryPage(): ReactElement {
             "2018-19",
           ]}
           values={[2.62, 2.58, 2.55, 2.61, 2.49, 2.53, 2.48, 2.56, 2.51, 2.58, 2.44, 2.39, 2.47, 2.35]}
+        />
+      </section>
+
+      <section className={styles.section} aria-labelledby="position-heading">
+        <h2 id="position-heading" className={styles.heading}>
+          League position
+        </h2>
+        <Sparkline
+          id="dev-league-position"
+          title="League position since 2013-14"
+          description="A club's final league position in each season from 2013-14 to 2018-19, a series of whole numbers."
+          note="A whole-number series prints without decimals: 19, not 19.00."
+          metric="Position"
+          seasons={["2013-14", "2014-15", "2015-16", "2016-17", "2017-18", "2018-19"]}
+          values={[19, 15, 12, 9, 6, 4]}
         />
       </section>
 
