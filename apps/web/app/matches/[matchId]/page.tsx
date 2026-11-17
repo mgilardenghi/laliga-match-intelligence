@@ -267,11 +267,7 @@ function RefusedPage(props: { readonly problem: Problem | null }): ReactElement 
 }
 
 /** A count with its noun in the right number: "1 match", "12 matches". */
-function countPhrase(
-  count: number,
-  singular: string,
-  plural: string = `${singular}s`,
-): string {
+function countPhrase(count: number, singular: string, plural: string): string {
   return `${formatCount(count)} ${count === 1 ? singular : plural}`;
 }
 
@@ -283,6 +279,7 @@ function standingLine(row: StandingRow | null): string | null {
   return `${ordinal(row.position)} · ${formatPoints(row.points)} pts after ${countPhrase(
     row.played,
     "match",
+    "matches",
   )}`;
 }
 
@@ -414,7 +411,7 @@ function RecordBar(props: {
       title={title}
       description={description}
       table={{
-        caption: `The ${countPhrase(record.played, "meeting")} of ${home} and ${away} before this fixture, counted from this fixture's home side`,
+        caption: `The ${countPhrase(record.played, "meeting", "meetings")} of ${home} and ${away} before this fixture, counted from this fixture's home side`,
         columns: ["Record", `${home} wins`, "Draws", `${away} wins`],
         rows: [
           [
@@ -887,6 +884,7 @@ export default async function MatchPage(
                 )}–${formatCount(side.form.goals_against)} goals in ${countPhrase(
                   side.form.matches.length,
                   "match",
+                  "matches",
                 )}.`}
               </p>
             </div>
@@ -896,7 +894,7 @@ export default async function MatchPage(
         <section id="head-to-head" className={styles.card}>
           <div className={styles.headingRow}>
             <h2 className={styles.sectionTitle}>
-              {`Head-to-head · ${countPhrase(record.played, "meeting")}`}
+              {`Head-to-head · ${countPhrase(record.played, "meeting", "meetings")}`}
             </h2>
             <MetricHelp
               label="head-to-head record"

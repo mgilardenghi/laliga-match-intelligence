@@ -399,6 +399,14 @@ def test_the_head_to_head_and_profile_render(page: Page, dashboard_url: str) -> 
         expect(
             record.locator("table").filter(has=page.locator("caption", has_text=H2H_CAPTION))
         ).to_have_count(0)
+        expect(
+            record.locator("table").filter(
+                has=page.locator("caption", has_text=LAST_MEETINGS_CAPTION)
+            )
+        ).to_have_count(0)
+        # No meeting list either: a stray row or a stray link would mean the page
+        # drew a record it does not have.
+        expect(record.locator('a[href*="/matches/"]')).to_have_count(0)
     else:
         totals = page.locator("table").filter(has=page.locator("caption", has_text=H2H_CAPTION))
         expect(totals).to_have_count(1)
