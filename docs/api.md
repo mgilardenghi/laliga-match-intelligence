@@ -705,7 +705,9 @@ played. `opponent_position` is `null` for an opponent the table does not rank.
 three results, always from the club's side: at home they are the stored
 home/draw/away triple and away the same triple read from the other end, so
 `p_win` means the club wins wherever it plays. `next_match` describes the fixture
-the club plays next: `match_id` is `remaining_fixtures[0].match.id`, and
+the club plays next: `match_id` is the first of `remaining_fixtures` dated on or after
+today in Madrid (the same match the focus page lists first as upcoming; a postponed
+fixture dated earlier stays in `remaining_fixtures` but is not next), and
 `outcomes.win`, `outcomes.draw` and `outcomes.loss` each carry `p_outcome` (the
 share of the simulated runs that produced that result), the conditional
 `p_relegation`, `p_europe` and `p_title` (the shares of those same runs that
@@ -730,7 +732,8 @@ when the run holds no row for the club. A `null` is unknown, never zero.
 **Two measurements, not a contradiction.** `p_outcome` is the simulated
 frequency of a result, not a model probability, so it may differ slightly --
 about half a percentage point at 10 000 runs -- from the model probability in
-`remaining_fixtures[0].p_win`, `p_draw` and `p_loss` for the same fixture. They
+the `p_win`, `p_draw` and `p_loss` of the `remaining_fixtures` entry whose match id is
+`next_match.match_id`. They
 are two measurements of the same match, not a contradiction: the frequency is
 what the run's samples produced, while the fixture triple is the model's
 probability of the fixture.

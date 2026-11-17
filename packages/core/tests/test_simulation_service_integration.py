@@ -348,10 +348,15 @@ def _next_match_ids(
     teams: dict[str, int],
     as_of_date: datetime.date,
 ) -> dict[int, int]:
-    """Return each team's first simulated fixture id in kickoff order, from the specs."""
+    """Return each team's next match id from the specs.
+
+    That is its first simulated fixture in kickoff order that is dated on or after
+    the as-of date: an earlier, still scheduled (postponed) fixture is simulated
+    but never named.
+    """
     first: dict[int, int] = {}
     for spec in sorted(specs, key=lambda item: item.kickoff_date):
-        if not _is_simulated(spec, as_of_date):
+        if not _is_simulated(spec, as_of_date) or spec.kickoff_date < as_of_date:
             continue
         home_id = teams[spec.home_name]
         away_id = teams[spec.away_name]
@@ -920,19 +925,19 @@ def test_detail_rows_stay_within_the_storage_bound(database: Database) -> None:
     assert len(fixtures) + len(next_matches) <= 440
 
 
-def test_the_next_match_follows_the_kickoff_not_the_score_date(
-    database: Database,
+@pytest.mark.parametrize("as_of_days", [24, 28], ids=["between-matchdays", "on-a-kickoff-date"])
+def test_a_postponed_fixture_is_simulated_but_never_named_the_next_match(
+    database: Database, as_of_days: int
 ) -> None:
-    """A postponed pile-up keeps the kickoff order, not the collapsed ``sim_date`` order.
+    """A scheduled fixture dated before the as-of date is not a club's next match.
 
-    The season rows are stored with the last matchday first, the way a backfill
-    that ingested a rescheduled fixture late would, so the match id runs opposite
-    to the kickoff order. Every remaining fixture is dated before the as-of date
-    and still scheduled, so all of them are simulated and every one collapses
-    onto the as-of date in ``sim_date`` order. The two candidate orders therefore
-    disagree on purpose: following the kickoff names each club's earliest
-    fixture, while following ``sim_date`` would break the tie by match id and
-    name its latest one.
+    The season rows are stored with the last matchday first, so the match id runs
+    opposite to the kickoff order. The fourth matchday is dated before the as-of
+    date and still scheduled: the service simulates it (it has not been played)
+    but names the first fixture dated on or after the as-of date instead, which is
+    what the focus page lists first as upcoming. Naming the earliest kickoff would
+    pick the postponed one, and ordering by ``sim_date`` would break the tie of
+    the collapsed dates by match id.
     """
     season_id = _create_season(database.sessions)
     teams = _create_teams(database.sessions)
@@ -944,29 +949,31 @@ def test_the_next_match_follows_the_kickoff_not_the_score_date(
         teams=teams,
         specs=list(reversed(specs)),
     )
-    as_of = start + datetime.timedelta(days=40)
+    as_of = start + datetime.timedelta(days=as_of_days)
 
     run_id, _ = _request_run(database, as_of)
     simulation_service.execute_run(database.sessions, run_id)
 
     match_ids = _match_ids_by_fixture(database, season_id)
     expected = _next_match_ids(specs, match_ids, teams, as_of)
+    assert set(expected) == set(teams.values())
     stored_ids_by_team: dict[int, set[int]] = {}
     for row in _next_match_rows(database, run_id):
         stored_ids_by_team.setdefault(row.team_id, set()).add(row.match_id)
     assert {team_id: min(ids) for team_id, ids in stored_ids_by_team.items()} == expected
     assert all(len(ids) == 1 for ids in stored_ids_by_team.values())
 
-    # The guard has teeth only while the two orders really disagree: the first
-    # club's earliest remaining kickoff carries the highest of its match ids.
-    early = match_ids[
-        (start + datetime.timedelta(days=21), teams[TEAM_NAMES[1]], teams[TEAM_NAMES[0]])
-    ]
-    middle = match_ids[
-        (start + datetime.timedelta(days=28), teams[TEAM_NAMES[2]], teams[TEAM_NAMES[0]])
-    ]
-    late = match_ids[
-        (start + datetime.timedelta(days=35), teams[TEAM_NAMES[3]], teams[TEAM_NAMES[0]])
-    ]
-    assert late < middle < early
-    assert expected[teams[TEAM_NAMES[0]]] == early
+    # A fixture dated exactly on the as-of date is eligible (the rule is >=), which
+    # the second case checks: its clubs name that fixture, not a later one.
+    # The guard has teeth only while a postponed fixture exists and is simulated:
+    # the fourth matchday is dated before the as-of date and every club plays it.
+    postponed = {
+        match_id
+        for (kickoff, _home, _away), match_id in match_ids.items()
+        if kickoff < as_of and kickoff >= start + datetime.timedelta(days=21)
+    }
+    assert postponed
+    assert postponed <= _simulated_fixture_ids(specs, match_ids, teams, as_of)
+    assert postponed.isdisjoint(
+        {match_id for ids in stored_ids_by_team.values() for match_id in ids}
+    )

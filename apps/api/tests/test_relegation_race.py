@@ -627,6 +627,63 @@ def test_a_stored_next_match_that_is_no_longer_next_serves_a_null_next_match(
     assert payload["next_match"] is None
 
 
+POSTPONED_KICKOFF = datetime.date(2020, 1, 1)
+"""A date long before today in Madrid: a scheduled fixture on it is postponed."""
+
+
+def _add_postponed_fixture(session: Session, pending: Pending) -> Match:
+    """Store a still scheduled fixture of the subject dated in the past."""
+    beta = pending.clubs[1]
+    return create_match(
+        session,
+        season=pending.season,
+        home=beta,
+        away=pending.subject,
+        kickoff_date=POSTPONED_KICKOFF,
+        matchday=5,
+    )
+
+
+def test_a_postponed_fixture_is_listed_but_the_next_match_is_the_first_upcoming_one(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """A scheduled fixture dated before today stays remaining but is not next.
+
+    The focus page lists only fixtures dated today or later as upcoming, so the
+    swing must name that same match. The run stored its counts for the first
+    upcoming fixture, as the service does, and the postponed one comes first in
+    the remaining fixtures.
+    """
+    pending, run = _pending_with_run(db_session)
+    postponed = _add_postponed_fixture(db_session, pending)
+    home, _away = pending.fixtures
+    _store_outcome_counts(
+        db_session, run=run, team=pending.subject, match=home, counts=OUTCOME_COUNTS
+    )
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    remaining = [fixture["match"]["id"] for fixture in payload["remaining_fixtures"]]
+    assert remaining[0] == postponed.id
+    assert payload["next_match"] is not None
+    assert payload["next_match"]["match_id"] == home.id
+
+
+def test_counts_stored_for_a_postponed_fixture_serve_a_null_next_match(
+    api_client: TestClient, db_session: Session
+) -> None:
+    """Counts for the postponed fixture describe a match that is not next."""
+    pending, run = _pending_with_run(db_session)
+    postponed = _add_postponed_fixture(db_session, pending)
+    _store_outcome_counts(
+        db_session, run=run, team=pending.subject, match=postponed, counts=OUTCOME_COUNTS
+    )
+
+    payload = _race(api_client, pending.subject.id, season=PENDING_SEASON_CODE)
+
+    assert payload["next_match"] is None
+
+
 def test_a_never_sampled_outcome_serves_a_null_next_match(
     api_client: TestClient, db_session: Session
 ) -> None:

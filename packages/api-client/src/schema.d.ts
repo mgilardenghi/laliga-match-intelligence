@@ -1061,8 +1061,9 @@ export interface paths {
          *     for a run created before revision 0004 and for a fixture the run did not
          *     simulate.
          *
-         *     ``next_match`` is the first of those fixtures and what each of its three
-         *     results does to the club, read from the same run's stored outcome counts
+         *     ``next_match`` is the first of those fixtures dated on or after Madrid today
+         *     (a postponed fixture dated earlier stays listed but is not next) and what each
+         *     of its three results does to the club, read from the same run's stored outcome counts
          *     through :func:`lmi_core.analytics.relegation.next_match_swing`. Each outcome
          *     carries the simulated frequency of the result, so ``p_outcome`` may differ
          *     slightly -- about half a percentage point at 10 000 runs -- from the model
