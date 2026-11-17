@@ -46,14 +46,14 @@ the one fact the client still has, and it ties the screen to the server log.
 
 | Route | State |
 | --- | --- |
-| `/` | The current table of a season (`?season=`), with the projected columns, the position heatmap and the points intervals when a simulation is stored. Empty states name `make ingest` or `make simulate`. |
+| `/` | The current table of a season (`?season=`): the race at a glance (title, Champions League and relegation cards from the stored run), the table with end-of-season chances (`?columns=all` shows every column), and the projection (projected final points and the position heatmap). Below 60 rem the table becomes a list of tappable rows, and the heatmap is a hinted sideways scroller. Empty states name `make ingest` or `make simulate`. |
 | `/matchday` | The fixtures of one matchday (`?matchday=`), one card per fixture, with the stored probabilities of every model and the market-implied probabilities. Empty states name `make ingest` or `make predict`. |
-| `/matches/[matchId]` | One match: the pre-match probabilities next to the market-implied ones, both clubs' form, the head-to-head record, the match statistics and both clubs' season profiles. Empty states name `make predict`. |
+| `/matches/[matchId]` | One match: a header with each club's table place before kickoff and a one-sentence reading of the main forecast (Dixon-Coles, else Elo), every stored pre-kickoff forecast (fitted models first, then the market price when stored, then the baselines), both clubs' form, the head-to-head record, the season profile and, on a played fixture, the result. Empty states name `make predict`. |
 | `/teams` | The clubs of one season (`?season=`) and the picker that stores the focus team (`?pick=focus`). |
 | `/teams/[teamId]` | One club's season (`?season=`): season at a glance, home and away split, for and against, results, next fixtures and the focus form. Empty states name `make ingest` and `make simulate`. |
 | `/focus` | Resolves the focus team and redirects to `/focus/<teamId>`; it renders nothing itself. |
 | `/focus/[teamId]` | The team focus page (MVP specification, section 6): a story card that states the season in one sentence and beside it four headline tiles, then the season diagnosis, the relegation race, the next match with what each result would change, the multi-season trend, and a `How to read this page` block. The sticky section bar links to the four sections, and every metric carries a help control. |
-| `/performance` | The backtest metrics per model and season and the live predictions against the market (`?subset=all\|common`). Empty states name `make backtest` and `make predict`. |
+| `/performance` | The backtest as a report: a verdict sentence computed on the common matches, the RPS ranking, the four scores with their definitions, the scores table (`?subset=all\|common`), RPS by season, calibration by outcome for one model (`?calibration=`), reproducibility, and the live predictions against the market. Empty states name `make backtest` and `make predict`. |
 | `/dev/charts` | The chart gallery, behind `LMI_DEV_PAGES=1`. |
 
 ### Theme
