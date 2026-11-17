@@ -4,11 +4,14 @@ The page renders inline fixture data, so it holds on the empty stack. The test
 checks the chart structure and its text alternatives, never the fixture values.
 """
 
+import itertools
+import re
+
 import pytest
 from playwright.sync_api import Locator, Page, Response, expect
 
 GALLERY_PATH = "/dev/charts"
-CHART_COUNT = 9
+CHART_COUNT = 11
 
 
 def _text_content(locator: Locator) -> str:
@@ -289,3 +292,96 @@ def test_compact_form_labels_meet_contrast_against_their_fills(
         "the table rendered a form strip inside a figure; the compact variant has none"
     )
     _assert_contrast(compact, f"compact form-strip labels on / in {scheme} mode")
+
+
+# Axis text that a phone reader can read (commit c7fe1b8). The y ticks of a
+# narrow axis printed one decimal and so repeated ("0.2" five times); the x
+# labels of a six-season chart ran into each other in a ~160 px plot; and a
+# whole-number sparkline printed "19.00". The checks read the rendered text and
+# boxes of the gallery at 390 px.
+PHONE_VIEWPORT = {"width": 390, "height": 844}
+Y_TICK_SELECTOR = '[class*="lineAxisTick"]'
+X_TICK_SELECTOR = '[class*="tickLabel"]'
+SPARKLINE_VALUE_SELECTOR = '[class*="sparklineValue"]'
+MAX_X_LABELS = 3
+SCORE_CHART_CAPTION = "Ranked probability score by season"
+POSITION_SPARKLINE_CAPTION = "League position since 2013-14"
+FRACTION_SPARKLINE_CAPTION = "Goals per match since 2005-06"
+
+
+def _open_gallery_on_a_phone(page: Page, dashboard_url: str) -> None:
+    page.set_viewport_size(PHONE_VIEWPORT)
+    url = f"{dashboard_url}{GALLERY_PATH}"
+    response: Response | None = page.goto(url)
+    assert response is not None, f"{url} returned no navigation response"
+    assert response.ok, f"{url} answered HTTP {response.status}"
+
+
+def _figure(page: Page, caption: str) -> Locator:
+    figure = page.locator("figure").filter(has=page.locator("figcaption", has_text=caption))
+    expect(figure).to_have_count(1)
+    return figure
+
+
+def _line_charts(page: Page) -> Locator:
+    charts = page.locator("figure").filter(has=page.locator(Y_TICK_SELECTOR))
+    assert charts.count() >= 3, "the gallery should hold at least three line charts"
+    return charts
+
+
+@pytest.mark.empty
+def test_line_chart_y_ticks_never_repeat_text(page: Page, dashboard_url: str) -> None:
+    _open_gallery_on_a_phone(page, dashboard_url)
+    charts = _line_charts(page)
+
+    for index in range(charts.count()):
+        chart = charts.nth(index)
+        caption = chart.locator("figcaption").inner_text().strip()
+        y_ticks = [text.strip() for text in chart.locator(Y_TICK_SELECTOR).all_inner_texts()]
+        assert len(y_ticks) >= 2, f"{caption!r} prints {len(y_ticks)} y ticks"
+        assert len(set(y_ticks)) == len(y_ticks), f"{caption!r} repeats y tick text: {y_ticks}"
+
+    # The narrow-axis fixture is where one decimal printed the same text twice.
+    score_ticks = [
+        t.strip()
+        for t in _figure(page, SCORE_CHART_CAPTION).locator(Y_TICK_SELECTOR).all_inner_texts()
+    ]
+    assert all(re.fullmatch(r"0\.\d\d", tick) for tick in score_ticks), (
+        f"the 0.02-step axis should print two decimals, got {score_ticks}"
+    )
+
+
+@pytest.mark.empty
+def test_line_chart_x_labels_fit_a_phone(page: Page, dashboard_url: str) -> None:
+    _open_gallery_on_a_phone(page, dashboard_url)
+    charts = _line_charts(page)
+
+    for index in range(charts.count()):
+        chart = charts.nth(index)
+        caption = chart.locator("figcaption").inner_text().strip()
+        x_labels = chart.locator(X_TICK_SELECTOR)
+        count = x_labels.count()
+        assert 1 <= count <= MAX_X_LABELS, f"{caption!r} draws {count} x labels at 390 px"
+        boxes = [x_labels.nth(i).bounding_box() for i in range(count)]
+        spans = sorted((box["x"], box["x"] + box["width"]) for box in boxes if box is not None)
+        assert len(spans) == count, f"{caption!r} has an x label with no box"
+        for (_, left_end), (right_start, _) in itertools.pairwise(spans):
+            assert left_end <= right_start, f"{caption!r} x labels overlap at 390 px: {spans}"
+
+    # Six season labels share the narrow plot here; three is the cap.
+    assert _figure(page, SCORE_CHART_CAPTION).locator(X_TICK_SELECTOR).count() == MAX_X_LABELS
+
+
+@pytest.mark.empty
+def test_sparkline_prints_whole_numbers_without_decimals(page: Page, dashboard_url: str) -> None:
+    _open_gallery_on_a_phone(page, dashboard_url)
+
+    whole = _figure(page, POSITION_SPARKLINE_CAPTION).locator(SPARKLINE_VALUE_SELECTOR)
+    whole_texts = [text.strip() for text in whole.all_inner_texts()]
+    assert whole_texts, "the whole-number sparkline prints no end values"
+    for text in whole_texts:
+        assert re.fullmatch(r"\d+", text), f"whole-number series printed {text!r}"
+
+    fractional = _figure(page, FRACTION_SPARKLINE_CAPTION).locator(SPARKLINE_VALUE_SELECTOR)
+    for text in (t.strip() for t in fractional.all_inner_texts()):
+        assert re.fullmatch(r"\d+\.\d\d", text), f"fractional series printed {text!r}"

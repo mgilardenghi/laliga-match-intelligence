@@ -7,7 +7,8 @@ import styles from "./ui.module.css";
  *
  * The control is a real `<summary>`, so Enter, Space, a click and a tap all
  * toggle it without a hook or a line of JavaScript. The summary carries the
- * metric's name as its accessible name; the glyph itself is decorative. An
+ * metric's name as its accessible name; the mark itself is decorative and drawn in CSS, because
+ * the ⓘ character has no glyph in some font stacks and showed as a box. An
  * `<abbr title>` would show the definition only on hover, which a touch reader
  * and a keyboard reader cannot reach.
  */
@@ -33,9 +34,7 @@ export function MetricHelp(props: MetricHelpProps): ReactElement {
   return (
     <details className={styles.metricHelp}>
       <summary className={styles.metricHelpSummary} aria-label={`What ${label} means`}>
-        <span className={styles.metricHelpGlyph} aria-hidden="true">
-          ⓘ
-        </span>
+        <span className={styles.metricHelpGlyph} aria-hidden="true" />
       </summary>
       <div className={styles.metricHelpPanel}>
         <p className={styles.metricHelpText}>{definition}</p>

@@ -98,31 +98,20 @@
   line-height: 1.5;
 }
 
-/* A circled i drawn by geometry rather than by a character: the page's font
-   stack has no glyph for the ⓘ character and drew a missing-glyph box in its
-   place. The dot and the stem are drawn here, so the mark renders at any font,
-   and the paragraph's text stays prose for a reader and for the screen reader
-   that hears the hidden word after it. */
-.infoMark,
-.metricHead summary > span,
-.listMetricTerm summary > span {
+/* A circled i drawn by geometry rather than by a character, so it renders at
+   any font. The shared MetricHelp draws the same mark in components/ui. */
+.infoMark {
   position: relative;
   display: inline-flex;
   width: 0.8125rem;
   height: 0.8125rem;
   border: 1px solid currentColor;
   border-radius: 999px;
-  /* The shared control draws one character in this span; the mark replaces it. */
-  font-size: 0;
   vertical-align: -0.1em;
 }
 
 .infoMark::before,
-.infoMark::after,
-.metricHead summary > span::before,
-.metricHead summary > span::after,
-.listMetricTerm summary > span::before,
-.listMetricTerm summary > span::after {
+.infoMark::after {
   position: absolute;
   left: 50%;
   width: 2px;
@@ -133,16 +122,12 @@
 }
 
 /* The dot of the i, and the gap that keeps it a letter rather than a bar. */
-.infoMark::before,
-.metricHead summary > span::before,
-.listMetricTerm summary > span::before {
+.infoMark::before {
   bottom: 7px;
   height: 2px;
 }
 
-.infoMark::after,
-.metricHead summary > span::after,
-.listMetricTerm summary > span::after {
+.infoMark::after {
   bottom: 2px;
   height: 4px;
 }
