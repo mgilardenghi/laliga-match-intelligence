@@ -310,7 +310,14 @@ export default async function HomePage(
             : "Table and end-of-season chances"}
         </h2>
         <p className={styles.hint}>
-          Sorted by points. Tap ⓘ on a header for its definition.
+          Sorted by points. Tap{" "}
+          {/* A circled i drawn by the stylesheet, not the ⓘ character: the page's
+              font stack has no glyph for U+24D8, so the character reaches a
+              reader as a missing-glyph box. The mark is decorative; the
+              visually hidden word keeps the sentence readable aloud. */}
+          <span aria-hidden="true" className={styles.infoMark} />
+          <span className={styles.visuallyHidden}>{"info "}</span>
+          on a header for its definition.
         </p>
         {run === null ? null : <Legend items={legendItems} />}
         <Link className={styles.columnsLink} href={columnsHref}>

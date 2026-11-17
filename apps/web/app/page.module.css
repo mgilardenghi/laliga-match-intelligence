@@ -98,6 +98,56 @@
   line-height: 1.5;
 }
 
+/* A circled i drawn from a border and a letter, so the hint's mark renders in
+   every font stack; the page's stack has no glyph for the ⓘ character and drew
+   a missing-glyph box in its place. The letter comes from the rule below rather
+   than the markup, so the paragraph's text reads as prose for a reader and for
+   the screen reader that hears the hidden word after it. */
+.infoMark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  vertical-align: -0.05em;
+}
+
+.infoMark::after {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  line-height: 1;
+  content: "i";
+}
+
+/* The shared help control draws one character, and the page's font stack has no
+   glyph for it, so every metric header reached a reader as a missing-glyph box.
+   This page draws its own mark over the control's own span: the circle and the
+   letter come from here, the accessible name stays the component's. Scoped to
+   this page's headers and phone rows, so other pages keep the component as it
+   was written. */
+.metricHead summary > span,
+.listMetricTerm summary > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0;
+}
+
+.metricHead summary > span::after,
+.listMetricTerm summary > span::after {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  line-height: 1;
+  content: "i";
+}
+
 /* The selector keeps the width of its own control instead of stretching across
    the page column. */
 .controls {
@@ -192,6 +242,9 @@
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
   padding-right: 0.5rem;
+  /* The zone mark is a 4px inset bar on this cell, so the rank starts clear of
+     it instead of sitting on top of it. */
+  padding-left: 0.75rem;
   line-height: 1.1;
 }
 
@@ -209,7 +262,7 @@
   gap: 0.2rem;
   margin-top: 0.1rem;
   color: var(--text);
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1.1;
 }
@@ -324,11 +377,14 @@
 }
 
 /* The header and every summary share one grid, so a column of the list lines
-   up with the heading over it. */
+   up with the heading over it. The last column is the form strip's own width
+   rather than `auto`: an `auto` column resolves to the heading's text in the
+   header and to the five badges in a row, and the two millimetre-different
+   grids put `Pts` over the wrong column. */
 .listHeader,
 .listSummary {
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr) 2.5rem auto;
+  grid-template-columns: 2rem minmax(0, 1fr) 2.5rem 7rem;
   gap: 0.375rem;
   align-items: center;
   padding: 0 0.625rem;
@@ -560,10 +616,16 @@
   overflow: hidden;
 }
 
+/* A segment is as wide as the chance it shows, and it is allowed to shrink:
+   the Champions League chances are cumulative (each one already contains the
+   clubs behind it), so three of them can add up to more than 100%. Without the
+   shrink the flex row would clip the last club the sentence names, which hides
+   a number the card just claimed. */
 .glanceSegmentPrimary,
 .glanceSegmentSecondary,
 .glanceSegmentTertiary {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 2px;
   height: 100%;
 }
 

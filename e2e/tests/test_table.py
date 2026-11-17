@@ -28,6 +28,26 @@ FORM_TITLE = re.compile(r"^Form: [WDL](, [WDL])*$")
 PERCENT = re.compile(r"(\d+(?:\.\d+)?)%")
 POINT_COUNT = re.compile(r"^\d+$")
 
+# The zone a phone row carries, read twice: `data-zone` on the row and the name
+# in the row's own text, which a screen reader hears with the rank.
+ZONE_NAMES = {"ucl": "UCL", "europe": "Europe", "relegation": "Relegation"}
+NO_ZONE_NAME = "No qualification place"
+
+# The likelihood line of an opened phone row: the run's likeliest finishes, or
+# the sentence a run whose positions all stay under one percent earns instead.
+FINISH = r"\d+(?:st|nd|rd|th) (?:<1%|>99%|\d+%)"
+LIKELIEST = re.compile(
+    rf"^Likeliest finishes: (?:no position reaches 1%\.|{FINISH}(?:, {FINISH}){{0,2}}\.)$"
+)
+
+# One club and the chance a ranked sentence prints after it (see `pct0`).
+RANKED_ITEM = re.compile(r"^(?P<club>.+?) (?P<chance><1%|>99%|\d+%)$")
+# The clause a ranked sentence closes with once it stops listing clubs.
+RANKED_TAIL = re.compile(r" (?:Nobody else reaches \d+%\.|\d+ more clubs? reach(?:es)? \d+%\.)$")
+# The sure part of the Champions League card, which precedes its contenders.
+CL_SURE_PART = re.compile(r"^.+? in at least \d+% of seasons\. ?")
+CONTENDING = "Contending: "
+
 # The column keys of the header row, in the order the table draws them. The
 # default width is the laptop view; `?columns=all` adds the result breakdown and
 # the Europe chance. A season without a run carries the standings only.
@@ -283,6 +303,97 @@ def _document_width(page: Page) -> int:
     return max(body, root)
 
 
+def _chance_by_club(table: Locator, key: str) -> dict[str, float]:
+    """Return each club's chance in the column `key`, as the table prints it.
+
+    The column is found by the header's own key, so the reading follows the
+    table it measures instead of a column position written twice. A club the run
+    does not mention keeps an em dash in the cell, and it is left out rather than
+    read as a zero the run never produced.
+    """
+    keys = _column_keys(table)
+    index = keys.index(key) - 1  # the position cell is a row header, not a cell
+    chances: dict[str, float] = {}
+    rows = table.locator(":scope > tbody > tr")
+    for position in range(rows.count()):
+        row = rows.nth(position)
+        club = row.locator("td a").first.inner_text().strip()
+        printed = row.locator(":scope > td").nth(index).inner_text()
+        match = PERCENT.search(printed)
+        if match is not None:
+            chances[club] = float(match.group(1))
+    return chances
+
+
+def _ranked(sentence: str) -> list[tuple[str, str]]:
+    """Return the clubs a ranked sentence names, with the chance printed for each."""
+    body = RANKED_TAIL.sub("", sentence).removesuffix(".")
+    named: list[tuple[str, str]] = []
+    for part in body.split(", "):
+        match = RANKED_ITEM.match(part)
+        assert match is not None, f"{part!r} is not a club and a chance"
+        named.append((match.group("club"), match.group("chance")))
+    return named
+
+
+def _chance_band(
+    chances: dict[str, float], minimum: float, maximum: float | None
+) -> tuple[list[str], set[str]]:
+    """Split the clubs at a chance threshold, and say which side is uncertain.
+
+    The table prints one decimal place, so a club whose chance prints within
+    half a tenth of a threshold may sit either side of it. Those clubs are
+    ambiguous, and a test that knows only the printed number must not claim to
+    know where they belong. The certain ones come back in the order the cards
+    rank them: chance descending, then name.
+    """
+    certain: list[str] = []
+    ambiguous: set[str] = set()
+    for club, chance in chances.items():
+        edges = [margin for margin in (minimum, maximum) if margin is not None]
+        if any(abs(chance - edge) <= 0.05 for edge in edges):
+            ambiguous.add(club)
+        elif chance > minimum and (maximum is None or chance < maximum):
+            certain.append(club)
+    certain.sort(key=lambda club: (-chances[club], club))
+    return certain, ambiguous
+
+
+def _assert_shortlist(
+    named: list[tuple[str, str]],
+    chances: dict[str, float],
+    minimum: float,
+    maximum: float | None,
+    cap: int,
+    what: str,
+) -> None:
+    """Assert a card's shortlist against the chances the table prints.
+
+    This is the check the sentence templates cannot make on their own: it ties
+    the clubs a card names, their order and their number to the run the table
+    shows, so a threshold moved by a hundredth or a list drawn in the wrong
+    order fails here.
+    """
+    certain, ambiguous = _chance_band(chances, minimum, maximum)
+    for club, _ in named:
+        assert club in chances, f"{what} names {club!r}, which has no {what} chance"
+        assert club in certain or club in ambiguous, (
+            f"{what} names {club!r} at {chances[club]}%, outside the band its sentence claims"
+        )
+    printed = [chances[club] for club, _ in named]
+    assert printed == sorted(printed, reverse=True), (
+        f"{what} lists {[club for club, _ in named]} in an order the table does not "
+        f"support: {printed} against {chances}"
+    )
+    if ambiguous:
+        return
+    expected = certain[:cap]
+    assert [club for club, _ in named] == expected, (
+        f"{what} names {[club for club, _ in named]} where the run puts "
+        f"{[club for club in expected]}"
+    )
+
+
 def _assert_fits(locator: Locator, what: str) -> None:
     """Fail when `locator` needs a sideways scroll to show everything it holds."""
     box = locator.evaluate(
@@ -497,6 +608,56 @@ def test_race_at_a_glance_is_built_from_the_run(page: Page, dashboard_url: str) 
 
 
 @pytest.mark.loaded
+def test_glance_shortlists_match_the_table_chances(page: Page, dashboard_url: str) -> None:
+    """Guard the glance data: the cards name the clubs the run's chances rank.
+
+    The shape test above reads the sentences; this one reads the run through the
+    table's own chance columns and checks that each card agrees with it: the same
+    clubs, in the same order, out of the same band of chances. A threshold moved
+    by a hundredth, a list sorted the wrong way or a club left out fails here.
+    """
+    page.goto(dashboard_url)
+    table = _main_table(page)
+    title = _sentence(_paragraphs(_glance_card(page, re.compile("^Title$")))[0])
+    ucl = _sentence(_paragraphs(_glance_card(page, CHAMPIONS_LEAGUE_LABEL))[0])
+    relegation = _sentence(_paragraphs(_glance_card(page, RELEGATION_LABEL))[0])
+
+    # The title card: every club at 1% or more, the top three named.
+    title_named = [] if title.startswith("No club wins") else _ranked(title)
+    _assert_shortlist(
+        title_named,
+        _chance_by_club(table, "title"),
+        1.0,
+        None,
+        3,
+        "the title card",
+    )
+
+    # The Champions League card: the sure clubs first, then the contenders.
+    sure = CL_SURE_PART.sub("", ucl)
+    contenders = sure[len(CONTENDING) :] if sure.startswith(CONTENDING) else ""
+    _assert_shortlist(
+        [] if contenders == "" else _ranked(contenders),
+        _chance_by_club(table, "ucl"),
+        5.0,
+        95.0,
+        3,
+        "the Champions League card",
+    )
+
+    # The relegation card: every club at 10% or more, the top four named.
+    relegation_named = [] if relegation.startswith("No club goes down") else _ranked(relegation)
+    _assert_shortlist(
+        relegation_named,
+        _chance_by_club(table, "rel"),
+        10.0,
+        None,
+        4,
+        "the relegation card",
+    )
+
+
+@pytest.mark.loaded
 def test_the_heatmap_matches_the_table_and_sums_to_one_hundred(
     page: Page, dashboard_url: str
 ) -> None:
@@ -670,6 +831,20 @@ def test_phone_layout_fits_390(page: Page, dashboard_url: str, simulated: bool) 
         text = points.inner_text().strip()
         assert POINT_COUNT.fullmatch(text), f"row {index} shows {text!r} points"
 
+        # The summary carries the four facts the header names, and the form
+        # strip that takes the place of a form column.
+        summary = rows.nth(index).locator("summary").first
+        for cell in ("pos", "club", "pts"):
+            expect(summary.locator(f'[data-cell="{cell}"]')).to_have_count(1)
+        expect(summary.locator("svg title")).to_have_text(FORM_TITLE)
+
+        # The zone is colour and a name: the row's own attribute, and the name a
+        # screen reader hears with the rank it belongs to.
+        zone = rows.nth(index).get_attribute("data-zone")
+        expected = NO_ZONE_NAME if zone is None else ZONE_NAMES[zone]
+        spoken = _sentence(summary.text_content() or "")
+        assert expected in spoken, f"row {index} carries the zone {zone!r} but reads {spoken!r}"
+
     # Nothing but the hinted grid may hide data behind a sideways scroll.
     _assert_fits(page.locator("[data-phone-list]"), "the phone list")
     if simulated:
@@ -734,6 +909,16 @@ def test_phone_layout_fits_390(page: Page, dashboard_url: str, simulated: bool) 
         link = row.locator('a[href^="/teams/"]')
         expect(link).to_have_count(1)
         expect(link).to_have_attribute("href", TEAM_HREF)
+
+        # With a run, the panel repeats the run's likeliest finish for this club:
+        # the number a phone would otherwise have to scroll the heatmap for.
+        lines = [_sentence(text) for text in row.locator("p").all_inner_texts()]
+        finishes = [line for line in lines if line.startswith("Likeliest finishes:")]
+        if not simulated:
+            assert finishes == [], f"row {index} offers a likelihood without a run"
+        else:
+            assert len(finishes) == 1, f"row {index} renders {finishes}"
+            assert LIKELIEST.fullmatch(finishes[0]), f"row {index} says {finishes[0]!r}"
 
         terms = row.locator("dl dt")
         if not simulated:

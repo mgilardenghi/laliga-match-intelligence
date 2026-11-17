@@ -71,7 +71,9 @@ export function ProjectionSection(
           current: row.current.points,
         }))}
         title={`Projected final points, ${season}`}
-        note={`${runNote(run)} Diamonds mark current points; the centre mark is the median; the table's Final pts is the mean.`}
+        note={`${runNote(
+          run,
+        )} The diamond is current points; the centre mark is the median; the table's Final pts is the mean.`}
       />
       <h3 className={styles.chartTitle}>Where each club can finish</h3>
       <p className={styles.heatmapHint}>
