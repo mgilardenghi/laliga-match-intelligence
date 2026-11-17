@@ -493,6 +493,22 @@ def test_real_pages_never_scale_chart_text(page: Page, dashboard_url: str) -> No
         _assert_no_scaled_text(page, detail_path)
 
 
+def _wait_until_laid_out(page: Page) -> None:
+    """Wait until the page has finished rendering and its layout has settled.
+
+    The link click returns once the URL changed, which is before the streamed
+    sections, the web fonts and the layout they cause have settled; a count of
+    figures or a width read at that moment describes a half-built page. The wait
+    covers the network going quiet, the fonts being ready and two animation frames
+    in a row, so a measurement taken after it reads the page a reader sees.
+    """
+    page.wait_for_load_state("networkidle")
+    page.evaluate(
+        """() => document.fonts.ready.then(() => new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))))"""
+    )
+
+
 PROFILE_CAPTION_WORDS = ("per-match averages", "per-match profile")
 
 PROFILE_FIT_SCRIPT = """
@@ -522,6 +538,7 @@ def test_profile_charts_fit_a_phone_without_hidden_data(page: Page, dashboard_ur
         (MATCHDAY_INDEX_PATH, MATCH_LINK_SELECTOR),
     ):
         detail_path = _follow_first_link(page, dashboard_url, index_path, selector)
+        _wait_until_laid_out(page)
         figures = page.locator("figure")
         for position in range(figures.count()):
             figure = figures.nth(position)
