@@ -48,6 +48,7 @@ from lmi_core.analytics.relegation import (
     next_match_swing,
     survival_threshold,
 )
+from lmi_core.clock import madrid_today
 from lmi_core.db.models import SimulationFixture as SimulationFixtureModel
 from lmi_core.db.models import SimulationNextMatch as SimulationNextMatchModel
 from lmi_core.db.models import SimulationRun as SimulationRunModel
@@ -216,8 +217,9 @@ def get_team_relegation_race(
     for a run created before revision 0004 and for a fixture the run did not
     simulate.
 
-    ``next_match`` is the first of those fixtures and what each of its three
-    results does to the club, read from the same run's stored outcome counts
+    ``next_match`` is the first of those fixtures dated on or after Madrid today
+    (a postponed fixture dated earlier stays listed but is not next) and what each
+    of its three results does to the club, read from the same run's stored outcome counts
     through :func:`lmi_core.analytics.relegation.next_match_swing`. Each outcome
     carries the simulated frequency of the result, so ``p_outcome`` may differ
     slightly -- about half a percentage point at 10 000 runs -- from the model
@@ -541,14 +543,17 @@ def _run_detail(
     subject = next((row for row in rows if row.team_id == team_id), None)
     if subject is None:
         return _Detail(probabilities=probabilities, next_match=None)
-    swings = next_match_swing(counts, n_runs=n_runs, match_id=scheduled[0].id)
+    next_fixture = _next_fixture(scheduled)
+    if next_fixture is None:
+        return _Detail(probabilities=probabilities, next_match=None)
+    swings = next_match_swing(counts, n_runs=n_runs, match_id=next_fixture.id)
     if swings is None:
         return _Detail(probabilities=probabilities, next_match=None)
     by_outcome = {swing.outcome: swing for swing in swings}
     return _Detail(
         probabilities=probabilities,
         next_match=NextMatch(
-            match_id=scheduled[0].id,
+            match_id=next_fixture.id,
             outcomes=NextMatchOutcomes(
                 win=_next_match_outcome(by_outcome["win"]),
                 draw=_next_match_outcome(by_outcome["draw"]),
@@ -562,6 +567,18 @@ def _run_detail(
             ),
         ),
     )
+
+
+def _next_fixture(scheduled: Sequence[views.MatchRow]) -> views.MatchRow | None:
+    """Return the first scheduled fixture dated on or after Madrid today, if any.
+
+    This is the rule of the focus page's upcoming list, so the swing and the next
+    fixture the page shows name the same match. A scheduled fixture dated earlier
+    is a postponed one whose result is not in yet: it stays in the remaining
+    fixtures but is not the club's next match. ``scheduled`` is in kickoff order.
+    """
+    today = madrid_today()
+    return next((row for row in scheduled if row.kickoff_date >= today), None)
 
 
 def _fixture_probabilities(

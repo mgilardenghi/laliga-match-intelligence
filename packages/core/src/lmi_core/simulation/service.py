@@ -450,13 +450,18 @@ def _season_inputs(session: Session, season_id: int, as_of_date: datetime.date) 
                     sim_date=max(match.kickoff_date, as_of_date),
                 )
             )
-            # The first simulated fixture a club meets in kickoff order is its
-            # next match. ``sim_date`` is never consulted: a postponed fixture
-            # collapses to the as-of date and would reorder the choice, and a
-            # status check beyond the withdrawn rule could let a backfill run
-            # read knowledge of later matches.
-            next_match_by_team.setdefault(match.home_team_id, match.id)
-            next_match_by_team.setdefault(match.away_team_id, match.id)
+            # A club's next match is the first simulated fixture it meets in
+            # kickoff order that is dated on or after the as-of date. A fixture
+            # dated before it is still simulated (it has not been played), but
+            # a postponed one is not "next": the focus page and the API list
+            # only fixtures dated today or later as upcoming, and both sides
+            # must name the same match. The rule reads the date and never the
+            # status, so a backfill run cannot use knowledge of later matches.
+            # ``sim_date`` is not consulted: it collapses to the as-of date and
+            # would reorder fixtures of the same day.
+            if match.kickoff_date >= as_of_date:
+                next_match_by_team.setdefault(match.home_team_id, match.id)
+                next_match_by_team.setdefault(match.away_team_id, match.id)
     fixtures.sort(key=lambda fixture: (fixture.sim_date, fixture.match_id))
     return _SeasonInputs(
         teams=teams,

@@ -705,7 +705,9 @@ played. `opponent_position` is `null` for an opponent the table does not rank.
 three results, always from the club's side: at home they are the stored
 home/draw/away triple and away the same triple read from the other end, so
 `p_win` means the club wins wherever it plays. `next_match` describes the fixture
-the club plays next: `match_id` is `remaining_fixtures[0].match.id`, and
+the club plays next: `match_id` is the first of `remaining_fixtures` dated on or after
+today in Madrid (the same match the focus page lists first as upcoming; a postponed
+fixture dated earlier stays in `remaining_fixtures` but is not next), and
 `outcomes.win`, `outcomes.draw` and `outcomes.loss` each carry `p_outcome` (the
 share of the simulated runs that produced that result), the conditional
 `p_relegation`, `p_europe` and `p_title` (the shares of those same runs that

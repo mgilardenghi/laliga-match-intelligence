@@ -231,8 +231,12 @@ run. Per-match backtest predictions are not stored.
   three outcomes of its next fixture, and how many of those also ended in the
   title, the European places and the relegation places, plus the summed final
   points. The API divides them.
-- "Next match" means the first simulated fixture in `(kickoff_date, id)` order,
-  the same order the API lists remaining fixtures in.
+- "Next match" means the first simulated fixture in `(kickoff_date, id)` order
+  that is dated on or after the as-of date, the same rule the API applies with
+  today's date to pick the fixture the focus page lists first. A postponed fixture
+  dated before it is still simulated but is not named; the rule reads the date,
+  never the match status. A club with no fixture dated on or after the as-of date
+  stores no next-match rows.
 - An outcome that no run reached is stored as a zero row, not left out.
 - A run that predates revision `0004` has no detail rows, so those fields stay
   null for it.
