@@ -431,10 +431,11 @@
   font-weight: 600;
 }
 
+/* A long club name wraps onto a second line inside the 44 px row rather than
+   being cut ("Deportivo …"): the name is what the reader scans for. */
 .listClub {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  line-height: 1.25;
   font-weight: 600;
 }
 
@@ -655,11 +656,11 @@
    row tint: the row stays on the page background, so the sticky position column
    keeps one colour and the badge text still names the zone beside the colour. */
 .zoneUcl {
-  --zone-mark: var(--accent);
+  --zone-mark: var(--zone-ucl);
 }
 
 .zoneEurope {
-  --zone-mark: var(--muted);
+  --zone-mark: var(--zone-europe);
 }
 
 .zoneRelegation {

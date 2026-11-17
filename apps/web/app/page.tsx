@@ -25,6 +25,7 @@ import {
 } from "@/components/ui";
 import { get, type GetData, type Problem } from "@/lib/api";
 import { formatCount } from "@/lib/format";
+import { modelLabel } from "@/lib/labels";
 import { parseSeason, type SearchParams } from "@/lib/params";
 
 import { parseColumns, type ColumnsView } from "./_table/columns";
@@ -131,7 +132,7 @@ function guideOf(projection: Projection): HowToReadItem[] {
   return [
     {
       term: "The simulation",
-      definition: `Each remaining fixture gets score probabilities from the ${run.model} model; the season is played out ${formatCount(run.n_runs)} times.`,
+      definition: `Each remaining fixture gets score probabilities from the ${modelLabel(run.model)} model; the season is played out ${formatCount(run.n_runs)} times.`,
     },
     {
       term: "Final pts",
