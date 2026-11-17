@@ -853,3 +853,50 @@ def test_the_focus_page_fits_a_phone(page: Page, dashboard_url: str) -> None:
             f"at {PHONE_WIDTH} px these {selector} are cut by the column that holds them: "
             f"{'; '.join(offenders)}"
         )
+
+
+# For every visible table cell: a pair of adjacent letters drawn on two
+# different lines is a word broken in the middle ("D / ra / w"). Returns
+# the number of cells measured and one entry per broken word.
+_MID_WORD_BREAKS = """() => {
+  const cells = [...document.querySelectorAll('main table th, main table td')]
+    .filter((cell) => cell.checkVisibility() && !cell.closest('details:not([open])'));
+  const broken = [];
+  for (const cell of cells) {
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent ?? '';
+      let previousTop = null;
+      for (let i = 0; i < text.length; i += 1) {
+        if (/\\s/.test(text[i])) { previousTop = null; continue; }
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const rect = range.getBoundingClientRect();
+        if (rect.width === 0) { continue; }
+        if (previousTop !== null && Math.abs(rect.top - previousTop) > 2) {
+          broken.push(`${text.trim()} (at "${text.slice(0, i)}|")`);
+          break;
+        }
+        previousTop = rect.top;
+      }
+    }
+  }
+  return [cells.length, broken];
+}"""
+
+
+@pytest.mark.loaded
+def test_focus_tables_never_break_a_word_on_a_phone(page: Page, dashboard_url: str) -> None:
+    """Guard legibility, not only width: a narrow column must wrap between
+    words, never split one. Shrinking columns until letters stack passes a
+    width check while the table can no longer be read."""
+    page.set_viewport_size({"width": PHONE_WIDTH, "height": PHONE_HEIGHT})
+    path = _default_focus_path(page, dashboard_url)
+    _open_rendered(page, dashboard_url, path)
+
+    measured, broken = page.evaluate(_MID_WORD_BREAKS)
+    assert measured > 0, "the phone page renders no table cell to measure"
+    assert broken == [], (
+        f"at {PHONE_WIDTH} px these table cells split a word across lines: {'; '.join(broken)}"
+    )
