@@ -5,7 +5,7 @@
  * Only this page's own layout lives here. The heading block is page-local, but
  * the selector, the empty and problem states and the charts come from shared
  * modules, so a change to those is never repeated here. Every colour is a token
- * from globals.css; the zone tints are mixes of those tokens, never new values.
+ * from globals.css; the zone marks are those tokens, never new values.
  */
 
 .main {
@@ -30,6 +30,48 @@
   gap: 0.5rem;
 }
 
+/* The loaded page's heading row: the text block with the season selector beside
+   it. It wraps instead of narrowing the text, so the selector moves under the
+   heading on a phone. */
+.headingRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.headingText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+/* The selector keeps the width of its own control. A wrapped row puts it at the
+   start of the new line, not centred under the text block. */
+.headingControls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: flex-start;
+}
+
+/* The season the page is about, directly under the page name. */
+.seasonLine {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+/* What the table counts and, with a run, what the projection rests on. */
+.subline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
 .title {
   font-size: clamp(1.5rem, 4vw, 2rem);
   letter-spacing: -0.02em;
@@ -40,6 +82,20 @@
   max-width: 48rem;
   color: var(--muted);
   line-height: 1.6;
+}
+
+/* A section target sits below the sticky section nav instead of under it. */
+.anchor {
+  scroll-margin-top: 4.5rem;
+}
+
+/* The line under a section heading, before the content it explains: quieter
+   than the content. */
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 /* The selector keeps the width of its own control instead of stretching across
@@ -72,15 +128,19 @@
 }
 
 /* The scroller owns the horizontal overflow: without `min-width: 0` the table's
-   intrinsic width would also be its minimum width and push the page wider. */
+   intrinsic width would also be its minimum width and push the page wider.
+
+   The table is the desktop table. Below the 60rem breakpoint the phone list
+   below carries the same clubs, so the scroller is taken out of the page
+   entirely instead of being scrolled sideways. */
 .tableWrap {
+  display: none;
   min-width: 0;
   overflow-x: auto;
 }
 
 .table {
   width: 100%;
-  min-width: 32rem;
   border-collapse: collapse;
   color: var(--text);
 }
@@ -176,50 +236,392 @@
   min-width: 7rem;
 }
 
-/* Goal counts are the first columns to go on a phone: the table keeps the
-   ranking counters and the projected columns, and the cells stay in the DOM so
-   a wide screen still gets them. */
-.colOptional {
+/* A metric header holds its label and the help control that defines it. The
+   wrapper is the anchor of the panel, so an open definition is taken out of the
+   flow and can never widen the column it belongs to. */
+.metricHead {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.metricHead > details[open] > div {
+  position: absolute;
+  right: 0;
+  z-index: 2;
+  width: min(18rem, 80vw);
+}
+
+/* A chance cell is a bar on a fixed track plus the share it draws. The track
+   is a fixed width so the bars of one column end on the same edge and a reader
+   can compare them by eye. */
+.chance {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.chanceBar {
+  flex: 0 0 3.5rem;
+  width: 3.5rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.chanceFillTitle,
+.chanceFillUcl,
+.chanceFillEurope,
+.chanceFillRel {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.chanceFillTitle {
+  background: var(--zone-ucl);
+}
+
+.chanceFillUcl {
+  background: var(--accent);
+}
+
+.chanceFillEurope {
+  background: var(--muted);
+}
+
+.chanceFillRel {
+  background: var(--zone-relegation);
+}
+
+.chanceValue {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The column switch is a desktop control: the phone list has no columns to
+   add, so a link that changes a hidden table would be a dead end. */
+.columnsLink {
+  display: none;
+  align-self: flex-start;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* The phone list: the same rows as the table, one native disclosure each.
+
+   Below the 60rem breakpoint the table is wider than a phone, so this list
+   replaces it (see the media query at the end of the file). A summary is a
+   grid row whose columns line up with the header above it; a panel opens below
+   it and never scrolls sideways. */
+.listWrap {
+  display: block;
+  min-width: 0;
+}
+
+/* The header and every summary share one grid, so a column of the list lines
+   up with the heading over it. */
+.listHeader,
+.listSummary {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) 2.5rem auto;
+  gap: 0.375rem;
+  align-items: center;
+  padding: 0 0.625rem;
+}
+
+.listHeader {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* The points heading sits over the points column, which is right-aligned. */
+.listHeader span:nth-child(3) {
+  text-align: right;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listDetails {
+  border-bottom: 1px solid var(--border);
+}
+
+/* The summary is the tap target: 44px is the smallest comfortable one, and the
+   native marker is suppressed because the whole row is the control. */
+.listSummary {
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.875rem;
+}
+
+.listSummary::-webkit-details-marker {
   display: none;
 }
 
-/* One tint per zone, mixed from the zone token over the page background. The
-   mix uses var(--background) rather than `transparent` so the sticky position
-   cell stays opaque when it travels over the rest of the row. */
+.listPos {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.listClub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.listPoints {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.listPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem 0.75rem 3rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.listLine {
+  margin: 0;
+}
+
+.listMetrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.listMetricRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+/* The term wraps so an opened definition takes a line of the panel instead of
+   pushing the value or the panel sideways. */
+.listMetricTerm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.listMetricValue {
+  margin: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.listClubLink {
+  align-self: flex-start;
+  font-weight: 600;
+}
+
+/* A label for a reader and not for the eye: the phone list names a zone this
+   way so the badge is never the only channel that carries it. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The heading above one chart inside a section: smaller than the section's own
+   heading, so the two charts stay siblings of one topic. */
+.chartTitle {
+  font-size: 1rem;
+}
+
+/* The heatmap is the one sideways scroller of this page. Below the desktop
+   width the hint says so; at 60rem the grid fits and the hint is dropped. */
+.heatmapHint {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* The one scroll region of the heatmap. The shared component draws its own
+   scroller, so it is neutralised below: the shared heatmap is not edited, its
+   own scroller is taken out of the composition and this wrapper is the single
+   scroll region — the focused element is then the one that scrolls. */
+.heatmapRegion {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.heatmapRegion:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.heatmapRegion > figure > div {
+  overflow: visible;
+}
+
+/* The cards of "The race at a glance".
+
+   One column by default and three equal columns from 40rem up: three sentences
+   side by side on a laptop, one under the other on a phone without a sideways
+   scroll. Every card can shrink, so a long club name wraps inside its own card
+   instead of widening the page. */
+.glanceGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.glanceCard {
+  /* The label tone of the card; the Champions League card keeps the accent. */
+  --glance-label: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  /* The card sits on the page background so the bar's track, which is the
+     surface token, stays visible on it. */
+  background: var(--background);
+}
+
+/* The label names the card's own zone: the title mark, the Champions League
+   accent and the relegation mark are the tokens the table's zones use, so the
+   colour of a card means the same thing here as in the table. */
+.glanceCard[data-tone="title"] {
+  --glance-label: var(--zone-ucl);
+}
+
+.glanceCard[data-tone="relegation"] {
+  --glance-label: var(--zone-relegation);
+}
+
+.glanceLabel {
+  margin: 0;
+  color: var(--glance-label);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.glanceText {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+/* The second sentence of the relegation card: smaller and quieter than the
+   one-line summary above it, because it is the footnote to that summary. */
+.glanceNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+/* A stacked bar on a fixed track: the segments keep their own widths and are
+   clipped by the track, so a rounding error never paints outside the card. */
+.glanceBar {
+  display: flex;
+  height: 0.625rem;
+  margin-top: auto;
+  border-radius: 999px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.glanceSegmentPrimary,
+.glanceSegmentSecondary,
+.glanceSegmentTertiary {
+  flex: 0 0 auto;
+  height: 100%;
+}
+
+/* The first club of the sentence carries the strongest tone; the two behind it
+   step down to a lighter shade of the same hue, so the bar reads in the order
+   the sentence lists its clubs. */
+.glanceSegmentPrimary {
+  background: var(--glance-label);
+}
+
+.glanceSegmentSecondary {
+  background: var(--glance-label);
+  opacity: 0.55;
+}
+
+.glanceSegmentTertiary {
+  background: var(--glance-label);
+  opacity: 0.3;
+}
+
+@media (min-width: 40rem) {
+  .glanceGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* One mark token per zone. The mark is an inset bar on the position cell, not a
+   row tint: the row stays on the page background, so the sticky position column
+   keeps one colour and the badge text still names the zone beside the colour. */
 .zoneUcl {
   --zone-mark: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--background));
 }
 
 .zoneEurope {
   --zone-mark: var(--muted);
-  background: color-mix(in srgb, var(--muted) 8%, var(--background));
 }
 
 .zoneRelegation {
   --zone-mark: var(--zone-relegation);
-  background: color-mix(in srgb, var(--zone-relegation) 8%, var(--background));
 }
 
-/* The tinted row replaces the sticky column's own background: inheriting the
-   row colour keeps the cell part of the row instead of punching a hole in it. */
-.zoneUcl .stickyColumn,
-.zoneEurope .stickyColumn,
-.zoneRelegation .stickyColumn {
-  background: inherit;
+.zoneUcl .positionCell,
+.zoneEurope .positionCell,
+.zoneRelegation .positionCell {
+  box-shadow: inset 4px 0 0 var(--zone-mark);
+}
+
+/* The phone list carries the same mark, painted on the summary rather than on
+   a table cell, so a zone reads the same way in both views. */
+.zoneUcl .listSummary,
+.zoneEurope .listSummary,
+.zoneRelegation .listSummary {
+  box-shadow: inset 4px 0 0 var(--zone-mark);
 }
 
 @media (min-width: 640px) {
   .main {
     padding: 2rem 1.5rem 3rem;
-  }
-
-  .table {
-    min-width: 46rem;
-  }
-
-  .colOptional {
-    display: table-cell;
   }
 }
 
@@ -234,5 +636,32 @@
 
   .charts {
     gap: 2.5rem;
+  }
+}
+
+/* Desktop from here up: the table is the default view and the column switch is
+   offered. Below it the phone list replaces the table. */
+@media (min-width: 60rem) {
+  /* Beside the text block on a laptop, the selector lines up with its bottom. */
+  .headingControls {
+    align-self: flex-end;
+  }
+
+  .heatmapHint {
+    display: none;
+  }
+
+  .tableWrap {
+    display: block;
+  }
+
+  /* The table carries the same rows at this width, and two views of one table
+     would be a reader's choice with no reason to exist. */
+  .listWrap {
+    display: none;
+  }
+
+  .columnsLink {
+    display: inline-block;
   }
 }
