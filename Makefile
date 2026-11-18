@@ -197,19 +197,20 @@ test: ## Run the Python unit test suite (no database needed)
 test-integration: ## Run the integration tests against a throwaway PostgreSQL container
 	# The container is disposable: placeholder credentials, a dedicated port, and
 	# it is always removed, including when pytest fails.
-	@docker rm -f $(TEST_DB) >/dev/null 2>&1 || true
+	@docker rm -fv $(TEST_DB) >/dev/null 2>&1 || true
 	docker run -d --name $(TEST_DB) -p $(TEST_DB_PORT):5432 \
+		--tmpfs /var/lib/postgresql \
 		-e POSTGRES_USER=lmi -e POSTGRES_DB=lmi -e POSTGRES_PASSWORD=placeholder \
 		$(TEST_DB_IMAGE)
 	@for attempt in $$(seq 1 60); do \
 		if docker exec $(TEST_DB) pg_isready -q -h 127.0.0.1 -U lmi -d lmi 2>/dev/null; then exit 0; fi; \
 		sleep 1; \
 	done; \
-	echo "the test database did not become ready" >&2; docker rm -f $(TEST_DB) >/dev/null; exit 1
+	echo "the test database did not become ready" >&2; docker rm -fv $(TEST_DB) >/dev/null; exit 1
 	@LMI_ALLOW_DESTRUCTIVE_TESTS=1 POSTGRES_HOST=localhost POSTGRES_PORT=$(TEST_DB_PORT) POSTGRES_USER=lmi \
 		POSTGRES_PASSWORD=placeholder POSTGRES_DB=lmi \
 		uv run pytest -m integration; \
-		status=$$?; docker rm -f $(TEST_DB) >/dev/null 2>&1; exit $$status
+		status=$$?; docker rm -fv $(TEST_DB) >/dev/null 2>&1; exit $$status
 
 build: ## Build the web application and every Docker image
 	pnpm --filter web build
@@ -225,4 +226,4 @@ api-client-check: ## Fail when the committed API client no longer matches the AP
 
 clean: ## Stop the stack and delete its volumes (project lmi only)
 	$(COMPOSE) down -v
-	@docker rm -f $(TEST_DB) >/dev/null 2>&1 || true
+	@docker rm -fv $(TEST_DB) >/dev/null 2>&1 || true
