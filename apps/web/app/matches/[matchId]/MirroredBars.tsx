@@ -1,8 +1,8 @@
 /**
  * The mirrored per-match profile of the two clubs, against the league average.
  *
- * The shared chart directory has no mirrored-bar component and this task does
- * not own it, so the chart lives beside its route and wraps `ChartFigure`: every
+ * The shared chart directory has no mirrored-bar component, so the chart lives
+ * beside its route and wraps `ChartFigure`: every
  * chart on the dashboard is a figure with a caption, an `svg[role="img"]`
  * labelled by its title and description, and a disclosure holding the exact
  * numbers. The exact values live in that table; the drawing encodes direction

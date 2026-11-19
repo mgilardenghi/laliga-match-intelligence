@@ -31,7 +31,7 @@ N_TEAMS: Final = 20
 """A full league, the size the real season simulation uses."""
 
 N_RUNS: Final = 10_000
-"""The default run count of the M4 season simulation."""
+"""The default run count of the season simulation."""
 
 _START: Final = datetime.date(2026, 8, 15)
 

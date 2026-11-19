@@ -1,14 +1,12 @@
 """Command line entry point for the LMI worker.
 
-``ingest`` and ``status`` exist since M1. ``ingest`` downloads one source file
-per planned job, loads it and records every run; ``status`` prints the current
-state of the data without touching the network. Of the M4 commands, ``predict``
-is implemented: it stores today's live predictions or prints the live metrics
+``ingest`` downloads one source file per planned job, loads it and records every
+run; ``status`` prints the current state of the data without touching the
+network. ``predict`` stores today's live predictions or prints the live metrics
 report. ``simulate`` runs the season simulator and prints its projected table.
-``daily`` is registered here, but its body lands in a later M4 task, so it is a
-stub that exits with code 2. ``python -m lmi_worker`` runs the same entry point,
-and the Compose worker uses ``status`` so starting the stack never contacts a
-source.
+``daily`` runs the daily cycle of :mod:`lmi_worker.daily`. ``python -m
+lmi_worker`` runs the same entry point, and the Compose worker uses ``status``
+so starting the stack never contacts a source.
 
 The plan is built before the settings and the engine on purpose: a usage error,
 an out-of-range season or an impossible source selection therefore exits with

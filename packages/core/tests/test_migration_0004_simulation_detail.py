@@ -8,7 +8,7 @@ constraints and triggers the design requires, drive both immutability triggers,
 delete a run to prove the ``ON DELETE CASCADE`` still works, downgrade back to
 ``0003`` and assert the shared ``lmi_reject_mutation()`` function survives.
 
-Like ``tests/test_migration_m4_live.py`` these tests need a live PostgreSQL and
+Like ``tests/test_migration_0003_live.py`` these tests need a live PostgreSQL and
 are opt-in: ``make test`` deselects them and ``make test-integration`` starts a
 throwaway container. The fixture fails rather than skips when the environment is
 not a disposable database, because a missing database is a configuration error,

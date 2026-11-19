@@ -1,6 +1,6 @@
 """Monte Carlo season simulation: pure, seeded and free of any I/O.
 
-:func:`simulate_season` is the core the M4 season simulation calls. It takes the
+:func:`simulate_season` is the core the season simulation job calls. It takes the
 results already played, the fixtures still to play with one scoreline
 distribution each, and a seed, and returns per-team distributions of final points
 and table positions. No season, matchday, clock or database concept enters here:

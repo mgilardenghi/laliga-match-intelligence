@@ -25,7 +25,7 @@ selects rather than of a filter here:
   kickoff, so it is never read, whatever a caller stored.
 
 The endpoint is served on the ``/matches`` prefix and under the ``matches`` tag
-of the M2 match resource, so the documentation groups the preview with the
+of the match resource, so the documentation groups the preview with the
 fixture it describes and a generated client sees one resource group per entity
 rather than one per path shape. The route only nests deeper; ``matches.py`` is
 not edited.
@@ -99,10 +99,10 @@ def get_match_preview(match_id: int, session: SessionDep) -> MatchPreview:
     the current sources publish odds only with results. No price is invented and
     no closing price is served.
 
-    The spec §6 items this resource deliberately does not carry are M5: the
+    Two preview items this resource deliberately does not carry: the
     opponent's profile beyond the form of both sides, and how much the result
     moves the relegation probability. Both need an input or a core rule this
-    task does not own, not another field here.
+    resource does not own, not another field here.
 
     The request issues at most nine statements whatever the size of the payload:
     one for the fixture, two for each of the two form summaries, two for the

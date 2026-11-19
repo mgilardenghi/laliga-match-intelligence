@@ -15,7 +15,7 @@ Recovery is deliberately bounded, not instant. A redis visibility timeout of
 one hour redelivers a message whose worker died; the claim's own 30-minute
 window lets a second executor take a ``running`` row over. When no worker
 restarts, the boot-time sweep is what closes the gap, and the worst case is the
-30-minute stale window stated in the ADR-0004 amendment.
+30-minute stale window.
 
 The two tasks run to completion under time limits sized from the measured cost
 of their work, not from the stale window. On the reference stack one daily cycle

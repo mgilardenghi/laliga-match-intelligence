@@ -1,10 +1,10 @@
 """The Madrid calendar, the one source of dates and boundaries in this codebase.
 
-No source provides a verified absolute kickoff instant (ADR-0002), so a live
-prediction must exist before Madrid midnight opens the day of its match
-(``docs/spec/mvp.md``). Every component that needs that boundary, the current
-Madrid date or the Madrid date of an instant asks this module instead of reading
-``zoneinfo`` itself, so one change of the rule reaches all of them.
+No source provides a verified absolute kickoff instant, so a live prediction
+must exist before Madrid midnight opens the day of its match. Every component
+that needs that boundary, the current Madrid date or the Madrid date of an
+instant asks this module instead of reading ``zoneinfo`` itself, so one change
+of the rule reaches all of them.
 
 Nothing here reads the database, accepts a timezone argument or guesses an
 instant: a naive datetime names no instant on any calendar, and

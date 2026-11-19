@@ -177,7 +177,7 @@ EXPECTED_METRICS = [
     make_metric("elo", None, "all", n_matches=610, n_fixtures=760, log_loss=0.65),
     make_metric("elo", None, "common", n_matches=570, n_fixtures=680, log_loss=0.66),
 ]
-"""The D11 order: model, season start year ascending, overall last, subset."""
+"""The stored order: model, season start year ascending, overall last, subset."""
 
 EXPECTED_CALIBRATION = [
     make_bin("home_win", "H", 0, mean_predicted=0.05),
@@ -188,7 +188,7 @@ EXPECTED_CALIBRATION = [
     make_bin("elo", "D", 0, mean_predicted=0.26),
     make_bin("elo", "A", 0, mean_predicted=0.36),
 ]
-"""The D11 order: model, outcome H/D/A, bin index."""
+"""The stored order: model, outcome H/D/A, bin index."""
 
 
 def store_run(

@@ -1,1 +1,1 @@
-"""Tests for the M3 backtest results package."""
+"""Tests for the backtest results package."""

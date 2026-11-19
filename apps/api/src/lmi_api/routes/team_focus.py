@@ -15,7 +15,7 @@ and points over the matches the read layer selects, through the shared readers
 of :mod:`lmi_api.views`, so this module only composes a payload.
 
 The endpoint is served on the ``/teams`` prefix and under the ``teams`` tag of
-the M2 team resource, so the documentation groups the focus view with the team
+the team resource, so the documentation groups the focus view with the team
 it describes and a generated client sees one resource group per entity rather
 than one per path shape. The route only nests deeper; ``teams.py`` is not
 edited.
@@ -94,11 +94,11 @@ def get_team_focus(team_id: int, session: SessionDep, season: str | None = None)
     season and is null when the season has no succeeded run, or when that run
     stored no row for the team.
 
-    The spec §6 items this resource deliberately does not carry are M5: expected
+    The focus items this resource deliberately does not carry: expected
     points against actual points, rolling trends, top/middle/bottom splits, the
     multi-season trend, the relegation race with its survival threshold, and how
     much a result moves the relegation probability. Each of them needs a stored
-    input or a core rule this task does not own, not another field here.
+    input or a core rule this resource does not own, not another field here.
 
     The request issues at most fourteen statements whatever the size of the
     payload: the team, the season, the season membership, two for the season

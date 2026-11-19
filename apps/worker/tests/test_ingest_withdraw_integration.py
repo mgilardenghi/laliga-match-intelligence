@@ -2,7 +2,7 @@
 
 A match a loader no longer sees is a removal candidate, and the store decides
 what removal means per candidate. These scenarios run against a migrated and
-seeded database and check the branch the M4 schema adds: a candidate that carries
+seeded database and check the branch the live-prediction schema adds: a candidate that carries
 a stored prediction is withdrawn instead of deleted, a candidate without one is
 still deleted, and a stored ``withdrawn`` match that a later fixture list carries
 again is restored in the statement that fixes its date.
@@ -12,7 +12,7 @@ so every prediction here uses :mod:`lmi_core.clock` for its as-of date and a mat
 whose kickoff date is strictly after that date. The trigger is never disabled.
 
 The third scenario, a candidate without a prediction that is still deleted, is
-already the M1 acceptance test ``test_a_scheduled_fixture_missing_from_the_snapshot_is_deleted``
+already the acceptance test ``test_a_scheduled_fixture_missing_from_the_snapshot_is_deleted``
 in ``test_ingest_integration.py``; that test asserts the new ``rows_withdrawn``
 counter instead of duplicating the scenario here.
 

@@ -71,7 +71,7 @@ class Probabilities(BaseModel):
 class PredictionScore(BaseModel):
     """The four scores of one on-time prediction of a played match.
 
-    ``log_loss``, ``brier`` and ``rps`` are the M3 metric functions on this one
+    ``log_loss``, ``brier`` and ``rps`` are the backtest metric functions on this one
     row, and ``correct`` says whether the most likely outcome is the one that
     happened. The values are null-free because the object exists only for a
     scored row: an absent score is a null field on the parent, never an object

@@ -2,7 +2,7 @@
 
 :func:`compute_standings` is pure. The caller hands in the season's team set and
 the results it wants counted -- the API filters a season and an ``as_of`` date,
-the M4 season simulation passes the matches it simulated -- and gets back one
+the season simulation passes the matches it simulated -- and gets back one
 row per team, so the same arguments always produce the same table. Nothing here
 reads the clock, the database or a file.
 

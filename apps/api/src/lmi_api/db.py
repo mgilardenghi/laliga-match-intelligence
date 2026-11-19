@@ -6,7 +6,7 @@ constructed when the module is imported, and a process may start before the
 database accepts connections. A request that needs data is therefore the first
 thing that opens a connection.
 
-Sessions are request-scoped and read-only: M2 exposes no write endpoint, so
+Sessions are request-scoped and read-only: the API exposes no write endpoint, so
 :func:`get_session` closes the session without ever committing.
 """
 

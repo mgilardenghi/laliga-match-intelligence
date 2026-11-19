@@ -12,7 +12,7 @@ values the assertions compare are the ones the arrays were built from.
 
 The one integration test runs the stored path against the migrated disposable
 database and then the ``--no-save --format json`` path twice, which is the
-reproducibility check of the brief: the same data and the same configuration
+reproducibility check: the same data and the same configuration
 must produce the same metrics, calibration and fingerprint.
 """
 

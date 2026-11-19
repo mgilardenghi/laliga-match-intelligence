@@ -21,7 +21,7 @@
  * never the page.
  *
  * Out of scope on purpose: per-fixture probabilities and the relegation swing a
- * result causes are not M5.
+ * result causes are not shown on this page.
  */
 import Link from "next/link";
 import { notFound } from "next/navigation";
