@@ -10,7 +10,7 @@ write. These tests drive those guards against a throwaway PostgreSQL migrated to
 instant as :func:`lmi_core.clock.kickoff_boundary`.
 
 The structural assertions of the migration itself live in
-``test_migration_m4_live.py``; this module observes behavior only. Every date a
+``test_migration_0003_live.py``; this module observes behavior only. Every date a
 scenario stores comes from one PostgreSQL query, so a run that crosses Madrid
 midnight cannot split a fixture date from its as-of date.
 

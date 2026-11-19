@@ -328,9 +328,9 @@ def test_outcome_and_points_for_are_the_single_result_rule() -> None:
 
 
 def test_the_public_dataclasses_keep_the_specified_shape() -> None:
-    # M3 mirrors these fields in JSON and M4 reads rows from simulated seasons,
-    # so the names, their order, and the frozen slots are the contract, not an
-    # implementation detail.
+    # The backtest mirrors these fields in JSON and the simulation reads rows
+    # from simulated seasons, so the names, their order, and the frozen slots
+    # are the contract, not an implementation detail.
     assert [field.name for field in dataclasses.fields(MatchResult)] == [
         "home_team_id",
         "away_team_id",

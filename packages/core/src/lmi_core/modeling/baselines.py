@@ -1,6 +1,6 @@
 """The baselines: always-home-win, and the outcome frequencies of the history.
 
-``home_win`` is the spec's baseline. Its log loss is degenerate by construction:
+``home_win`` is the naive baseline. Its log loss is degenerate by construction:
 without any information the home side gets probability 1, so every match that
 does not end in a home win scores ``-ln(EPS)`` under the global clip
 ``EPS = 1e-15``. The report states the value so it reads as intended rather than

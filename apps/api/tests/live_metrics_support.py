@@ -5,7 +5,7 @@ are made up, nothing is downloaded or ingested, and no source is contacted. The
 helpers only cover what this endpoint needs on top of the live fixtures, which
 live in :mod:`tests.live_support` and are reused rather than duplicated.
 
-The price written here is a pre-closing 1x2 row, the only kind the M3
+The price written here is a pre-closing 1x2 row, the only kind the
 played-match loader accepts for the market reference. It is stored through the
 ``Session`` it is given and flushed, never committed: the caller's transaction
 decides whether the row survives, and the flush is enough for the loader to

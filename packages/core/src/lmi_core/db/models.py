@@ -377,7 +377,7 @@ class BacktestMetric(Base):
     """One metric row per run, model, season and subset.
 
     ``season_id`` is NULL for the row that covers every scored season. The
-    tables of M3 reference ``seasons`` only: per-match backtest predictions are
+    backtest result tables reference ``seasons`` only: per-match backtest predictions are
     not stored here.
     """
 

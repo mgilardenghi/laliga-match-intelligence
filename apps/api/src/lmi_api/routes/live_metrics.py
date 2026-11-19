@@ -3,11 +3,11 @@
 The endpoint is a read over the stored predictions and the stored results. It
 introduces no rule of its own: the outcome of every stored row and every score
 of the report come from :mod:`lmi_core.live.scoring`, and the market price comes
-from the M3 played-match loader with its margin removal, so the served numbers
+from the played-match loader with its margin removal, so the served numbers
 are the ones the worker prints and cannot disagree with them.
 
 There is one route and it is served at ``/live`` on the ``/model-metrics``
-prefix, next to the stored backtest report of T4. The path is fixed, so the two
+prefix, next to the stored backtest report. The path is fixed, so the two
 resources share a prefix without sharing a route.
 """
 
@@ -43,7 +43,7 @@ def get_live_model_metrics(session: SessionDep, season: str | None = None) -> Li
     rows.
 
     ``market_reference`` is recomputed from the pre-closing 1x2 odds of the
-    played matches, through the M3 loader priority and margin removal. The
+    played matches, through the loader's bookmaker priority and margin removal. The
     prices are pre-kickoff information, but they were not stored as a live row,
     which is why the reference always reports ``stored_before_kickoff`` false
     and is a benchmark rather than a stored prediction.

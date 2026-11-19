@@ -24,7 +24,7 @@ plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 # Celery ships no type information. The project does not add the celery-types
-# stub package, because ADR-0003 fixes the dependency list.
+# stub package, to keep the dependency list fixed.
 module = ["celery", "celery.*", "kombu", "kombu.*"]
 ignore_missing_imports = true
 

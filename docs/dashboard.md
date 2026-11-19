@@ -52,7 +52,7 @@ the one fact the client still has, and it ties the screen to the server log.
 | `/teams` | The clubs of one season (`?season=`) and the picker that stores the focus team (`?pick=focus`). |
 | `/teams/[teamId]` | One club's season (`?season=`): season at a glance, home and away split, for and against, results, next fixtures and the focus form. Empty states name `make ingest` and `make simulate`. |
 | `/focus` | Resolves the focus team and redirects to `/focus/<teamId>`; it renders nothing itself. |
-| `/focus/[teamId]` | The team focus page (MVP specification, section 6): a story card that states the season in one sentence and beside it four headline tiles, then the season diagnosis, the relegation race, the next match with what each result would change, the multi-season trend, and a `How to read this page` block. The sticky section bar links to the four sections, and every metric carries a help control. |
+| `/focus/[teamId]` | The team focus page: a story card that states the season in one sentence and beside it four headline tiles, then the season diagnosis, the relegation race, the next match with what each result would change, the multi-season trend, and a `How to read this page` block. The sticky section bar links to the four sections, and every metric carries a help control. |
 | `/performance` | The backtest as a report: a verdict sentence computed on the common matches, the RPS ranking, the four scores with their definitions, the scores table (`?subset=all\|common`), RPS by season, calibration by outcome for one model (`?calibration=`), reproducibility, and the live predictions against the market. Empty states name `make backtest` and `make predict`. |
 | `/dev/charts` | The chart gallery, behind `LMI_DEV_PAGES=1`. |
 
@@ -214,12 +214,3 @@ to the dashboard.
 snapshot differs from the regenerated one. The `api-client` CI job runs it on
 every pull request, so an API change and a stale client cannot be merged
 together.
-
-## Status
-
-The generated client, the browser harness, the shell and the data layer are in
-place, and so are the data pages: the table, the matchday list, the teams index,
-the team page, the match page, the performance page and the focus redirect. Two outputs stay
-deferred: the per-fixture win, draw and loss probabilities and the next-match
-detail of the relegation race are `null`, because the simulator does not store
-them yet.

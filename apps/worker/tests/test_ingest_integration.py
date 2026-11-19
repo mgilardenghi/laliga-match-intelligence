@@ -1,6 +1,6 @@
 """Integration tests for the ingestion runner, the status report and the CLI.
 
-These are the M1 acceptance scenarios of the ingestion block, run against a
+These are the acceptance scenarios of the ingestion block, run against a
 migrated and seeded database: a full football-data and openfootball load, a
 second identical run that changes nothing, a later file that plays ten more
 matches, a date move that must reach only the scheduled rows, a fixture list that

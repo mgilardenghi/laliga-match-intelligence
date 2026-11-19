@@ -2,8 +2,7 @@
 
 The tests cover the exit-code paths that must work before any connection exists:
 a successful ``--help``, a malformed command line, a rejected plan, and a missing
-database configuration for both commands. Every M4 command is implemented now, so
-the stub assertions are gone: one test asserts ``--help`` lists all three and the
+database configuration for both commands. One test asserts ``--help`` lists all three and the
 others live in the module of the command they cover. Every command that needs
 configuration runs with the ``POSTGRES_*`` variables removed, so the
 configuration error is the one a fresh shell sees.

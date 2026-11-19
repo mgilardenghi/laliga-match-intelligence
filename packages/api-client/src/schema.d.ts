@@ -238,10 +238,10 @@ export interface paths {
          *     the current sources publish odds only with results. No price is invented and
          *     no closing price is served.
          *
-         *     The spec §6 items this resource deliberately does not carry are M5: the
+         *     Two preview items this resource deliberately does not carry: the
          *     opponent's profile beyond the form of both sides, and how much the result
          *     moves the relegation probability. Both need an input or a core rule this
-         *     task does not own, not another field here.
+         *     resource does not own, not another field here.
          *
          *     The request issues at most nine statements whatever the size of the payload:
          *     one for the fixture, two for each of the two form summaries, two for the
@@ -329,7 +329,7 @@ export interface paths {
          *     rows.
          *
          *     ``market_reference`` is recomputed from the pre-closing 1x2 odds of the
-         *     played matches, through the M3 loader priority and margin removal. The
+         *     played matches, through the loader's bookmaker priority and margin removal. The
          *     prices are pre-kickoff information, but they were not stored as a live row,
          *     which is why the reference always reports ``stored_before_kickoff`` false
          *     and is a benchmark rather than a stored prediction.
@@ -874,11 +874,11 @@ export interface paths {
          *     season and is null when the season has no succeeded run, or when that run
          *     stored no row for the team.
          *
-         *     The spec §6 items this resource deliberately does not carry are M5: expected
+         *     The focus items this resource deliberately does not carry: expected
          *     points against actual points, rolling trends, top/middle/bottom splits, the
          *     multi-season trend, the relegation race with its survival threshold, and how
          *     much a result moves the relegation probability. Each of them needs a stored
-         *     input or a core rule this task does not own, not another field here.
+         *     input or a core rule this resource does not own, not another field here.
          *
          *     The request issues at most fourteen statements whatever the size of the
          *     payload: the team, the season, the season membership, two for the season
@@ -1740,7 +1740,7 @@ export interface components {
          *     forecast of every model of the fixture, whatever its evaluation. ``odds`` is
          *     the pre-closing price of the fixture or null when it carries none.
          *
-         *     The spec §6 items this resource deliberately does not carry are M5: the
+         *     Two preview items this resource deliberately does not carry: the
          *     opponent's profile beyond the form of both sides, and how much the result
          *     moves the relegation probability. Both need an input or a core rule this
          *     resource does not own, not another field here.
@@ -2262,7 +2262,7 @@ export interface components {
          * PredictionScore
          * @description The four scores of one on-time prediction of a played match.
          *
-         *     ``log_loss``, ``brier`` and ``rps`` are the M3 metric functions on this one
+         *     ``log_loss``, ``brier`` and ``rps`` are the backtest metric functions on this one
          *     row, and ``correct`` says whether the most likely outcome is the one that
          *     happened. The values are null-free because the object exists only for a
          *     scored row: an absent score is a null field on the parent, never an object

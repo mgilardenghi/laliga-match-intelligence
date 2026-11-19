@@ -12,7 +12,7 @@ row stamped at or after it is ``late`` and never scored. The comparison uses the
 match's **current** ``kickoff_date``, so a match moved earlier than the creation
 instant makes the row invalid even though it was stored in good faith.
 
-The scores themselves are the M3 metric functions on a one-row array, so the
+The scores themselves are the backtest metric functions on a one-row array, so the
 log-loss clip is :data:`lmi_core.evaluation.metrics.EPS` and never a second
 constant that could drift away from it.
 """

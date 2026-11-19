@@ -178,7 +178,7 @@ run. Per-match backtest predictions are not stored.
   with `as_of < kickoff_date <= as_of + horizon`, on history strictly before
   `as_of`.
 - Immutability is enforced by the database, not only by code: migration
-  `packages/core/src/lmi_core/db/migrations/versions/0003_m4_live.py` installs
+  `packages/core/src/lmi_core/db/migrations/versions/0003_live.py` installs
   `predictions_immutable` (BEFORE UPDATE OR DELETE) and
   `predictions_no_truncate` on the `predictions` table, both raising
   `lmi: <op> on <table> is not allowed, rows are immutable`. An insert guard

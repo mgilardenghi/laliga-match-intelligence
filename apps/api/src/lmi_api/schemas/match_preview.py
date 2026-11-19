@@ -98,7 +98,7 @@ class MatchPreview(BaseModel):
     forecast of every model of the fixture, whatever its evaluation. ``odds`` is
     the pre-closing price of the fixture or null when it carries none.
 
-    The spec §6 items this resource deliberately does not carry are M5: the
+    Two preview items this resource deliberately does not carry: the
     opponent's profile beyond the form of both sides, and how much the result
     moves the relegation probability. Both need an input or a core rule this
     resource does not own, not another field here.

@@ -2,7 +2,7 @@
 
 :class:`Problem` is the RFC 9457 "problem details" object every error response
 carries, so a client has one shape to parse whatever failed. :class:`Page` is
-the pagination envelope for collections: the collection endpoints of M2 are
+the pagination envelope for collections: the reference collection endpoints are
 small enough to return a bare list, and the endpoints that grow without bound
 return a :class:`Page` instead.
 """
