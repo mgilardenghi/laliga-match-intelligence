@@ -42,6 +42,7 @@ make e2e
 
 - Code, docs and commit messages are in English.
 - Never commit secrets, `.env` files, personal data or downloaded match data.
+- Commit with your GitHub noreply address (`<id>+<login>@users.noreply.github.com`), set as the repository-local `user.email`. A personal address in a commit is public once the repository is public.
 - Never add club crests, logos or other trademarked images.
 - Models use only data available before kickoff. A feature or fit that can see a later match is a bug.
 - Stored live predictions are immutable.
